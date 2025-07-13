@@ -1,16 +1,12 @@
-// File: android/app/src/main/kotlin/com/example/primejet_mobile/MainActivity.kt
+package com.example.primejet_mobile // Your package name
 
-package com.example.primejet_mobile // Ensure this matches your package name
-
-import io.flutter.embedding.android.FlutterActivity // OPay SDK does not strictly require FlutterFragmentActivity, FlutterActivity is default and often sufficient.
+import io.flutter.embedding.android.FlutterFragmentActivity // <<< CHANGE THIS IMPORT
 import io.flutter.embedding.engine.FlutterEngine
-// Ensure no other payment SDK native imports or custom MethodChannel setup here.
+import io.flutter.plugins.GeneratedPluginRegistrant
 
-class MainActivity : FlutterActivity() { // Use FlutterActivity as base class
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        // No OPay SDK initialization or MethodChannel setup here;
-        // OPay Flutter SDK handles this directly.
-    }
-    // Remove any lingering onActivityResult or helper methods here.
+class MainActivity: FlutterFragmentActivity() { // <<< CHANGE THIS CLASS
+    // Optional: If you have other plugins that need to be registered
+    // override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+    //     GeneratedPluginRegistrant.registerWith(flutterEngine)
+    // }
 }

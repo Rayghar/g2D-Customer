@@ -40,7 +40,7 @@ dependencies:
   google_sign_in: ^6.2.1
   permission_handler: ^11.3.1
   firebase_auth: ^5.6.2
-  flutter_local_notifications: ^19.3.0
+  flutter_local_notifications: ^15.0.0
   opay_online_flutter_sdk: ^0.9.6
   flutter_easyloading: ^3.0.3
 
@@ -52,7 +52,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-  webview_flutter: ^3.0.4 # Or the latest stable version
+  webview_flutter: ^3.0.0 # Or the latest stable version
   
 
 flutter:
