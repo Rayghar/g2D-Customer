@@ -31,7 +31,7 @@ class PaymentScreen extends StatefulWidget {
   final String?
       iswMerchantId; // Interswitch Merchant ID passed from OrderPlacementScreen
   final String?
-      iswDomainId; // Interswitch Domain ID (sometimes called merchantCode)
+      iswMerchantCode; // Interswitch Domain ID (sometimes called merchantCode)
 
   const PaymentScreen({
     super.key,
@@ -40,7 +40,7 @@ class PaymentScreen extends StatefulWidget {
     this.itemDescription,
     required this.customer,
     this.iswMerchantId, // Receive Merchant ID
-    this.iswDomainId, // Receive Domain ID (used as merchantCode)
+    this.iswMerchantCode, // Receive Domain ID (used as merchantCode)
   });
 
   @override
@@ -65,15 +65,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Future<void> _initializeInterswitchSdk() async {
     try {
       // Use keys passed from arguments, or fallback to dotenv if not provided (safer to pass via args)
-      final merchantId = widget.iswMerchantId ?? dotenv.env['ISW_MERCHANT_ID'];
+      final merchantId = widget.iswMerchantId;
       // Documentation's `IswSdkConfig` takes `merchantCode`, which often is the domain ID.
-      final merchantCode = widget.iswDomainId ?? dotenv.env['ISW_DOMAIN_ID'];
-      final merchantSecret =
-          dotenv.env['ISW_CLIENT_SECRET']; // Required by IswSdkConfig
+      final merchantCode = widget.iswMerchantCode;
+      final merchantSecret = "07BuF6FEXcNTn16"; // Required by IswSdkConfig
       final currencyCode = "566"; // NGN currency code for IswSdkConfig
 
-      final isLiveMode =
-          dotenv.env['ISW_LIVE_MODE'] == 'true'; // Get live mode from .env
+      const bool isLiveMode = false; // Get live mode from .env
 
       if (merchantId == null ||
           merchantId.isEmpty ||

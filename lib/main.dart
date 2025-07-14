@@ -80,9 +80,11 @@ Future<void> main() async {
   try {
     await dotenv.load(fileName: ".env");
     debugPrint('Successfully loaded .env file.');
+    // Add this line to check the value:
+    debugPrint(
+        'Loaded Merchant ID from .env: ${dotenv.env['ISW_MERCHANT_ID']}');
   } catch (e) {
     debugPrint('Failed to load .env file: $e');
-    // Fallback to default Stripe key or handle gracefully
   }
 
   // Firebase initialization
@@ -256,7 +258,7 @@ class MyApp extends StatelessWidget {
                   itemDescription: args['itemDescription'] as String?,
                   // Pass the Interswitch keys from your arguments
                   iswMerchantId: args['iswMerchantId'] as String?,
-                  iswDomainId: args['iswDomainId'] as String?,
+                  iswMerchantCode: args['iswMerchantCode'] as String?,
                 ),
                 settings: settings,
               );

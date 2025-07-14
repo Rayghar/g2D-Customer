@@ -553,8 +553,9 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                 _currentUserProfile!, // Explicitly use non-null assertion as it's checked earlier
             'itemDescription':
                 '${_orderItems.length} cylinder(s) - Order #${response.order.shortOrderId}',
-            'iswMerchantId': dotenv.env['ISW_MERCHANT_ID'],
-            'iswDomainId': dotenv.env['ISW_DOMAIN_ID'],
+            'iswMerchantId':
+                "IKIABD0F761EBA47A9A627A86F1382467C04076BE37C", // From Client ID
+            'iswMerchantCode': "MX250635",
           },
         );
         // --- END OF UPDATE ---
