@@ -29,8 +29,8 @@ import 'screens/customer/feedback_screen.dart';
 import 'screens/customer/chat_screen.dart';
 import 'screens/customer/notification_screen.dart';
 import 'screens/customer/location_history_screen.dart';
-// REMOVED: import 'screens/customer/payment_screen.dart'; // Old Paystack payment screen
-import 'screens/customer/opay_payment_screen.dart'; // NEW: OPay payment screen
+import 'providers/auth_provider.dart'; // <<< ADD THIS LINE (Please verify the path is correct for your project)
+import 'screens/customer/payment_screen.dart'; // NEW: OPay payment screen
 import 'screens/customer/address_list_screen.dart';
 import 'screens/customer/add_edit_address_screen.dart';
 import 'screens/customer/promotion_details_screen.dart';
@@ -72,7 +72,6 @@ import 'models/deal_model.dart';
 import 'models/admin/admin_promotion_model.dart';
 import 'models/admin/faq_item_model.dart';
 import 'models/user.dart' as app_user;
-import 'package:opay_online_flutter_sdk/opay_online_flutter_sdk.dart'; // OPay SDK import
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -128,6 +127,9 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(
+            create: (_) => AuthProvider()), // <<< AND THIS LINE
+
         // Add other providers as needed
       ],
       child: const MyApp(),
@@ -241,7 +243,28 @@ class MyApp extends StatelessWidget {
             return _buildErrorRoute(
                 settings, "Missing user name for Complete Profile Screen");
 
-          // NEW: Route for OPayPaymentScreen
+          case PaymentScreen.routeName: // <<< ADD THIS NEW CASE
+            if (args != null &&
+                args.containsKey('orderId') &&
+                args.containsKey('amount') &&
+                args.containsKey('customer')) {
+              return MaterialPageRoute(
+                builder: (_) => PaymentScreen(
+                  orderId: args['orderId'] as String,
+                  amount: (args['amount'] as num).toDouble(),
+                  customer: args['customer'] as app_user.User,
+                  itemDescription: args['itemDescription'] as String?,
+                  // Pass the Interswitch keys from your arguments
+                  iswMerchantId: args['iswMerchantId'] as String?,
+                  iswDomainId: args['iswDomainId'] as String?,
+                ),
+                settings: settings,
+              );
+            }
+            return _buildErrorRoute(
+                settings, "Missing required arguments for PaymentScreen");
+
+          /* // NEW: Route for OPayPaymentScreen
           case OpayPaymentScreen.routeName: // Use the new OPay route name
             if (args != null &&
                 args.containsKey('orderId') &&
@@ -264,6 +287,7 @@ class MyApp extends StatelessWidget {
             }
             return _buildErrorRoute(
                 settings, "Missing arguments for OpayPaymentScreen");
+                */
 
           case OrderDetailsScreen.routeName:
             if (args != null &&

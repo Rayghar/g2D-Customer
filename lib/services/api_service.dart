@@ -2707,6 +2707,38 @@ class ApiService {
     }
   }
 
+  Future<void> verifyInterswitchPayment(
+      {required String transactionReference, required String orderId}) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Authentication token not found.');
+
+    final String apiUrl =
+        '$baseUrl/interswitch/verify-transaction'; // Your backend endpoint
+    print(
+        'ApiService: Verifying Interswitch payment for ref $transactionReference');
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(
+            {'transactionReference': transactionReference, 'orderId': orderId}),
+      );
+
+      if (response.statusCode != 200) {
+        final responseBody = jsonDecode(response.body);
+        throw Exception(responseBody['message'] ??
+            'Payment verification failed on server.');
+      }
+    } catch (e) {
+      print('ApiService: Error verifying Interswitch payment: $e');
+      rethrow;
+    }
+  }
+
   /*Future<void> verifyMonnifyPayment(
       {required String transactionReference, required String orderId}) async {
     final token = await _getToken();

@@ -28,20 +28,6 @@ android {
         jvmTarget = "11"
     }
 
-    packagingOptions {
-        // This can sometimes help with conflicting files, but primarily for JARs/AARs
-        resources.excludes.add("META-INF/LICENSE.md")
-        resources.excludes.add("META-INF/LICENSE-notice.md")
-    }
-
-    // Add this block to resolve duplicate resources
-    // This tells Gradle to pick the first one it finds for duplicates
-    resourceMerging {
-        failOnMissingConfigurator = false
-    }
-
-
-
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -59,7 +45,6 @@ android {
 flutter {
     source = "../.."
 }
-
 
 dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
