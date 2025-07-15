@@ -52,7 +52,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-  webview_flutter: ^3.0.0 # Or the latest stable version
+  webview_flutter: ^4.13.0
   
 
 flutter:
