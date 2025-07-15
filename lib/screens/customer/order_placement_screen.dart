@@ -23,15 +23,11 @@ import '../../widgets/button.dart';
 import '../../widgets/card.dart';
 import '../../widgets/input.dart';
 import './address_list_screen.dart';
-// REMOVED: import './payment_screen.dart'; // This now points to your OPay screen
-import 'package:opay_online_flutter_sdk/opay_online_flutter_sdk.dart'; // OPay SDK import
-import './opay_payment_screen.dart'; // NEW: Point to the new OPay payment screen
-
+import './payment_screen.dart';
 import './order_summary_screen.dart';
 import './order_details_screen.dart';
 import '../customer/customer_dashboard_screen.dart';
 
-// GasCylinder, OrderItem, and Promotion classes remain unchanged
 class GasCylinder {
   final String id;
   final String sizeLabel;
@@ -87,6 +83,7 @@ class OrderPlacementScreen extends StatefulWidget {
   final List<Map<String, dynamic>>? lastOrderItems;
   final AddressModel? initialAddress;
   final String? customerId;
+  //final String? promoCodeToApply;
   final String? preselectedCylinderIdFromDeal;
 
   const OrderPlacementScreen({
@@ -95,6 +92,7 @@ class OrderPlacementScreen extends StatefulWidget {
     this.lastOrderItems,
     this.initialAddress,
     this.customerId,
+    //this.promoCodeToApply,
     this.preselectedCylinderIdFromDeal,
   });
 
@@ -112,6 +110,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   final List<OrderItem> _orderItems = [];
 
   final TextEditingController _promoCodeController = TextEditingController();
+  final TextEditingController _referralCodeController = TextEditingController();
   Promotion? _appliedUIPromotion;
 
   FeeSettings? _feeSettings;
@@ -143,16 +142,23 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       _selectedDeliveryAddress = widget.initialAddress;
       _isLoadingAddress = false;
     }
+    /*
+    if (widget.promoCodeToApply != null &&
+        widget.promoCodeToApply!.isNotEmpty) {
+      _promoCodeController.text = widget.promoCodeToApply!;
+      _appliedUIPromotion = Promotion(
+          code: widget.promoCodeToApply!,
+          description: "Promo code will be attempted");
+    }*/
 
     _entryAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 700));
-
     _sectionSlideAnimations = List.generate(
-      8,
+      8, // Increased for new referral card
       (index) => Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero)
           .animate(CurvedAnimation(
               parent: _entryAnimController,
-              curve: Interval(0.1 * index, min(1.0, (0.1 * index) + 0.5),
+              curve: Interval(0.1 * index, (0.1 * index) + 0.5,
                   curve: Curves.easeOutCubic))),
     );
 
@@ -278,6 +284,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   void dispose() {
     _entryAnimController.dispose();
     _promoCodeController.dispose();
+    _referralCodeController.dispose(); // <<< DISPOSE
     _recipientNameController.dispose();
     _recipientPhoneController.dispose();
     super.dispose();
@@ -458,7 +465,6 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   }
 
   Future<void> _handlePlaceOrder() async {
-    // Validation logic remains the same
     if (_selectedDeliveryAddress == null) {
       _showFeedbackSnackbar("Please select a delivery address.",
           isError: true, context: context);
@@ -466,13 +472,6 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     }
     if (_orderItems.isEmpty) {
       _showFeedbackSnackbar("Please add at least one item to your order.",
-          isError: true, context: context);
-      return;
-    }
-    final String? currentActiveCustomerId =
-        widget.customerId ?? _currentUserProfile?.id;
-    if (currentActiveCustomerId == null || currentActiveCustomerId.isEmpty) {
-      _showFeedbackSnackbar("User not identified. Please re-login.",
           isError: true, context: context);
       return;
     }
@@ -484,10 +483,16 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           context: context);
       return;
     }
+    final String? currentActiveCustomerId =
+        widget.customerId ?? _currentUserProfile?.id;
+    if (currentActiveCustomerId == null || currentActiveCustomerId.isEmpty) {
+      _showFeedbackSnackbar("User not identified. Please re-login.",
+          isError: true, context: context);
+      return;
+    }
 
     setState(() => _isPlacingOrder = true);
 
-    // Payload creation remains the same
     final List<Map<String, dynamic>> orderItemsPayload =
         _orderItems.map((item) {
       return {
@@ -524,8 +529,10 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       'recipientPhone': recipientPhoneValue,
       'isExpress': _isExpressDelivery,
       'useWalletBalance': _useWalletBalance,
-      if (_promoCodeController.text.trim().isNotEmpty)
+      /*if (_promoCodeController.text.trim().isNotEmpty)
         'promoCodeApplied': _promoCodeController.text.trim().toUpperCase(),
+      if (_referralCodeController.text.trim().isNotEmpty)
+        'referralCode': _referralCodeController.text.trim().toUpperCase(),*/
     };
 
     try {
@@ -536,68 +543,33 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
       if (response.paymentNeeded) {
         _showFeedbackSnackbar("Order confirmed. Proceeding to payment...",
-            isError: false, context: context);
+            isError: false);
 
-        // NEW: Prepare OPay PayParams
-        final PayParams opayPayParams = PayParams(
-          // Replace with your actual OPay Public Key and Merchant ID
-          publicKey: "YOUR_OPAY_PUBLIC_KEY", // From OPay Dashboard
-          merchantId: "YOUR_OPAY_MERCHANT_ID", // From OPay Dashboard
-          merchantName: "Gas2Door", // Your business name on OPay
-
-          reference: response.order.id, // Your unique order ID
-          countryCode:
-              Country.nigeria.countryCode, // e.g., Country.nigeria.countryCode
-          payAmount: response.grandTotalToPay
-              .toInt(), // Amount in smallest currency unit
-          currency: Country.nigeria.currency, // e.g., Country.nigeria.currency
-
-          // Product details from your order items
-          productName:
-              _orderItems.map((item) => item.cylinder.sizeLabel).join(', '),
-          productDescription:
-              '${_orderItems.length} cylinder(s) - Order #${response.order.id.substring(response.order.id.length - 6)}',
-
-          // IMPORTANT: This callback URL must be publicly accessible on your backend
-          // and configured in your OPay merchant dashboard.
-          callbackUrl: "https://your-backend.com/opay-callback",
-          paymentType:
-              "", // Leave empty for all methods, or specify like "BANK_ACCOUNT"
-          expireAt: 30, // Payment link expiration in minutes
-          userClientIP:
-              "1.1.1.1", // Replace with user's actual IP if available, or a default
-
-          // Optional: User information for OPay's records
-          userInfo: UserInfo(
-            _currentUserProfile?.id ?? '',
-            _currentUserProfile?.email ?? '',
-            _currentUserProfile?.phone ?? '',
-            _currentUserProfile?.name ?? '',
-          ),
-        );
-
-        // Navigate to the OPay Payment Screen
+        // This now correctly navigates to your Monnify PaymentScreen
         Navigator.of(context).pushReplacementNamed(
-          OpayPaymentScreen.routeName, // NEW: Route to OPay payment screen
+          PaymentScreen.routeName,
           arguments: {
             'orderId': response.order.id,
             'amount': response.grandTotalToPay,
-            'customer': _currentUserProfile!,
-            'itemDescription': opayPayParams.productDescription,
-            'opayPayParams':
-                opayPayParams, // NEW: Pass the OPay PayParams object
+            'customer': _currentUserProfile!, // Pass the full customer object
+            'itemDescription':
+                '${_orderItems.length} cylinder(s) - Order #${response.order.id.substring(response.order.id.length - 6)}',
           },
         );
       } else {
-        // This part for non-payment orders (e.g., paid by wallet) remains the same
-        _showFeedbackSnackbar("Order placed successfully! Paid with wallet.",
-            isError: false, context: context);
+        _showFeedbackSnackbar(
+            response.message.isNotEmpty
+                ? response.message
+                : "Order placed successfully!",
+            isError: false,
+            context: context);
         Navigator.of(context).pushNamedAndRemoveUntil(
           OrderSummaryScreen.routeName,
           ModalRoute.withName(CustomerDashboardScreen.routeName),
           arguments: {
             'orderId': response.order.id,
-            'fromPaymentSuccess': true,
+            'showConfirmation': true,
+            'orderPayload': response.order,
           },
         );
       }
@@ -615,7 +587,6 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     }
   }
 
-  // All build methods and other helper methods remain the same.
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
@@ -676,6 +647,11 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                             SlideTransition(
                                 position: _sectionSlideAnimations[4],
                                 child: _buildPromoCodeCard(themeProvider)),
+                            const SizedBox(height: 24),
+                            // ### ADDED NEW WIDGET ###
+                            SlideTransition(
+                                position: _sectionSlideAnimations[5],
+                                child: _buildReferralCodeCard(themeProvider)),
                             const SizedBox(height: 24),
                             if (_currentUserProfile != null &&
                                 _walletBalance > 0 &&
@@ -743,6 +719,34 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                     color: themeProvider.infoColorOnDarkBgs ?? Colors.white),
               ),
             ),
+    );
+  }
+
+  // ### ADD THIS NEW WIDGET METHOD ###
+  Widget _buildReferralCodeCard(ThemeProvider themeProvider) {
+    return CustomCard(
+      color: themeProvider.cardBackground,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Have a Referral Code?',
+                style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: themeProvider.primaryText)),
+            const SizedBox(height: 12),
+            CustomInput(
+              controller: _referralCodeController,
+              hintText: 'Enter friend\'s code',
+              labelText: 'Referral Code (Optional)',
+              textInputAction: TextInputAction.done,
+              prefixIcon: Icons.group_add_outlined,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -848,21 +852,22 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                             color: themeProvider.gas2doorPrimaryBlue, size: 32),
                         const SizedBox(width: 12),
                         Expanded(
-                            child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(cylinder.sizeLabel,
-                                style: GoogleFonts.inter(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                    color: themeProvider.primaryText)),
-                            Text(
-                                '₦${NumberFormat("#,##0.00").format(cylinder.price / 100)}',
-                                style: GoogleFonts.inter(
-                                    fontSize: 13,
-                                    color: themeProvider.secondaryText)),
-                          ],
-                        )),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(cylinder.sizeLabel,
+                                  style: GoogleFonts.inter(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: themeProvider.primaryText)),
+                              Text(
+                                  '₦${NumberFormat("#,##0.00").format(cylinder.price / 100)}',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 13,
+                                      color: themeProvider.secondaryText)),
+                            ],
+                          ),
+                        ),
                         Container(
                           decoration: BoxDecoration(
                               color: themeProvider.appSecondaryBackground

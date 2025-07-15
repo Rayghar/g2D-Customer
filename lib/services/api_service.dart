@@ -2707,7 +2707,7 @@ class ApiService {
     }
   }
 
-  /*Future<void> verifyMonnifyPayment(
+  Future<void> verifyMonnifyPayment(
       {required String transactionReference, required String orderId}) async {
     final token = await _getToken();
     if (token == null) throw Exception('Authentication token not found.');
@@ -2736,7 +2736,7 @@ class ApiService {
       print('ApiService: Error verifying Monnify payment: $e');
       rethrow;
     }
-  }*/
+  }
 
   // UPDATED: This function sends the official transactionId to the backend for verification.
   /*Future<void> verifyFlutterwavePayment(

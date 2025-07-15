@@ -5,8 +5,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
-import 'package:flutter_easyloading/flutter_easyloading.dart'; // Import flutter_easyloading
-
 import 'services/fcm_service.dart'; // <<< IMPORT THE NEW SERVICE
 
 // Screen imports
@@ -29,8 +27,7 @@ import 'screens/customer/feedback_screen.dart';
 import 'screens/customer/chat_screen.dart';
 import 'screens/customer/notification_screen.dart';
 import 'screens/customer/location_history_screen.dart';
-// REMOVED: import 'screens/customer/payment_screen.dart'; // Old Paystack payment screen
-import 'screens/customer/opay_payment_screen.dart'; // NEW: OPay payment screen
+import 'screens/customer/payment_screen.dart';
 import 'screens/customer/address_list_screen.dart';
 import 'screens/customer/add_edit_address_screen.dart';
 import 'screens/customer/promotion_details_screen.dart';
@@ -71,8 +68,6 @@ import 'models/address_model.dart';
 import 'models/deal_model.dart';
 import 'models/admin/admin_promotion_model.dart';
 import 'models/admin/faq_item_model.dart';
-import 'models/user.dart' as app_user;
-import 'package:opay_online_flutter_sdk/opay_online_flutter_sdk.dart'; // OPay SDK import
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -85,6 +80,11 @@ Future<void> main() async {
     debugPrint('Failed to load .env file: $e');
     // Fallback to default Stripe key or handle gracefully
   }
+
+  // Initialize Stripe with publishable key from .env
+  Stripe.publishableKey =
+      dotenv.env['STRIPE_PUBLISHABLE_KEY'] ?? 'YOUR_FALLBACK_PK_TEST_KEY';
+  debugPrint('Stripe initialized with key: ${Stripe.publishableKey}');
 
   // Firebase initialization
   try {
@@ -108,21 +108,6 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Firebase initialization failed: $e');
   }
-
-  // Configure EasyLoading
-  EasyLoading.instance
-    ..displayDuration = const Duration(milliseconds: 2000)
-    ..indicatorType = EasyLoadingIndicatorType.fadingCircle
-    ..loadingStyle = EasyLoadingStyle.dark
-    ..indicatorSize = 45.0
-    ..radius = 10.0
-    ..progressColor = Colors.yellow
-    ..backgroundColor = Colors.green
-    ..indicatorColor = Colors.yellow
-    ..textColor = Colors.yellow
-    ..maskColor = Colors.blue.withOpacity(0.5)
-    ..userInteractions = false
-    ..dismissOnTap = false;
 
   runApp(
     MultiProvider(
@@ -209,6 +194,7 @@ class MyApp extends StatelessWidget {
                       (args['lastOrderItems'] as List<Map<String, dynamic>>?),
                   initialAddress: args['initialAddress'] as AddressModel?,
                   customerId: args['customerId'] as String,
+                  //promoCodeToApply: args['prefilledPromoCode'] as String?,
                   preselectedCylinderIdFromDeal:
                       args['preselectedCylinderIdFromDeal'] as String?,
                 ),
@@ -218,6 +204,16 @@ class MyApp extends StatelessWidget {
             return _buildErrorRoute(
                 settings, "Missing customerId for OrderPlacementScreen");
 
+            return MaterialPageRoute(builder: (_) => const SplashScreen());
+          case CustomerLoginScreen.routeName:
+            return MaterialPageRoute(
+                builder: (_) => const CustomerLoginScreen());
+          case CustomerRegisterScreen.routeName:
+            return MaterialPageRoute(
+                builder: (_) => const CustomerRegisterScreen());
+
+          // ========================== FIX IS HERE ==========================
+          // This case handles the navigation to the OTP screen and extracts the email argument.
           case OtpVerificationScreen.routeName:
             if (args != null && args.containsKey('email')) {
               return MaterialPageRoute(
@@ -228,6 +224,7 @@ class MyApp extends StatelessWidget {
               );
             }
             return _buildErrorRoute(settings, "Missing email for OTP Screen");
+          // =
 
           case CompleteProfileScreen.routeName:
             if (args != null && args.containsKey('userName')) {
@@ -241,29 +238,23 @@ class MyApp extends StatelessWidget {
             return _buildErrorRoute(
                 settings, "Missing user name for Complete Profile Screen");
 
-          // NEW: Route for OPayPaymentScreen
-          case OpayPaymentScreen.routeName: // Use the new OPay route name
+          case PaymentScreen.routeName:
             if (args != null &&
                 args.containsKey('orderId') &&
                 args.containsKey('amount') &&
-                args.containsKey('customer') &&
-                args.containsKey('opayPayParams')) {
-              // Expect OPay PayParams
+                args.containsKey('customer')) {
               return MaterialPageRoute(
-                builder: (_) => OpayPaymentScreen(
-                  // Use the new OPay screen
+                builder: (_) => PaymentScreen(
                   orderId: args['orderId'] as String,
                   amount: (args['amount'] as num).toDouble(),
                   itemDescription: args['itemDescription'] as String?,
                   customer: args['customer'] as app_user.User,
-                  opayPayParams: args['opayPayParams']
-                      as PayParams, // Cast to OPay PayParams
                 ),
                 settings: settings,
               );
             }
             return _buildErrorRoute(
-                settings, "Missing arguments for OpayPaymentScreen");
+                settings, "Missing arguments for PaymentScreen");
 
           case OrderDetailsScreen.routeName:
             if (args != null &&
@@ -272,7 +263,8 @@ class MyApp extends StatelessWidget {
               return MaterialPageRoute(
                 builder: (_) => OrderDetailsScreen(
                   orderId: args['orderId'] as String,
-                  customerId: args['customerId'] as String,
+                  // Removed showConfirmation as it's no longer a direct parameter
+                  customerId: args['customerId'] as String, // Added customerId
                 ),
                 settings: settings,
               );
@@ -536,7 +528,6 @@ class MyApp extends StatelessWidget {
                 settings, "Route not found: ${settings.name}");
         }
       },
-      builder: EasyLoading.init(), // Initialize EasyLoading here
     );
   }
 
