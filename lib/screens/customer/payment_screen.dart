@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:monnify_payment_sdk/monnify_payment_sdk.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:monnify_payment_sdk/src/models/transaction_response.dart';
+
+// CORRECTED: These are the correct imports based on your monnify_payment_sdk.dart file
+import 'package:monnify_payment_sdk/monnify_payment_sdk.dart';
 
 import '../../services/api_service.dart';
 import '../../providers/theme_provider.dart';
@@ -16,7 +19,7 @@ import '../../models/user.dart' as app_user;
 class PaymentScreen extends StatefulWidget {
   static const String routeName = '/payment';
   final String orderId;
-  final double amount;
+  final double amount; // Amount in SMALLEST currency unit (e.g., Kobo)
   final String? itemDescription;
   final app_user.User customer;
 
@@ -35,8 +38,13 @@ class PaymentScreen extends StatefulWidget {
 class _PaymentScreenState extends State<PaymentScreen> {
   final _apiService = ApiService();
   bool _isProcessing = false;
-  bool _isSdkInitialized = false;
   String _statusMessage = 'Initializing...';
+
+  //
+  // >>>>> FIX: Store the Monnify instance after initialization <<<<<
+  // The `initialize` method returns an object that we need to use later.
+  //
+  Monnify? _monnify;
 
   @override
   void initState() {
@@ -44,20 +52,32 @@ class _PaymentScreenState extends State<PaymentScreen> {
     _initializeMonnify();
   }
 
+  /// Initializes the Monnify SDK and stores the instance for later use.
   Future<void> _initializeMonnify() async {
     try {
       final apiKey = dotenv.env['MONNIFY_API_KEY'];
       final contractCode = dotenv.env['MONNIFY_CONTRACT_CODE'];
+
       if (apiKey == null || contractCode == null) {
         throw Exception("Monnify credentials not found in .env file.");
       }
-      await MonnifyPaymentSdk.initialize(
-          apiKey, contractCode, ApplicationMode.TEST);
-      if (mounted)
+
+      //
+      // >>>>> FIX FOR ERROR 1 <<<<<
+      // The class is `Monnify` and it returns an instance which we must store.
+      //
+      final monnifyInstance = await Monnify.initialize(
+        apiKey: apiKey,
+        contractCode: contractCode,
+        applicationMode: ApplicationMode.TEST,
+      );
+
+      if (mounted) {
         setState(() {
-          _isSdkInitialized = true;
+          _monnify = monnifyInstance;
           _statusMessage = 'Pay Now';
         });
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _statusMessage = 'Initialization Failed');
@@ -82,43 +102,58 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   Future<void> _handlePayment() async {
+    if (_monnify == null) {
+      _showFeedbackSnackbar('SDK not initialized. Please wait.', isError: true);
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
       _statusMessage = 'Processing...';
     });
 
-    final transaction = Transaction(
-      widget.amount / 100,
-      "NGN",
-      widget.customer.name,
-      widget.customer.email,
-      widget.orderId,
-      widget.itemDescription ?? 'Payment for Order',
+    //
+    // >>>>> FIX FOR ERROR 2 <<<<<
+    // The class is named `TransactionDetails`, not `Transaction`.
+    // It uses named parameters.
+    //
+    final transactionDetails = TransactionDetails(
+      amount: widget.amount / 100,
+      currencyCode: "NGN",
+      customerName: widget.customer.name,
+      customerEmail: widget.customer.email,
+      paymentReference: widget.orderId,
+      paymentDescription: widget.itemDescription ?? 'Payment for Order',
       paymentMethods: [PaymentMethod.CARD, PaymentMethod.ACCOUNT_TRANSFER],
     );
 
     try {
+      //
+      // >>>>> FIX FOR ERRORS 3 & 4 <<<<<
+      // `initializePayment` is an instance method, called on the `_monnify` object.
+      // The response type is `TransactionResponse`.
+      //
       final TransactionResponse? response =
-          await MonnifyPaymentSdk.initializePayment(transaction);
+          await _monnify!.initializePayment(transaction: transactionDetails);
 
+      //
+      // >>>>> FIX FOR ERROR 5 <<<<<
+      // The status is a string. We must compare it to the string values 'PAID' or 'OVERPAID'.
+      //
       if (response != null &&
-          (response.status == TransactionStatus.PAID ||
-              response.status == TransactionStatus.SUCCESS)) {
-        if (response.transactionReference == null) {
-          throw Exception("Transaction successful but reference is missing.");
-        }
-
+          (response.transactionStatus == 'PAID' ||
+              response.transactionStatus == 'OVERPAID')) {
         _showFeedbackSnackbar("Payment successful! Finalizing order...",
             isError: false);
 
+        // This logic is for the "Trust the Client" model we previously established.
         await _apiService.confirmOrderPayment(
           orderId: widget.orderId,
           amountPaid: widget.amount,
-          transactionId: response.transactionReference!,
+          transactionId: response.transactionReference,
         );
 
         if (mounted) {
-          _showFeedbackSnackbar("Order Confirmed!");
           Navigator.of(context).pushReplacementNamed(
             OrderSummaryScreen.routeName,
             arguments: {
@@ -130,7 +165,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
           );
         }
       } else {
-        _showFeedbackSnackbar("Payment was not completed.", isError: true);
+        _showFeedbackSnackbar(
+            response?.transactionStatus ?? "Payment was not completed.",
+            isError: true);
         if (mounted)
           setState(() {
             _isProcessing = false;
@@ -216,10 +253,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
             CustomButton(
               text: _statusMessage,
               onPressed:
-                  _isSdkInitialized && !_isProcessing ? _handlePayment : null,
+                  _monnify != null && !_isProcessing ? _handlePayment : null,
               color: themeProvider.gas2doorPrimaryBlue,
               height: 52,
-              icon: _isProcessing || !_isSdkInitialized
+              icon: _isProcessing || _monnify == null
                   ? const SizedBox(
                       width: 20,
                       height: 20,

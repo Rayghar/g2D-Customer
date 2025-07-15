@@ -545,22 +545,19 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
       if (response.paymentNeeded) {
         _showFeedbackSnackbar("Order confirmed. Proceeding to payment...",
-            isError: false);
+            isError: false, context: context);
 
-        // This navigation logic is now correct for the Flutterwave/Monnify SDK flow.
-        // It passes the full customer object and other details to the PaymentScreen.
         Navigator.of(context).pushReplacementNamed(
           PaymentScreen.routeName,
           arguments: {
             'orderId': response.order.id,
             'amount': response.grandTotalToPay,
-            'customer': _currentUserProfile!, // Pass the full customer object
+            'customer': _currentUserProfile!,
             'itemDescription':
                 '${_orderItems.length} cylinder(s) - Order #${response.order.id.substring(response.order.id.length - 6)}',
           },
         );
       } else {
-        // This handles orders paid by wallet
         _showFeedbackSnackbar(
             response.message.isNotEmpty
                 ? response.message
