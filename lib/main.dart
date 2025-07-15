@@ -3,12 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
-import 'services/fcm_service.dart'; // <<< IMPORT THE NEW SERVICE
+import 'services/fcm_service.dart'; // FCM Service import
 
 // Screen imports
-import 'screens/auth/complete_profile_screen.dart'; // Import the new screen
+import 'screens/auth/complete_profile_screen.dart';
 import 'screens/auth/splash_screen.dart';
 import 'screens/auth/customer_login_screen.dart';
 import 'screens/auth/customer_register_screen.dart';
@@ -27,7 +26,7 @@ import 'screens/customer/feedback_screen.dart';
 import 'screens/customer/chat_screen.dart';
 import 'screens/customer/notification_screen.dart';
 import 'screens/customer/location_history_screen.dart';
-import 'screens/customer/payment_screen.dart';
+import 'screens/customer/payment_screen.dart'; // The Payment Screen
 import 'screens/customer/address_list_screen.dart';
 import 'screens/customer/add_edit_address_screen.dart';
 import 'screens/customer/promotion_details_screen.dart';
@@ -68,52 +67,18 @@ import 'models/address_model.dart';
 import 'models/deal_model.dart';
 import 'models/admin/admin_promotion_model.dart';
 import 'models/admin/faq_item_model.dart';
+import 'models/user.dart'
+    as app_user; // Added app_user import for PaymentScreen arguments
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Load environment variables from .env file with error handling
-  try {
-    await dotenv.load(fileName: ".env");
-    debugPrint('Successfully loaded .env file.');
-  } catch (e) {
-    debugPrint('Failed to load .env file: $e');
-    // Fallback to default Stripe key or handle gracefully
-  }
-
-  // Initialize Stripe with publishable key from .env
-  Stripe.publishableKey =
-      dotenv.env['STRIPE_PUBLISHABLE_KEY'] ?? 'YOUR_FALLBACK_PK_TEST_KEY';
-  debugPrint('Stripe initialized with key: ${Stripe.publishableKey}');
-
-  // Firebase initialization
-  try {
-    if (Firebase.apps.isEmpty) {
-      await Firebase.initializeApp(
-        options: kIsWeb
-            ? const FirebaseOptions(
-                apiKey: "YOUR_WEB_API_KEY",
-                appId: "YOUR_WEB_APP_ID",
-                messagingSenderId: "YOUR_WEB_MESSAGING_SENDER_ID",
-                projectId: "YOUR_PROJECT_ID",
-                authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-                storageBucket: "YOUR_PROJECT_ID.appspot.com",
-              )
-            : null, // Mobile uses google-services.json / GoogleService-Info.plist
-      );
-      debugPrint('Firebase initialized successfully.');
-    } else {
-      debugPrint('Firebase already initialized.');
-    }
-  } catch (e) {
-    debugPrint('Firebase initialization failed: $e');
-  }
-
+  await dotenv.load(fileName: ".env");
+  await Firebase.initializeApp();
+  // REMOVED: All other payment SDK initializations (Stripe, etc.) are gone.
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
-        // Add other providers as needed
       ],
       child: const MyApp(),
     ),
@@ -135,8 +100,7 @@ class MyApp extends StatelessWidget {
       themeMode: themeProvider.currentThemeMode,
       initialRoute: '/', // Set root route explicitly
       routes: {
-        '/': (_) =>
-            const CustomerLoginScreen(), // Map root route to SplashScreen
+        '/': (_) => const SplashScreen(), // Map root route to SplashScreen
         SplashScreen.routeName: (_) => const SplashScreen(),
         CustomerLoginScreen.routeName: (_) => const CustomerLoginScreen(),
         CustomerRegisterScreen.routeName: (_) => const CustomerRegisterScreen(),
@@ -194,7 +158,6 @@ class MyApp extends StatelessWidget {
                       (args['lastOrderItems'] as List<Map<String, dynamic>>?),
                   initialAddress: args['initialAddress'] as AddressModel?,
                   customerId: args['customerId'] as String,
-                  //promoCodeToApply: args['prefilledPromoCode'] as String?,
                   preselectedCylinderIdFromDeal:
                       args['preselectedCylinderIdFromDeal'] as String?,
                 ),
@@ -204,7 +167,6 @@ class MyApp extends StatelessWidget {
             return _buildErrorRoute(
                 settings, "Missing customerId for OrderPlacementScreen");
 
-            return MaterialPageRoute(builder: (_) => const SplashScreen());
           case CustomerLoginScreen.routeName:
             return MaterialPageRoute(
                 builder: (_) => const CustomerLoginScreen());
@@ -212,8 +174,6 @@ class MyApp extends StatelessWidget {
             return MaterialPageRoute(
                 builder: (_) => const CustomerRegisterScreen());
 
-          // ========================== FIX IS HERE ==========================
-          // This case handles the navigation to the OTP screen and extracts the email argument.
           case OtpVerificationScreen.routeName:
             if (args != null && args.containsKey('email')) {
               return MaterialPageRoute(
@@ -224,7 +184,6 @@ class MyApp extends StatelessWidget {
               );
             }
             return _buildErrorRoute(settings, "Missing email for OTP Screen");
-          // =
 
           case CompleteProfileScreen.routeName:
             if (args != null && args.containsKey('userName')) {
@@ -238,6 +197,7 @@ class MyApp extends StatelessWidget {
             return _buildErrorRoute(
                 settings, "Missing user name for Complete Profile Screen");
 
+          // UPDATED: This route now correctly handles arguments for the PaymentScreen
           case PaymentScreen.routeName:
             if (args != null &&
                 args.containsKey('orderId') &&
@@ -263,8 +223,7 @@ class MyApp extends StatelessWidget {
               return MaterialPageRoute(
                 builder: (_) => OrderDetailsScreen(
                   orderId: args['orderId'] as String,
-                  // Removed showConfirmation as it's no longer a direct parameter
-                  customerId: args['customerId'] as String, // Added customerId
+                  customerId: args['customerId'] as String,
                 ),
                 settings: settings,
               );

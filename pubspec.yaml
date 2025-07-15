@@ -41,8 +41,8 @@ dependencies:
   permission_handler: ^11.3.1
   firebase_auth: ^5.6.2
   flutter_local_notifications: ^15.0.0
-  opay_online_flutter_sdk: ^0.9.6
   flutter_easyloading: ^3.0.3
+  monnify_payment_sdk: ^1.0.5
 
 
 

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:monnify_payment_sdk/monnify_payment_sdk.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import '../../services/api_service.dart';
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/card.dart';
@@ -15,7 +16,7 @@ import '../../models/user.dart' as app_user;
 class PaymentScreen extends StatefulWidget {
   static const String routeName = '/payment';
   final String orderId;
-  final double amount; // Amount in SMALLEST currency unit (e.g., Kobo)
+  final double amount;
   final String? itemDescription;
   final app_user.User customer;
 
@@ -32,6 +33,7 @@ class PaymentScreen extends StatefulWidget {
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
+  final _apiService = ApiService();
   bool _isProcessing = false;
   bool _isSdkInitialized = false;
   String _statusMessage = 'Initializing...';
@@ -42,26 +44,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
     _initializeMonnify();
   }
 
-  /// Initializes the Monnify SDK with keys from the .env file.
-  /// The UI is updated based on the initialization status.
   Future<void> _initializeMonnify() async {
     try {
       final apiKey = dotenv.env['MONNIFY_API_KEY'];
       final contractCode = dotenv.env['MONNIFY_CONTRACT_CODE'];
-
       if (apiKey == null || contractCode == null) {
         throw Exception("Monnify credentials not found in .env file.");
       }
-
       await MonnifyPaymentSdk.initialize(
           apiKey, contractCode, ApplicationMode.TEST);
-
-      if (mounted) {
+      if (mounted)
         setState(() {
           _isSdkInitialized = true;
           _statusMessage = 'Pay Now';
         });
-      }
     } catch (e) {
       if (mounted) {
         setState(() => _statusMessage = 'Initialization Failed');
@@ -85,7 +81,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
-  /// Handles the entire client-side payment flow using the Monnify SDK.
   Future<void> _handlePayment() async {
     setState(() {
       _isProcessing = true;
@@ -93,12 +88,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
     });
 
     final transaction = Transaction(
-      widget.amount /
-          100, // Monnify expects amount in the major unit (e.g., Naira)
+      widget.amount / 100,
       "NGN",
       widget.customer.name,
       widget.customer.email,
-      widget.orderId, // Use your unique order ID as the paymentReference
+      widget.orderId,
       widget.itemDescription ?? 'Payment for Order',
       paymentMethods: [PaymentMethod.CARD, PaymentMethod.ACCOUNT_TRANSFER],
     );
@@ -107,23 +101,30 @@ class _PaymentScreenState extends State<PaymentScreen> {
       final TransactionResponse? response =
           await MonnifyPaymentSdk.initializePayment(transaction);
 
-      // In the webhook flow, we trust the SDK's success response.
-      // The app's responsibility ends here, and it navigates away.
       if (response != null &&
           (response.status == TransactionStatus.PAID ||
               response.status == TransactionStatus.SUCCESS)) {
-        _showFeedbackSnackbar(
-            "Payment Sent! Waiting for server confirmation...",
+        if (response.transactionReference == null) {
+          throw Exception("Transaction successful but reference is missing.");
+        }
+
+        _showFeedbackSnackbar("Payment successful! Finalizing order...",
             isError: false);
 
+        await _apiService.confirmOrderPayment(
+          orderId: widget.orderId,
+          amountPaid: widget.amount,
+          transactionId: response.transactionReference!,
+        );
+
         if (mounted) {
+          _showFeedbackSnackbar("Order Confirmed!");
           Navigator.of(context).pushReplacementNamed(
             OrderSummaryScreen.routeName,
             arguments: {
               'orderId': widget.orderId,
               'customerId': widget.customer.id,
-              'showConfirmation':
-                  true, // Use this to show a "Processing..." state on the summary screen
+              'showConfirmation': true,
               'transactionRef': response.transactionReference,
             },
           );

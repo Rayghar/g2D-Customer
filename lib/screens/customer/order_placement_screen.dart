@@ -23,7 +23,7 @@ import '../../widgets/button.dart';
 import '../../widgets/card.dart';
 import '../../widgets/input.dart';
 import './address_list_screen.dart';
-import './payment_screen.dart';
+import './payment_screen.dart'; // Ensure this points to your PaymentScreen
 import './order_summary_screen.dart';
 import './order_details_screen.dart';
 import '../customer/customer_dashboard_screen.dart';
@@ -83,7 +83,7 @@ class OrderPlacementScreen extends StatefulWidget {
   final List<Map<String, dynamic>>? lastOrderItems;
   final AddressModel? initialAddress;
   final String? customerId;
-  //final String? promoCodeToApply;
+  //final String? promoCodeToApply; // Commented out as per previous context
   final String? preselectedCylinderIdFromDeal;
 
   const OrderPlacementScreen({
@@ -284,7 +284,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   void dispose() {
     _entryAnimController.dispose();
     _promoCodeController.dispose();
-    _referralCodeController.dispose(); // <<< DISPOSE
+    _referralCodeController.dispose();
     _recipientNameController.dispose();
     _recipientPhoneController.dispose();
     super.dispose();
@@ -529,10 +529,12 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       'recipientPhone': recipientPhoneValue,
       'isExpress': _isExpressDelivery,
       'useWalletBalance': _useWalletBalance,
-      /*if (_promoCodeController.text.trim().isNotEmpty)
+      // Pass promo code if entered
+      if (_promoCodeController.text.trim().isNotEmpty)
         'promoCodeApplied': _promoCodeController.text.trim().toUpperCase(),
+      // Pass referral code if entered
       if (_referralCodeController.text.trim().isNotEmpty)
-        'referralCode': _referralCodeController.text.trim().toUpperCase(),*/
+        'referralCode': _referralCodeController.text.trim().toUpperCase(),
     };
 
     try {
@@ -545,7 +547,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
         _showFeedbackSnackbar("Order confirmed. Proceeding to payment...",
             isError: false);
 
-        // This now correctly navigates to your Monnify PaymentScreen
+        // This navigation logic is now correct for the Flutterwave/Monnify SDK flow.
+        // It passes the full customer object and other details to the PaymentScreen.
         Navigator.of(context).pushReplacementNamed(
           PaymentScreen.routeName,
           arguments: {
@@ -557,6 +560,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           },
         );
       } else {
+        // This handles orders paid by wallet
         _showFeedbackSnackbar(
             response.message.isNotEmpty
                 ? response.message

@@ -433,17 +433,15 @@ class ApiService {
 
   Future<Map<String, dynamic>> confirmOrderPayment({
     required String orderId,
-    required double amountPaid, // Amount in major unit (e.g., NGN)
-    required String transactionReference,
+    required double amountPaid, // Amount in SMALLEST currency unit
+    required String transactionId,
   }) async {
     final token = await _getToken();
-    if (token == null) {
-      throw Exception('Not authenticated.');
-    }
-    final amountInMinorUnit = (amountPaid * 100).toInt();
+    if (token == null) throw Exception('Not authenticated.');
 
+    // This endpoint should be handled by your order.controller.js's processPayment function
     final String apiUrl = '$baseUrl/orders/$orderId/payment';
-    print('ApiService: Confirming order payment for $orderId to $apiUrl');
+    print('ApiService: Confirming payment for order $orderId to $apiUrl');
 
     try {
       final response = await http.post(
@@ -453,26 +451,20 @@ class ApiService {
           'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
-          'amount': amountInMinorUnit,
-          'transactionId': transactionReference,
+          'amount': amountPaid,
+          'transactionId': transactionId,
         }),
       );
 
       final responseBody = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
-        print(
-            'ApiService: Order payment confirmation successful. Response: $responseBody');
         return responseBody;
       } else {
-        final errorMessage =
-            (responseBody is Map ? responseBody['error'] : null) ??
-                (responseBody is Map ? responseBody['message'] : null) ??
-                'Failed to confirm order payment: ${response.statusCode}';
-        throw Exception(errorMessage);
+        throw Exception(
+            responseBody['error'] ?? 'Failed to confirm order payment.');
       }
     } catch (e) {
-      print('ApiService: Error confirming order payment $orderId: $e');
       throw Exception('Failed to confirm payment: ${e.toString()}');
     }
   }
@@ -1930,6 +1922,7 @@ class ApiService {
     }
   }
 
+  /// simply creates the order and returns its details without initializing any payment.
   Future<PlaceOrderResponseModel> placeOrder(
       Map<String, dynamic> orderPayload) async {
     final token = await _getToken();
@@ -1952,14 +1945,12 @@ class ApiService {
       final responseBody = jsonDecode(response.body);
 
       if (response.statusCode == 201) {
-        print('ApiService: Order placed successfully. Response: $responseBody');
         return PlaceOrderResponseModel.fromJson(responseBody);
       } else {
         final errorMessage = responseBody['error'] ?? 'Order placement failed';
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Unexpected error during order placement: $e');
       throw Exception('An unexpected error occurred while placing your order.');
     }
   }
@@ -2707,7 +2698,7 @@ class ApiService {
     }
   }
 
-  Future<void> verifyMonnifyPayment(
+  /*Future<void> verifyMonnifyPayment(
       {required String transactionReference, required String orderId}) async {
     final token = await _getToken();
     if (token == null) throw Exception('Authentication token not found.');
@@ -2736,7 +2727,7 @@ class ApiService {
       print('ApiService: Error verifying Monnify payment: $e');
       rethrow;
     }
-  }
+  }*/
 
   // UPDATED: This function sends the official transactionId to the backend for verification.
   /*Future<void> verifyFlutterwavePayment(
