@@ -49,6 +49,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   void initState() {
     super.initState();
+    // No BuildContext dependent calls directly in initState
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Safely initialize Monnify here as it might involve BuildContext in error reporting
     _initializeMonnify();
   }
 
