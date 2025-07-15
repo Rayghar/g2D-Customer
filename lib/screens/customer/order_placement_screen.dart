@@ -554,8 +554,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             'itemDescription':
                 '${_orderItems.length} cylinder(s) - Order #${response.order.shortOrderId}',
             'iswMerchantId':
-                "IKIACA67D931869E40BE07EE418A0B07A4A6D9EEF588", // From Client ID
-            'iswMerchantCode': "MX1209",
+                "IKIA8D0F761EBA47A9A627A86F1382467C04076BE37C", // From Client ID
+            'iswMerchantCode': "MX250635",
           },
         );
         // --- END OF UPDATE ---

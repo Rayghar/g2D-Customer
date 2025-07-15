@@ -69,7 +69,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       // Documentation's `IswSdkConfig` takes `merchantCode`, which often is the domain ID.
       final merchantCode = widget.iswMerchantCode;
       final merchantSecret =
-          "y0FISAGAS+OSIASec5Cts/khsWVXaWCoxZcLF2d8o/A="; // Required by IswSdkConfig
+          "/oRRpXn+2+7n2AlL+Q96GMwFDkuueCfCJeaMU30cW/7Kse2A3zDmIZffBdfZwmSg"; // Required by IswSdkConfig
       final currencyCode = "566"; // NGN currency code for IswSdkConfig
 
       const bool isLiveMode = false; // Get live mode from .env
