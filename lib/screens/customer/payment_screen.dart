@@ -34,6 +34,7 @@ class PaymentScreen extends StatefulWidget {
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
+  // ApiService is not directly used for payment confirmation here anymore
   bool _isProcessing = false;
   String _statusMessage = 'Initializing...';
 
@@ -76,6 +77,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _statusMessage = 'Initialization Failed');
+        // Show a snackbar for SDK initialization errors, but not during build cycle directly.
+        // It's already in didChangeDependencies, so this is okay for initial error.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not initialize payment SDK: ${e.toString()}',
