@@ -129,8 +129,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     // Prepare transaction details for Monnify
     final transactionDetails = TransactionDetails(
-      amount: widget.amount /
-          100, // Monnify expects amount in major currency unit (Naira)
+      amount: widget
+          .amount, // Monnify expects amount in major currency unit (Naira)
       currencyCode: "NGN",
       customerName: widget.customer.name,
       customerEmail: widget.customer.email,

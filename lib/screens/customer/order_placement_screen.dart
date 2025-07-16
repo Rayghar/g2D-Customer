@@ -1019,7 +1019,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                       fontWeight: FontWeight.w500,
                       fontSize: 15)),
               subtitle: Text(
-                  '+ ₦${NumberFormat("#,##0.00").format((_feeSettings?.expressDeliverySurcharge ?? 0) / 100)} (Get it faster!)',
+                  '+ ₦${NumberFormat("#,##0.00").format((_feeSettings?.expressDeliverySurcharge ?? 0))} (Get it faster!)',
                   style: GoogleFonts.inter(
                       fontSize: 13, color: themeProvider.secondaryText)),
               value: _isExpressDelivery,
@@ -1165,7 +1165,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                   '+ ${currencyFormat.format(serviceFee / 100)}',
                   themeProvider),
             _buildSummaryRow('Delivery Fee:',
-                '+ ${currencyFormat.format(deliveryFee / 100)}', themeProvider),
+                '+ ${currencyFormat.format(deliveryFee)}', themeProvider),
             if (_appliedUIPromotion != null &&
                 _appliedUIPromotion!.code.isNotEmpty)
               _buildSummaryRow(
