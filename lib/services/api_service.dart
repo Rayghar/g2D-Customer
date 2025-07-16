@@ -4,19 +4,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter/material.dart'; // <<< Re-added for BuildContext in Flutter
-
+import 'package:flutter/material.dart'; // Re-added for BuildContext in Flutter
 import '../utils/constants.dart';
 import '../models/feedback.dart' as app_feedback;
 import '../models/location.dart' as app_location;
 import '../models/notification.dart';
 import '../models/user.dart' as app_user;
 import '../models/address_model.dart';
-import '../models/system_config_model.dart'; // <-- Import the PLAIN model
+import '../models/system_config_model.dart'; // Import the PLAIN model
 import '../models/admin/admin_config_model.dart'
     as admin_model; // Use prefix for admin model
 import '../models/place_order_response_model.dart';
-import '../models/order.dart' as app_order;
+import '../models/order.dart' as app_order; // Import the Order model
 import '../models/deal_model.dart';
 import '../models/chat_thread_model.dart'; // Import the new model
 import '../models/driver_stats_model.dart'; // Import the new model
@@ -43,6 +42,7 @@ class ApiService {
     return await _storage.read(key: 'jwt_token');
   }
 
+  // Auth methods
   Future<Map<String, dynamic>> login(String email, String password) async {
     final String apiUrl = '$baseUrl/auth/login';
     print('ApiService: Attempting login to $apiUrl');
@@ -80,6 +80,322 @@ class ApiService {
     } catch (e) {
       throw Exception(
           'An unexpected error occurred during login: ${e.toString()}');
+    }
+  }
+
+  Future<void> logout() async {
+    await _storage.delete(key: 'jwt_token');
+    print('ApiService: Logged out, token deleted.');
+  }
+
+  // User methods
+  Future<app_user.User> getMyProfile() async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated. Please log in.');
+
+    final String apiUrl = '$baseUrl/users/me';
+    print('ApiService: Getting my profile from $apiUrl');
+
+    try {
+      final response = await http.get(
+        Uri.parse(apiUrl),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      final responseBody = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        // The response body is the user object
+        return app_user.User.fromJson(responseBody);
+      } else {
+        final errorMessage = responseBody['error'] ?? 'Failed to get profile';
+        throw Exception(errorMessage);
+      }
+    } on SocketException {
+      throw Exception('Network error. Please check your connection.');
+    } catch (e) {
+      print('ApiService: Error fetching profile: ${e.toString()}');
+      rethrow;
+    }
+  }
+
+  Future<List<AddressModel>> getMyAddresses() async {
+    final token = await _getToken();
+    if (token == null) {
+      throw Exception('Not authenticated.');
+    }
+    final String apiUrl = '$baseUrl/addresses';
+    print('ApiService: Getting addresses from $apiUrl');
+
+    try {
+      final response = await http.get(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        final List<dynamic> addressesJson =
+            responseBody as List<dynamic>? ?? [];
+        return addressesJson
+            .map((json) => AddressModel.fromJson(json as Map<String, dynamic>))
+            .toList();
+      } else {
+        final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
+            'Failed to get addresses: ${response.statusCode}';
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      print('ApiService: Error fetching addresses: $e');
+      throw Exception('Failed to fetch addresses: ${e.toString()}');
+    }
+  }
+
+  Future<AddressModel> addAddress(AddressModel address) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated.');
+    final String apiUrl = '$baseUrl/addresses';
+    print('ApiService: Creating address via $apiUrl');
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
+        body: jsonEncode(address.toJson()),
+      );
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 201) {
+        return AddressModel.fromJson(responseBody);
+      } else {
+        final errorMessage = responseBody['error'] ??
+            responseBody['message'] ??
+            'Failed to create address: ${response.statusCode}';
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      throw Exception('Failed to create address: ${e.toString()}');
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteAddress(String addressId) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated.');
+    final String apiUrl = '$baseUrl/addresses/$addressId';
+    print('ApiService: Deleting address $addressId via $apiUrl');
+
+    try {
+      final response = await http.delete(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        print('ApiService: Delete address successful. Response: $responseBody');
+        return responseBody;
+      } else {
+        final errorMessage = responseBody['error'] ??
+            responseBody['message'] ??
+            'Failed to delete address: ${response.statusCode}';
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      print('ApiService: Error deleting address $addressId: $e');
+      throw Exception('Failed to delete address: ${e.toString()}');
+    }
+  }
+
+  Future<SystemConfigModel> getSystemConfig() async {
+    final token = await _getToken();
+
+    final String apiUrl = '$baseUrl/config'; // Corrected endpoint path
+    print('ApiService: Getting system configuration from $apiUrl');
+
+    try {
+      final response = await http.get(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
+      );
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        // Return the plain data model
+        return SystemConfigModel.fromJson(responseBody);
+      } else {
+        throw Exception(
+            responseBody['error'] ?? 'Failed to get system configuration');
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Order methods
+  /// simply creates the order and returns its details without initializing any payment.
+  Future<PlaceOrderResponseModel> placeOrder(
+      Map<String, dynamic> orderPayload) async {
+    final token = await _getToken();
+    if (token == null) {
+      throw Exception('Not authenticated to place order.');
+    }
+    final String apiUrl = '$baseUrl/orders';
+    print('ApiService: Placing order to $apiUrl');
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(orderPayload),
+      );
+
+      final responseBody = jsonDecode(response.body);
+
+      if (response.statusCode == 201) {
+        return PlaceOrderResponseModel.fromJson(responseBody);
+      } else {
+        final errorMessage = responseBody['error'] ?? 'Order placement failed';
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      throw Exception('An unexpected error occurred while placing your order.');
+    }
+  }
+
+  // New method to fetch order by ID for polling
+  Future<app_order.Order> fetchOrderById(String orderId) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated.');
+    final String apiUrl = '$baseUrl/orders/$orderId';
+    print('ApiService: Fetching order $orderId from $apiUrl');
+
+    try {
+      final response = await http.get(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        print(
+            'ApiService: Order $orderId fetched successfully. Response: $responseBody');
+        return app_order.Order.fromJson(responseBody);
+      } else {
+        final errorMessage =
+            (responseBody is Map ? responseBody['error'] : null) ??
+                (responseBody is Map ? responseBody['message'] : null) ??
+                'Failed to fetch order $orderId: ${response.statusCode}';
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      throw Exception('Failed to fetch order $orderId: ${e.toString()}');
+    }
+  }
+
+  Future<List<app_order.Order>> getMyOrders() async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated.');
+    final String apiUrl =
+        '$baseUrl/orders/me'; // Assuming an endpoint for user's orders
+    print('ApiService: Fetched user orders successfully.');
+
+    try {
+      final response = await http.get(
+        Uri.parse(apiUrl),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        return (responseBody['orders'] as List)
+            .map((json) => app_order.Order.fromJson(json))
+            .toList();
+      } else {
+        throw Exception(responseBody['error'] ?? 'Failed to get orders');
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // !!! IMPORTANT: The client-side confirmOrderPayment method is removed
+  // as payment confirmation is now handled securely via Monnify webhooks on the backend.
+  // The method was previously commented out, now it's fully removed as per instruction.
+
+  Future<Map<String, dynamic>> cancelOrder(String orderId) async {
+    final token = await _getToken();
+    if (token == null) {
+      throw Exception('Not authenticated.');
+    }
+    final String apiUrl = '$baseUrl/orders/$orderId';
+    print('ApiService: Attempting to cancel order $orderId via $apiUrl');
+
+    try {
+      final response = await http.delete(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        print('ApiService: Order cancel successful. Response: $responseBody');
+        return responseBody;
+      } else {
+        final errorMessage =
+            (responseBody is Map ? responseBody['error'] : null) ??
+                (responseBody is Map ? responseBody['message'] : null) ??
+                'Failed to cancel order: ${response.statusCode}';
+        print(
+            'ApiService: Order cancel failed. Status: ${response.statusCode}, Error: $errorMessage');
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      print('ApiService: Error cancelling order $orderId: $e');
+      throw Exception('Failed to cancel order: ${e.toString()}');
+    }
+  }
+
+  Future<app_order.Order> getOrderDetails(String orderId) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated.');
+    final String apiUrl = '$baseUrl/orders/$orderId';
+    print('ApiService: Getting order details from $apiUrl');
+
+    try {
+      final response = await http.get(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        print(
+            'ApiService: Order details fetched successfully. Response: $responseBody');
+        return app_order.Order.fromJson(responseBody);
+      } else {
+        final errorMessage =
+            (responseBody is Map ? responseBody['error'] : null) ??
+                (responseBody is Map ? responseBody['message'] : null) ??
+                'Failed to get order details: ${response.statusCode}';
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      throw Exception('Failed to fetch order details: ${e.toString()}');
     }
   }
 
@@ -199,37 +515,6 @@ class ApiService {
       );
     } catch (e) {
       print('ApiService: Could not update chat thread summary: $e');
-    }
-  }
-
-  /// Fetches the profile for the currently authenticated user.
-  Future<app_user.User> getMyProfile() async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated. Please log in.');
-
-    final String apiUrl = '$baseUrl/users/me';
-    print('ApiService: Getting my profile from $apiUrl');
-
-    try {
-      final response = await http.get(
-        Uri.parse(apiUrl),
-        headers: {'Authorization': 'Bearer $token'},
-      );
-
-      final responseBody = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        // The response body is the user object
-        return app_user.User.fromJson(responseBody);
-      } else {
-        final errorMessage = responseBody['error'] ?? 'Failed to get profile';
-        throw Exception(errorMessage);
-      }
-    } on SocketException {
-      throw Exception('Network error. Please check your connection.');
-    } catch (e) {
-      print('ApiService: Error fetching profile: ${e.toString()}');
-      rethrow;
     }
   }
 
@@ -366,144 +651,6 @@ class ApiService {
     }
   }
 
-  Future<app_order.Order> getOrderDetails(String orderId) async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
-    final String apiUrl = '$baseUrl/orders/$orderId';
-    print('ApiService: Getting order details from $apiUrl');
-
-    try {
-      final response = await http.get(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-      final responseBody = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        print(
-            'ApiService: Order details fetched successfully. Response: $responseBody');
-        return app_order.Order.fromJson(responseBody);
-      } else {
-        final errorMessage =
-            (responseBody is Map ? responseBody['error'] : null) ??
-                (responseBody is Map ? responseBody['message'] : null) ??
-                'Failed to get order details: ${response.statusCode}';
-        throw Exception(errorMessage);
-      }
-    } catch (e) {
-      throw Exception('Failed to fetch order details: ${e.toString()}');
-    }
-  }
-
-  /*Future<void> confirmOrderPayment({
-    required String orderId,
-    required double amountPaid, // Amount in SMALLEST currency unit
-    required String transactionId,
-  }) async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
-
-    final String apiUrl = '$baseUrl/orders/$orderId/payment';
-    print('ApiService: Confirming payment for order $orderId');
-
-    try {
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'amount': amountPaid,
-          'transactionId': transactionId,
-        }),
-      );
-
-      if (response.statusCode != 200) {
-        final responseBody = jsonDecode(response.body);
-        throw Exception(
-            responseBody['error'] ?? 'Failed to confirm payment on server.');
-      }
-    } catch (e) {
-      rethrow;
-    }
-  }*/
-
-  Future<Map<String, dynamic>> confirmOrderPayment({
-    required String orderId,
-    required double amountPaid, // Amount in SMALLEST currency unit
-    required String transactionId,
-  }) async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
-
-    // This endpoint should be handled by your order.controller.js's processPayment function
-    final String apiUrl = '$baseUrl/orders/$orderId/payment';
-    print('ApiService: Confirming payment for order $orderId to $apiUrl');
-
-    try {
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'amount': amountPaid,
-          'transactionId': transactionId,
-        }),
-      );
-
-      final responseBody = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        return responseBody;
-      } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to confirm order payment.');
-      }
-    } catch (e) {
-      throw Exception('Failed to confirm payment: ${e.toString()}');
-    }
-  }
-
-  Future<Map<String, dynamic>> cancelOrder(String orderId) async {
-    final token = await _getToken();
-    if (token == null) {
-      throw Exception('Not authenticated.');
-    }
-    final String apiUrl = '$baseUrl/orders/$orderId';
-    print('ApiService: Attempting to cancel order $orderId via $apiUrl');
-
-    try {
-      final response = await http.delete(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-      final responseBody = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        print('ApiService: Order cancel successful. Response: $responseBody');
-        return responseBody;
-      } else {
-        final errorMessage =
-            (responseBody is Map ? responseBody['error'] : null) ??
-                (responseBody is Map ? responseBody['message'] : null) ??
-                'Failed to cancel order: ${response.statusCode}';
-        print(
-            'ApiService: Order cancel failed. Status: ${response.statusCode}, Error: $errorMessage');
-        throw Exception(errorMessage);
-      }
-    } catch (e) {
-      print('ApiService: Error cancelling order $orderId: $e');
-      throw Exception('Failed to cancel order: ${e.toString()}');
-    }
-  }
-
   Future<admin_run_models.AdminActiveRunDetailModel> adminCreateRunFromOrders(
       List<String> orderIds) async {
     final token = await _getToken();
@@ -620,7 +767,7 @@ class ApiService {
         Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: jsonEncode({
           'paymentMethodId': stripePaymentMethodId,
@@ -1226,6 +1373,8 @@ class ApiService {
     final token = await _getToken();
     if (token == null) throw Exception('Not authenticated.');
 
+    // Note: The backend endpoint is `/referrals`, no customerId in path.
+    // The `authMiddleware` identifies the user.
     final String apiUrl = '$baseUrl/referrals';
     print('ApiService: Getting referral info from $apiUrl');
 
@@ -1709,40 +1858,6 @@ class ApiService {
     }
   }
 
-  Future<List<AddressModel>> getMyAddresses() async {
-    final token = await _getToken();
-    if (token == null) {
-      throw Exception('Not authenticated.');
-    }
-    final String apiUrl = '$baseUrl/addresses';
-    print('ApiService: Getting addresses from $apiUrl');
-
-    try {
-      final response = await http.get(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-      final responseBody = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        final List<dynamic> addressesJson =
-            responseBody as List<dynamic>? ?? [];
-        return addressesJson
-            .map((json) => AddressModel.fromJson(json as Map<String, dynamic>))
-            .toList();
-      } else {
-        final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
-            'Failed to get addresses: ${response.statusCode}';
-        throw Exception(errorMessage);
-      }
-    } catch (e) {
-      print('ApiService: Error fetching addresses: $e');
-      throw Exception('Failed to fetch addresses: ${e.toString()}');
-    }
-  }
-
   Future<AddressModel> setDefaultAddress(String addressId) async {
     final token = await _getToken();
     if (token == null) throw Exception('Not authenticated.');
@@ -1773,36 +1888,6 @@ class ApiService {
     } catch (e) {
       print('ApiService: Error setting default address $addressId: $e');
       throw Exception('Failed to set default address: ${e.toString()}');
-    }
-  }
-
-  Future<Map<String, dynamic>> deleteAddress(String addressId) async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
-    final String apiUrl = '$baseUrl/addresses/$addressId';
-    print('ApiService: Deleting address $addressId via $apiUrl');
-
-    try {
-      final response = await http.delete(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-      final responseBody = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        print('ApiService: Delete address successful. Response: $responseBody');
-        return responseBody;
-      } else {
-        final errorMessage = responseBody['error'] ??
-            responseBody['message'] ??
-            'Failed to delete address: ${response.statusCode}';
-        throw Exception(errorMessage);
-      }
-    } catch (e) {
-      print('ApiService: Error deleting address $addressId: $e');
-      throw Exception('Failed to delete address: ${e.toString()}');
     }
   }
 
@@ -1863,35 +1948,6 @@ class ApiService {
     }
   }
 
-  /// Fetches the entire system configuration object.
-  /// Returns a plain data model suitable for any part of the app.
-  Future<SystemConfigModel> getSystemConfig() async {
-    final token = await _getToken();
-
-    final String apiUrl = '$baseUrl/config'; // Corrected endpoint path
-    print('ApiService: Getting system configuration from $apiUrl');
-
-    try {
-      final response = await http.get(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-      );
-      final responseBody = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        // Return the plain data model
-        return SystemConfigModel.fromJson(responseBody);
-      } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to get system configuration');
-      }
-    } catch (e) {
-      rethrow;
-    }
-  }
-
   /// Updates the system configuration. Admin only.
   /// Takes the admin-specific model and converts it to JSON.
   Future<void> updateSystemConfig(admin_model.SystemConfigModel config) async {
@@ -1919,39 +1975,6 @@ class ApiService {
       }
     } catch (e) {
       rethrow;
-    }
-  }
-
-  /// simply creates the order and returns its details without initializing any payment.
-  Future<PlaceOrderResponseModel> placeOrder(
-      Map<String, dynamic> orderPayload) async {
-    final token = await _getToken();
-    if (token == null) {
-      throw Exception('Not authenticated to place order.');
-    }
-    final String apiUrl = '$baseUrl/orders';
-    print('ApiService: Placing order to $apiUrl');
-
-    try {
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(orderPayload),
-      );
-
-      final responseBody = jsonDecode(response.body);
-
-      if (response.statusCode == 201) {
-        return PlaceOrderResponseModel.fromJson(responseBody);
-      } else {
-        final errorMessage = responseBody['error'] ?? 'Order placement failed';
-        throw Exception(errorMessage);
-      }
-    } catch (e) {
-      throw Exception('An unexpected error occurred while placing your order.');
     }
   }
 
@@ -2013,7 +2036,6 @@ class ApiService {
     }
   }
 
-  // ========================== FIX IS HERE ==========================
   /// Updates the currently authenticated user's profile.
   /// The `updateData` is a Map containing the fields to update, e.g., {'phone': '12345'}.
   Future<app_user.User> updateProfile(Map<String, dynamic> updateData) async {
@@ -2485,8 +2507,7 @@ class ApiService {
     required String reportType,
     String period = 'weekly',
   }) async {
-    final token =
-        await _getToken(); // This call is now correctly inside the class scope
+    final token = await _getToken();
     if (token == null) throw Exception('Not authenticated.');
 
     final uri = Uri.parse('$baseUrl/reports').replace(queryParameters: {
@@ -2523,23 +2544,6 @@ class ApiService {
       throw Exception('Failed to initialize card tokenization.');
     }
   }
-
-  /*Future<void> saveTokenizedCard(String monnifyToken) async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
-    final String apiUrl = '$baseUrl/payments/tokenize-card/save';
-    final response = await http.post(
-      Uri.parse(apiUrl),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json'
-      },
-      body: jsonEncode({'monnifyToken': monnifyToken}),
-    );
-    if (response.statusCode != 201) {
-      throw Exception('Failed to save card.');
-    }
-  }*/
 
   Future<List<PaymentMethodModel>> getPaymentMethods() async {
     final token = await _getToken();
@@ -2640,38 +2644,6 @@ class ApiService {
     } catch (e) {
       rethrow;
     }
-
-    /// Initializes a payment on the backend and gets an access_code.
-    Future<Map<String, dynamic>> initializePaymentForOrder(
-        String orderId) async {
-      final token = await _getToken();
-      if (token == null) throw Exception('Authentication token not found.');
-
-      final String apiUrl = '$baseUrl/payments/initialize';
-      print('ApiService: Initializing payment for order $orderId via $apiUrl');
-
-      try {
-        final response = await http.post(
-          Uri.parse(apiUrl),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode({'orderId': orderId}),
-        );
-
-        final responseBody = jsonDecode(response.body);
-        if (response.statusCode == 200) {
-          return responseBody; // Expects { accessCode, paymentNeeded }
-        } else {
-          final errorMessage =
-              responseBody['error'] ?? 'Failed to initialize payment';
-          throw Exception(errorMessage);
-        }
-      } catch (e) {
-        throw Exception('Failed to initialize payment: ${e.toString()}');
-      }
-    }
   }
 
   /// Sets a payment method as the default.
@@ -2698,14 +2670,13 @@ class ApiService {
     }
   }
 
-  /*Future<void> verifyMonnifyPayment(
-      {required String transactionReference, required String orderId}) async {
+  /// Initializes a payment on the backend and gets an access_code.
+  Future<Map<String, dynamic>> initializePaymentForOrder(String orderId) async {
     final token = await _getToken();
     if (token == null) throw Exception('Authentication token not found.');
 
-    final String apiUrl = '$baseUrl/payments/monnify/verify';
-    print(
-        'ApiService: Verifying Monnify transaction ref $transactionReference');
+    final String apiUrl = '$baseUrl/payments/initialize';
+    print('ApiService: Initializing payment for order $orderId via $apiUrl');
 
     try {
       final response = await http.post(
@@ -2714,48 +2685,19 @@ class ApiService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode(
-            {'transactionReference': transactionReference, 'orderId': orderId}),
+        body: jsonEncode({'orderId': orderId}),
       );
 
-      if (response.statusCode != 200) {
-        final responseBody = jsonDecode(response.body);
-        throw Exception(
-            responseBody['error'] ?? 'Payment verification failed on server.');
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        return responseBody; // Expects { accessCode, paymentNeeded }
+      } else {
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to initialize payment';
+        throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error verifying Monnify payment: $e');
-      rethrow;
+      throw Exception('Failed to initialize payment: ${e.toString()}');
     }
-  }*/
-
-  // UPDATED: This function sends the official transactionId to the backend for verification.
-  /*Future<void> verifyFlutterwavePayment(
-      {required String transactionId, required String orderId}) async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Authentication token not found.');
-
-    final String apiUrl = '$baseUrl/payments/flutterwave/verify';
-    print('ApiService: Verifying Flutterwave transaction ID $transactionId');
-
-    try {
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({'transactionId': transactionId, 'orderId': orderId}),
-      );
-
-      if (response.statusCode != 200) {
-        final responseBody = jsonDecode(response.body);
-        throw Exception(
-            responseBody['error'] ?? 'Payment verification failed on server.');
-      }
-    } catch (e) {
-      print('ApiService: Error verifying Flutterwave payment: $e');
-      rethrow;
-    }
-  }*/
+  }
 }

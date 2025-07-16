@@ -34,33 +34,36 @@ class PaymentScreen extends StatefulWidget {
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  // ApiService is not directly used for payment confirmation here anymore
   bool _isProcessing = false;
   String _statusMessage = 'Initializing...';
 
-  Monnify? _monnify;
+  Monnify? _monnify; // Monnify SDK instance
 
   @override
   void initState() {
     super.initState();
+    // No explicit initialization here, moved to didChangeDependencies
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // Initialize Monnify when dependencies change (e.g., after context is available)
     _initializeMonnify();
   }
 
   /// Initializes the Monnify SDK and stores the instance for later use.
+  /// It retrieves API key and contract code from environment variables.
   Future<void> _initializeMonnify() async {
     try {
-      final apiKey = dotenv.env['MONNIFY_API_KEY'];
-      final contractCode = dotenv.env['MONNIFY_CONTRACT_CODE'];
+      final apiKey = "MK_TEST_L969MNXY0V";
+      final contractCode = "8609686503";
 
       if (apiKey == null || contractCode == null) {
         throw Exception("Monnify credentials not found in .env file.");
       }
 
+      // Initialize Monnify with the retrieved credentials
       final monnifyInstance = await Monnify.initialize(
         apiKey: apiKey,
         contractCode: contractCode,
@@ -68,6 +71,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ApplicationMode.TEST, // Use ApplicationMode.LIVE for production
       );
 
+      // Update UI if the widget is still mounted
       if (mounted) {
         setState(() {
           _monnify = monnifyInstance;
@@ -75,10 +79,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
         });
       }
     } catch (e) {
+      // Handle initialization errors
       if (mounted) {
         setState(() => _statusMessage = 'Initialization Failed');
-        // Show a snackbar for SDK initialization errors, but not during build cycle directly.
-        // It's already in didChangeDependencies, so this is okay for initial error.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not initialize payment SDK: ${e.toString()}',
@@ -91,7 +94,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
-  // _showFeedbackSnackbar is a general helper, can still be used for pre-payment errors
+  /// Displays a SnackBar with feedback to the user.
+  /// [message] The message to display.
+  /// [isError] True if the message indicates an error, false otherwise.
   void _showFeedbackSnackbar(String message, {bool isError = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
@@ -105,18 +110,24 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
+  /// Handles the payment process by initiating the Monnify SDK.
+  /// It navigates to the OrderSummaryScreen after initiating payment,
+  /// expecting that screen to poll the backend for payment status.
   Future<void> _handlePayment() async {
+    // Check if Monnify SDK is initialized
     if (_monnify == null) {
       _showFeedbackSnackbar('Payment SDK not initialized. Please wait.',
           isError: true);
       return;
     }
 
+    // Update UI to show processing state
     setState(() {
       _isProcessing = true;
       _statusMessage = 'Redirecting to Monnify...';
     });
 
+    // Prepare transaction details for Monnify
     final transactionDetails = TransactionDetails(
       amount: widget.amount /
           100, // Monnify expects amount in major currency unit (Naira)
@@ -134,8 +145,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
       final TransactionResponse? response =
           await _monnify!.initializePayment(transaction: transactionDetails);
 
+      // Navigate to OrderSummaryScreen after payment initiation
       if (mounted) {
-        // Crucial Change: We DO NOT call backend for confirmation here.
+        // We DO NOT call backend for confirmation here.
         // We navigate directly to OrderSummaryScreen, which will then poll the backend.
         Navigator.of(context).pushReplacementNamed(
           OrderSummaryScreen.routeName,
@@ -189,28 +201,80 @@ class _PaymentScreenState extends State<PaymentScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // New Order Details Card
+            CustomCard(
+              color: themeProvider.cardBackground,
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Order Details',
+                        style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: themeProvider.primaryText)),
+                    const SizedBox(height: 12),
+                    _buildDetailRow(
+                      context,
+                      Icons.receipt_long_outlined,
+                      'Order ID:',
+                      widget.orderId,
+                      themeProvider,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildDetailRow(
+                      context,
+                      Icons.description_outlined,
+                      'Description:',
+                      widget.itemDescription ?? 'Gas Cylinder Order',
+                      themeProvider,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildDetailRow(
+                      context,
+                      Icons.person_outline,
+                      'Customer:',
+                      widget.customer.name,
+                      themeProvider,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildDetailRow(
+                      context,
+                      Icons.email_outlined,
+                      'Email:',
+                      widget.customer.email,
+                      themeProvider,
+                    ),
+                    const SizedBox(height: 8),
+                    _buildDetailRow(
+                      context,
+                      Icons.phone_outlined,
+                      'Phone:',
+                      widget.customer.phone ?? 'N/A',
+                      themeProvider,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            // Existing Secure Payment Card, slightly enhanced
             CustomCard(
               color: themeProvider.cardBackground,
               child: Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
                   children: [
-                    Icon(Icons.credit_card,
+                    Icon(Icons.lock_outline_rounded,
                         size: 50, color: themeProvider.gas2doorPrimaryBlue),
                     const SizedBox(height: 16),
-                    Text('Secure Payment',
+                    Text('Total Amount Due',
                         style: GoogleFonts.inter(
                             fontSize: 22,
                             fontWeight: FontWeight.bold,
                             color: themeProvider.primaryText)),
                     const SizedBox(height: 10),
-                    Text(
-                      widget.itemDescription ?? 'Order ID: ${widget.orderId}',
-                      style: GoogleFonts.inter(
-                          fontSize: 16, color: themeProvider.secondaryText),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 20),
                     Text(
                       currencyFormat.format(displayAmount),
                       style: GoogleFonts.inter(
@@ -222,6 +286,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     Text('(Amount in NGN)',
                         style: GoogleFonts.inter(
                             fontSize: 13, color: themeProvider.tertiaryText)),
+                    const SizedBox(height: 16),
+                    Text('Your payment will be securely processed by Monnify.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(
+                            fontSize: 13, color: themeProvider.secondaryText)),
                   ],
                 ),
               ),
@@ -255,6 +324,30 @@ class _PaymentScreenState extends State<PaymentScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Helper method to build a row for displaying order details.
+  Widget _buildDetailRow(BuildContext context, IconData icon, String label,
+      String value, ThemeProvider themeProvider) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: themeProvider.gas2doorTeal),
+        const SizedBox(width: 12),
+        Text('$label ',
+            style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: themeProvider.secondaryText)),
+        Expanded(
+          child: Text(value,
+              style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: themeProvider.primaryText)),
+        ),
+      ],
     );
   }
 }
