@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart'; // Re-added for BuildContext in Flutter
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Make sure this is imported if using .env for baseUrl
 import '../utils/constants.dart';
 import '../models/feedback.dart' as app_feedback;
 import '../models/location.dart' as app_location;
@@ -37,6 +38,8 @@ import '../models/payment_method_model.dart'; // Added missing import for Paymen
 
 class ApiService {
   final _storage = const FlutterSecureStorage();
+  final String baseUrl = dotenv.env['API_BASE_URL'] ??
+      'https://primejet-backend.onrender.com/api/v1';
 
   Future<String?> _getToken() async {
     return await _storage.read(key: 'jwt_token');
@@ -234,6 +237,37 @@ class ApiService {
             responseBody['error'] ?? 'Failed to get system configuration');
       }
     } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<String> getOrderPaymentStatus(String orderId) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Authentication token not found.');
+
+    final String apiUrl = '$baseUrl/orders/$orderId/payment-status';
+    print('ApiService: Fetching payment status for order $orderId via $apiUrl');
+
+    try {
+      final response = await http.get(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        return responseBody['paymentStatus']
+            as String; // Expects a string like 'Completed', 'Pending', 'Failed'
+      } else {
+        final errorMessage = responseBody['message'] ??
+            'Failed to fetch payment status'; // Changed from 'error' to 'message'
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      print('Error fetching payment status: $e');
       rethrow;
     }
   }

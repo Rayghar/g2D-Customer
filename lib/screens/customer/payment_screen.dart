@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+// UPDATE 1: Import TransactionStatus from monnify_payment_sdk to resolve undefined name errors.
+import 'package:monnify_payment_sdk/src/models/transaction_status.dart';
 import 'package:monnify_payment_sdk/src/models/transaction_response.dart';
 import 'package:monnify_payment_sdk/monnify_payment_sdk.dart';
 
@@ -37,33 +39,27 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool _isProcessing = false;
   String _statusMessage = 'Initializing...';
 
-  Monnify? _monnify; // Monnify SDK instance
+  Monnify? _monnify;
+  final ApiService _apiService = ApiService();
 
   @override
   void initState() {
     super.initState();
-    // No explicit initialization here, moved to didChangeDependencies
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Initialize Monnify when dependencies change (e.g., after context is available)
     _initializeMonnify();
   }
 
-  /// Initializes the Monnify SDK and stores the instance for later use.
-  /// It retrieves API key and contract code from environment variables.
   Future<void> _initializeMonnify() async {
     try {
-      final apiKey = "MK_TEST_L969MNXY0V";
-      final contractCode = "8609686503";
+      // Hardcoded keys for analysis purposes ONLY. Not recommended for production.
+      final apiKey = "MK_TEST_L969MNXY0V"; //
+      final contractCode = "8609686503"; //
+      // Note: MONNIFY_SECRET_KEY=2Z659QCSA4GCPR0VKTPQTB81A3R7XHK4 is a backend secret and should NEVER be used client-side.
+      // It is not included in this client-side file.
 
-      if (apiKey == null || contractCode == null) {
-        throw Exception("Monnify credentials not found in .env file.");
+      if (apiKey.isEmpty || contractCode.isEmpty) {
+        throw Exception("Monnify credentials are not configured.");
       }
 
-      // Initialize Monnify with the retrieved credentials
       final monnifyInstance = await Monnify.initialize(
         apiKey: apiKey,
         contractCode: contractCode,
@@ -71,7 +67,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ApplicationMode.TEST, // Use ApplicationMode.LIVE for production
       );
 
-      // Update UI if the widget is still mounted
       if (mounted) {
         setState(() {
           _monnify = monnifyInstance;
@@ -79,98 +74,169 @@ class _PaymentScreenState extends State<PaymentScreen> {
         });
       }
     } catch (e) {
-      // Handle initialization errors
       if (mounted) {
         setState(() => _statusMessage = 'Initialization Failed');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not initialize payment SDK: ${e.toString()}',
-                style: GoogleFonts.inter(color: Colors.white)),
-            backgroundColor: Theme.of(context).colorScheme.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        _showFeedbackSnackbar(
+            'Could not initialize payment SDK: ${e.toString().replaceFirst("Exception: ", "")}',
+            isError: true);
       }
     }
   }
 
-  /// Displays a SnackBar with feedback to the user.
-  /// [message] The message to display.
-  /// [isError] True if the message indicates an error, false otherwise.
-  void _showFeedbackSnackbar(String message, {bool isError = false}) {
+  void _showFeedbackSnackbar(String message,
+      {bool isError = false, bool isSuccess = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
-        backgroundColor:
-            isError ? themeProvider.errorColor : themeProvider.successColor,
+        backgroundColor: isError
+            ? themeProvider.errorColor
+            : (isSuccess
+                ? themeProvider.successColor
+                : themeProvider.gas2doorPrimaryBlue),
         behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
-  /// Handles the payment process by initiating the Monnify SDK.
-  /// It navigates to the OrderSummaryScreen after initiating payment,
-  /// expecting that screen to poll the backend for payment status.
   Future<void> _handlePayment() async {
-    // Check if Monnify SDK is initialized
     if (_monnify == null) {
       _showFeedbackSnackbar('Payment SDK not initialized. Please wait.',
           isError: true);
       return;
     }
 
-    // Update UI to show processing state
     setState(() {
       _isProcessing = true;
       _statusMessage = 'Redirecting to Monnify...';
     });
 
-    // Prepare transaction details for Monnify
     final transactionDetails = TransactionDetails(
-      amount: widget
-          .amount, // Monnify expects amount in major currency unit (Naira)
+      amount: widget.amount / 100.0, // Convert from Kobo to Naira
       currencyCode: "NGN",
       customerName: widget.customer.name,
       customerEmail: widget.customer.email,
-      paymentReference:
-          widget.orderId, // Use orderId as Monnify paymentReference
+      paymentReference: widget.orderId,
       paymentDescription: widget.itemDescription ?? 'Payment for Order',
       paymentMethods: [PaymentMethod.CARD, PaymentMethod.ACCOUNT_TRANSFER],
     );
 
     try {
-      // Initiate payment with Monnify SDK
       final TransactionResponse? response =
           await _monnify!.initializePayment(transaction: transactionDetails);
 
-      // Navigate to OrderSummaryScreen after payment initiation
       if (mounted) {
-        // We DO NOT call backend for confirmation here.
-        // We navigate directly to OrderSummaryScreen, which will then poll the backend.
-        Navigator.of(context).pushReplacementNamed(
-          OrderSummaryScreen.routeName,
-          arguments: {
-            'orderId': widget.orderId,
-            'customerId': widget.customer.id,
-            'showConfirmation': true, // Used to display an initial message
-            'transactionRef': response
-                ?.transactionReference, // Pass Monnify's transaction reference
-            'isVerifyingPayment': true, // Flag to OrderSummary to start polling
-          },
-        );
+        // UPDATE 2: Corrected 'response.status' to 'response.transactionStatus'
+        // UPDATE 3: Used TransactionStatus enum for comparison (e.g., TransactionStatus.PAID.toString().split('.').last to get 'PAID')
+        if (response != null &&
+            response.transactionStatus ==
+                TransactionStatus.PAID.toString().split('.').last) {
+          _showFeedbackSnackbar(
+              'Payment initiated. Verifying status with server...',
+              isSuccess: true);
+          try {
+            final String confirmedStatus =
+                await _apiService.getOrderPaymentStatus(widget.orderId);
+
+            if (mounted) {
+              if (confirmedStatus == 'Completed') {
+                _showFeedbackSnackbar(
+                    'Payment successfully confirmed by server!',
+                    isSuccess: true);
+                Navigator.of(context).pushReplacementNamed(
+                  OrderSummaryScreen.routeName,
+                  arguments: {
+                    'orderId': widget.orderId,
+                    'customerId': widget.customer.id,
+                    'showConfirmation': true,
+                    'transactionRef': response.transactionReference,
+                    'isVerifyingPayment': false,
+                  },
+                );
+              } else {
+                _showFeedbackSnackbar(
+                    'Payment confirmation pending or failed. Please check order details later.',
+                    isError: true);
+                Navigator.of(context).pushReplacementNamed(
+                  OrderSummaryScreen.routeName,
+                  arguments: {
+                    'orderId': widget.orderId,
+                    'customerId': widget.customer.id,
+                    'showConfirmation': false,
+                    'transactionRef': response.transactionReference,
+                    'isVerifyingPayment': true,
+                  },
+                );
+              }
+            }
+          } catch (e) {
+            if (mounted) {
+              _showFeedbackSnackbar(
+                  'Error communicating with server for payment confirmation: ${e.toString().replaceFirst("Exception: ", "")}',
+                  isError: true);
+              Navigator.of(context).pushReplacementNamed(
+                OrderSummaryScreen.routeName,
+                arguments: {
+                  'orderId': widget.orderId,
+                  'customerId': widget.customer.id,
+                  'showConfirmation': false,
+                  'transactionRef': response.transactionReference,
+                  'isVerifyingPayment': true,
+                },
+              );
+            }
+          }
+          // UPDATE 4: Corrected 'response.status' to 'response.transactionStatus' and used TransactionStatus enum.
+        } else if (response != null &&
+            response.transactionStatus ==
+                TransactionStatus.CANCELLED.toString().split('.').last) {
+          _showFeedbackSnackbar('Payment cancelled by user.', isError: true);
+          if (mounted) {
+            setState(() {
+              _isProcessing = false;
+              _statusMessage = 'Pay Now';
+            });
+          }
+        } else {
+          // UPDATE 5: Removed 'response.message' as it's not a property of TransactionResponse.
+          // Provided a generic error message.
+          _showFeedbackSnackbar('Payment failed: Unknown error from Monnify.',
+              isError: true);
+          if (mounted) {
+            setState(() {
+              _isProcessing = false;
+              _statusMessage = 'Pay Now';
+            });
+          }
+        }
+      } else {
+        _showFeedbackSnackbar(
+            'Payment process ended unexpectedly. Please check your order status.',
+            isError: true);
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed(
+            OrderSummaryScreen.routeName,
+            arguments: {
+              'orderId': widget.orderId,
+              'customerId': widget.customer.id,
+              'showConfirmation': false,
+              'transactionRef': null,
+              'isVerifyingPayment': true,
+            },
+          );
+        }
       }
     } catch (e) {
-      // Catch errors that occur *before* the Monnify WebView successfully loads/completes
       if (mounted) {
         setState(() {
           _isProcessing = false;
           _statusMessage = 'Pay Now';
         });
-        _showFeedbackSnackbar("Payment initiation failed: ${e.toString()}",
+        _showFeedbackSnackbar(
+            "Payment initiation failed: ${e.toString().replaceFirst("Exception: ", "")}",
             isError: true);
-        print('Monnify SDK initiation error: $e'); // For debugging in console
+        print('Monnify SDK initiation error: $e');
       }
     }
   }

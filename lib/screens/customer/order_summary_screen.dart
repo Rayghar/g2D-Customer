@@ -8,16 +8,20 @@ import 'package:provider/provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/card.dart';
-import './track_driver_screen.dart';
-import './chat_screen.dart';
-import './feedback_screen.dart';
+import './track_driver_screen.dart'; // Ensure this is imported if used
+import './chat_screen.dart'; // Ensure this is imported if used
+import './feedback_screen.dart'; // Ensure this is imported if used
 import './order_details_screen.dart'; // Ensure OrderDetailsScreen is imported
 import '../../models/order.dart' as app_order;
-import '../../models/driver_info_for_order.dart';
+import '../../models/driver_info_for_order.dart'; // Ensure this is imported if used
 import '../../services/api_service.dart';
 import '../customer/customer_dashboard_screen.dart';
+import '../../models/user.dart'; // Import User model, as it's typically used in this flow.
+// If not strictly needed, it can be removed.
+// import 'package:logger/logger.dart'; // Example if using external logger package
+// final logger = Logger(); // If using an external logger instance
 
-// OrderStatusStep definition
+// OrderStatusStep definition (kept as is, though it's duplicated from order_details_screen)
 class OrderStatusStep {
   final String title;
   final String? subtitle;
@@ -34,16 +38,18 @@ class OrderStatusStep {
 class OrderSummaryScreen extends StatefulWidget {
   static const String routeName = '/order_summary';
   final String orderId;
-  final bool showConfirmation;
   final String customerId;
-  final dynamic orderPayload;
+  final bool showConfirmation;
+  final String? transactionRef;
+  final bool isVerifyingPayment;
 
   const OrderSummaryScreen({
     super.key,
     required this.orderId,
-    this.showConfirmation = false,
     required this.customerId,
-    this.orderPayload,
+    this.showConfirmation = false,
+    this.transactionRef,
+    this.isVerifyingPayment = false,
   });
 
   @override
@@ -52,7 +58,8 @@ class OrderSummaryScreen extends StatefulWidget {
 
 class _OrderSummaryScreenState extends State<OrderSummaryScreen>
     with TickerProviderStateMixin {
-  bool _isLoadingOrderDetails = true;
+  bool _isLoading = true;
+  String? _errorMessage;
   app_order.Order? _orderData;
 
   late AnimationController _entryAnimController;
@@ -61,15 +68,18 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
 
   final ApiService _apiService = ApiService();
 
-  // This list seems to be a duplicate from order_details_screen and could be centralized
   final List<OrderStatusStep> _statusTimelineSteps = [
     OrderStatusStep(
         statusKey: 'Order Placed',
         title: 'Order Placed',
         icon: Icons.playlist_add_check_circle_outlined,
         subtitle: "We've received your order."),
-    // ... other statuses
   ];
+
+  Timer? _pollingTimer;
+  int _pollAttempt = 0;
+  final int _maxPollAttempts = 10;
+  final Duration _pollInterval = const Duration(seconds: 3);
 
   @override
   void initState() {
@@ -83,65 +93,32 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
             CurvedAnimation(
                 parent: _entryAnimController, curve: Curves.easeOutCubic));
 
-    if (widget.showConfirmation && widget.orderPayload != null) {
-      _processOrderPayload(widget.orderPayload!);
-    } else {
-      _fetchOrderDetails();
-    }
-  }
-
-  void _processOrderPayload(dynamic payload) {
-    try {
-      app_order.Order? initialOrder;
-      if (payload is app_order.Order) {
-        initialOrder = payload;
-      } else if (payload is Map<String, dynamic>) {
-        initialOrder = app_order.Order.fromJson(payload);
-      }
-
-      if (initialOrder != null) {
-        setState(() {
-          _orderData = initialOrder;
-          _isLoadingOrderDetails = false;
-        });
-        _entryAnimController.forward();
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _showFeedbackSnackbar(
-              'Order #${_orderData?.shortOrderId ?? widget.orderId.split('-').lastOrNull?.toUpperCase() ?? widget.orderId.toUpperCase()} confirmed! Payment details being verified.',
-              context,
-              isSuccess: true);
-          Future.delayed(const Duration(seconds: 5), () {
-            if (mounted &&
-                (_orderData?.paymentStatus?.toLowerCase() == 'pending' ||
-                    _orderData?.status?.toLowerCase() == 'pending payment')) {
-              _fetchOrderDetails();
-            }
-          });
-        });
-      } else {
-        throw Exception("Invalid orderPayload type.");
-      }
-    } catch (e) {
-      print("Error processing orderPayload in OrderSummaryScreen: $e");
-      _fetchOrderDetails();
+    _fetchOrderDetails(); // Always fetch initial order details
+    if (widget.isVerifyingPayment) {
+      _startPollingPaymentStatus();
     }
   }
 
   @override
   void dispose() {
     _entryAnimController.dispose();
+    _pollingTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> _fetchOrderDetails() async {
+  Future<void> _fetchOrderDetails({bool forceRefresh = false}) async {
     if (!mounted) return;
-    setState(() => _isLoadingOrderDetails = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
     try {
       final fetchedOrder = await _apiService.getOrderDetails(widget.orderId);
       if (mounted) {
         setState(() {
           _orderData = fetchedOrder;
-          _isLoadingOrderDetails = false;
+          _isLoading = false;
         });
         _entryAnimController.forward();
       }
@@ -149,17 +126,67 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
       if (mounted) {
         print("Error fetching order details in OrderSummaryScreen: $e");
         setState(() {
-          _isLoadingOrderDetails = false;
+          _errorMessage = e.toString().replaceFirst("Exception: ", "");
+          _isLoading = false;
         });
         _showFeedbackSnackbar(
             'Failed to load order details: ${e.toString().replaceFirst("Exception: ", "")}',
-            context,
             isError: true);
       }
     }
   }
 
-  void _showFeedbackSnackbar(String message, BuildContext context,
+  void _startPollingPaymentStatus() {
+    _pollingTimer = Timer.periodic(_pollInterval, (timer) async {
+      _pollAttempt++;
+      if (_pollAttempt > _maxPollAttempts) {
+        timer.cancel();
+        _showFeedbackSnackbar(
+            'Payment verification timed out. Please check order details later.',
+            isError: true);
+        return;
+      }
+
+      try {
+        final String currentPaymentStatus =
+            await _apiService.getOrderPaymentStatus(widget.orderId);
+        if (mounted) {
+          // UPDATE 1: Removed direct assignment to _orderData?.paymentStatus as it's final.
+          // Instead, if status changes to Completed/Failed, re-fetch full order details.
+          // This ensures _orderData is fully reloaded with the new immutable state.
+          if (_orderData?.paymentStatus != currentPaymentStatus) {
+            // Only re-fetch if the status actually changed to avoid unnecessary API calls
+            await _fetchOrderDetails();
+          }
+        }
+
+        if (currentPaymentStatus == 'Completed') {
+          timer.cancel();
+          _showFeedbackSnackbar('Payment confirmed by server!',
+              isSuccess: true);
+          // _fetchOrderDetails(forceRefresh: true); // Already called above if status changed
+        } else if (currentPaymentStatus == 'Failed' ||
+            currentPaymentStatus.contains('Discrepancy')) {
+          timer.cancel();
+          _showFeedbackSnackbar(
+              'Payment failed or has an issue. Please contact support.',
+              isError: true);
+          // _fetchOrderDetails(forceRefresh: true); // Already called above if status changed
+        }
+      } catch (e) {
+        print(
+            'Error during polling payment status: $e'); // Using print, replace with logger if available
+        if (_pollAttempt == _maxPollAttempts) {
+          timer.cancel();
+          _showFeedbackSnackbar(
+              'Failed to verify payment status due to network issues.',
+              isError: true);
+        }
+      }
+    });
+  }
+
+  void _showFeedbackSnackbar(String message,
       {bool isError = false, bool isSuccess = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
@@ -189,7 +216,6 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
     } else {
       _showFeedbackSnackbar(
           'Tracking details are not available. Customer or Order ID missing.',
-          context,
           isError: true);
     }
   }
@@ -199,6 +225,10 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
     final themeProvider = Provider.of<ThemeProvider>(context);
     final appBarTitle =
         widget.showConfirmation ? 'Order Confirmed!' : 'Order Summary';
+    final currencyFormat = NumberFormat.currency(
+        locale: 'en_NG',
+        symbol: '₦',
+        decimalDigits: 2); // Corrected to 2 decimal places
 
     return Scaffold(
       backgroundColor: themeProvider.appSecondaryBackground,
@@ -208,7 +238,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         shadowColor: themeProvider.cardShadowColorGlobal.withOpacity(0.3),
         title: Text(appBarTitle,
             style: GoogleFonts.inter(
-                color: widget.showConfirmation
+                color: widget.showConfirmation &&
+                        _orderData?.paymentStatus == 'Completed'
                     ? themeProvider.successColor
                     : themeProvider.primaryText,
                 fontWeight: FontWeight.w600,
@@ -226,10 +257,11 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
               }
             }),
       ),
-      body: _isLoadingOrderDetails
+      body: _isLoading
           ? _buildLoadingState(themeProvider)
-          : _orderData == null
-              ? _buildErrorState(themeProvider)
+          : _errorMessage != null || _orderData == null
+              ? _buildErrorState(
+                  themeProvider, _errorMessage ?? "Order summary not found.")
               : FadeTransition(
                   opacity: _fadeAnimation,
                   child: SlideTransition(
@@ -240,7 +272,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (widget.showConfirmation)
-                            _buildConfirmationHeaderCard(themeProvider),
+                            _buildConfirmationMessage(themeProvider),
+                          const SizedBox(height: 16),
                           _buildOrderInfoCard(_orderData!, themeProvider),
                           const SizedBox(height: 16),
                           _buildItemsOrderedCard(_orderData!, themeProvider),
@@ -250,7 +283,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                                 'Order Placed',
                                 'Order Confirmed',
                                 'Processing',
-                                'Cancelled'
+                                'Cancelled',
+                                'Pending Payment' // Include this status for driver info visibility
                               ].contains(_orderData!.status))
                             Padding(
                               padding: const EdgeInsets.only(bottom: 16.0),
@@ -273,28 +307,13 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
   }
 
   Widget _buildLoadingState(ThemeProvider themeProvider) {
-    return Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(children: [
-          CustomCard(
-              color: themeProvider.cardBackground,
-              child: Container(
-                  height: 150,
-                  alignment: Alignment.center,
-                  child: CircularProgressIndicator(
-                      color: themeProvider.gas2doorPrimaryBlue))),
-          const SizedBox(height: 16),
-          CustomCard(
-              color: themeProvider.cardBackground,
-              child: Container(
-                  height: 100,
-                  alignment: Alignment.center,
-                  child: CircularProgressIndicator(
-                      color: themeProvider.gas2doorPrimaryBlue))),
-        ]));
+    return Center(
+      child:
+          CircularProgressIndicator(color: themeProvider.gas2doorPrimaryBlue),
+    );
   }
 
-  Widget _buildErrorState(ThemeProvider themeProvider) {
+  Widget _buildErrorState(ThemeProvider themeProvider, String message) {
     return Center(
         child: Padding(
             padding: const EdgeInsets.all(20),
@@ -309,7 +328,7 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                       fontSize: 18,
                       fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
-              Text('Could not fetch the order details. Please try again.',
+              Text(message,
                   style: GoogleFonts.inter(
                       color: themeProvider.secondaryText, fontSize: 15),
                   textAlign: TextAlign.center),
@@ -321,34 +340,52 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
             ])));
   }
 
-  Widget _buildConfirmationHeaderCard(ThemeProvider themeProvider) {
+  Widget _buildConfirmationMessage(ThemeProvider themeProvider) {
+    String message = '';
+    IconData icon = Icons.check_circle_outline_rounded;
+    Color color = themeProvider.successColor;
+
+    // UPDATE 2: Dynamically determine confirmation message based on payment status.
+    if (_orderData?.paymentStatus == 'Completed') {
+      message = 'Your order has been placed and payment confirmed!';
+      icon = Icons.check_circle_outline_rounded;
+      color = themeProvider.successColor;
+    } else if (_orderData?.paymentStatus == 'Pending') {
+      message = 'Order placed. Payment is pending confirmation.';
+      icon = Icons.pending_actions_outlined;
+      color = themeProvider.warningColor;
+    } else if (_orderData?.paymentStatus == 'Failed') {
+      message = 'Order placed, but payment failed. Please try again.';
+      icon = Icons.error_outline_rounded;
+      color = themeProvider.errorColor;
+    } else if (_orderData?.paymentStatus?.contains('Discrepancy') ?? false) {
+      // Handle discrepancy status
+      message =
+          'Order placed, but payment amount mismatch. Please contact support.';
+      icon = Icons.warning_amber_rounded;
+      color = themeProvider.errorColor;
+    } else {
+      message = 'Order placed. Verifying payment...';
+      icon = Icons.info_outline;
+      color = themeProvider.gas2doorPrimaryBlue;
+    }
+
     return CustomCard(
-      color: themeProvider.successColor.withOpacity(0.1),
-      borderRadius: themeProvider.cardBorderRadiusValue,
-      margin: const EdgeInsets.only(bottom: 20),
+      color: color.withOpacity(0.1),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(16.0),
         child: Row(
           children: [
-            Icon(Icons.check_circle_outline_rounded,
-                color: themeProvider.successColor, size: 40),
-            const SizedBox(width: 16),
+            Icon(icon, size: 30, color: color),
+            const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Order Confirmed!',
-                      style: GoogleFonts.inter(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: themeProvider.successColor)),
-                  const SizedBox(height: 4),
-                  Text(
-                      'Your order #${_orderData?.shortOrderId ?? widget.orderId.split('-').lastOrNull?.toUpperCase() ?? widget.orderId.toUpperCase()} has been placed successfully.',
-                      style: GoogleFonts.inter(
-                          fontSize: 14,
-                          color: themeProvider.primaryText.withOpacity(0.9))),
-                ],
+              child: Text(
+                message,
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: themeProvider.primaryText,
+                ),
               ),
             ),
           ],
@@ -368,7 +405,7 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         statusIcon = Icons.check_circle_outline_rounded;
         statusColor = themeProvider.successColor;
         break;
-      case 'order confirmed':
+      case 'order confirmed': // This status might be redundant if 'Order Placed' is used after payment
         statusIcon = Icons.thumb_up_alt_outlined;
         statusColor = themeProvider.gas2doorPrimaryBlue;
         break;
@@ -391,6 +428,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         statusColor = themeProvider.warningColor;
         break;
       case 'cancelled':
+      case 'canceled by customer': // Ensure consistency with your backend statuses
+      case 'canceled by admin':
         statusIcon = Icons.cancel_outlined;
         statusColor = themeProvider.errorColor;
         break;
@@ -401,6 +440,14 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
       case 'pending payment':
         statusIcon = Icons.payment_outlined;
         statusColor = themeProvider.warningColor.withOpacity(0.8);
+        break;
+      case 'payment discrepancy': // If you have this status from backend
+        statusIcon = Icons.warning_amber_rounded;
+        statusColor = themeProvider.errorColor;
+        break;
+      case 'failed': // For general failed status
+        statusIcon = Icons.error_outline_rounded;
+        statusColor = themeProvider.errorColor;
         break;
       default:
         statusIcon = Icons.info_outline;
@@ -454,6 +501,33 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                 ],
               ),
             ),
+            // UPDATE 3: Modified _buildDetailRow to directly pass text style properties
+            // as 'valueColor' is not a parameter of the internal _buildDetailRow.
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("Payment Status:",
+                      style: GoogleFonts.inter(
+                          fontSize: 14, color: themeProvider.secondaryText)),
+                  Text(order.paymentStatus,
+                      style: GoogleFonts.inter(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color:
+                              order.paymentStatus.toLowerCase() == 'completed'
+                                  ? themeProvider.successColor
+                                  : (order.paymentStatus.toLowerCase() ==
+                                              'failed' ||
+                                          order.paymentStatus
+                                              .toLowerCase()
+                                              .contains('discrepancy')
+                                      ? themeProvider.errorColor
+                                      : themeProvider.warningColor))),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -462,6 +536,11 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
 
   Widget _buildItemsOrderedCard(
       app_order.Order order, ThemeProvider themeProvider) {
+    final currencyFormat =
+        NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 0);
+    final currencyFormatWithKobo =
+        NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 2);
+
     return CustomCard(
       color: themeProvider.cardBackground,
       borderRadius: themeProvider.cardBorderRadiusValue,
@@ -495,7 +574,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                                 color: themeProvider.primaryText,
                                 fontWeight: FontWeight.w500))),
                     Text(
-                        '₦${NumberFormat("#,##0").format((item.unitPrice * item.quantity) / 100)}',
+                        currencyFormatWithKobo
+                            .format(item.unitPrice * item.quantity / 100),
                         style: GoogleFonts.inter(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
@@ -713,7 +793,6 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                       if (order.customer?.id == null) {
                         _showFeedbackSnackbar(
                             "Cannot initiate chat: User details missing.",
-                            context,
                             isError: true);
                         return;
                       }
@@ -740,9 +819,30 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
   Widget _buildActionButtons(app_order.Order order, ThemeProvider themeProvider,
       BuildContext context) {
     List<Widget> buttons = [];
-    String normalizedStatus = order.status.toLowerCase();
 
-    buttons.add(CustomButton(
+    // UPDATE 4: Added a 'View Full Order Details' button.
+    buttons.add(
+      CustomButton(
+        text: 'View Full Order Details',
+        onPressed: () {
+          HapticFeedback.lightImpact();
+          // Navigates to OrderDetailsScreen, replacing the current screen in the navigation stack.
+          Navigator.of(context).pushReplacementNamed(
+            OrderDetailsScreen.routeName,
+            arguments: {
+              'orderId': order.id,
+              'customerId': widget.customerId,
+            },
+          );
+        },
+        color: themeProvider.gas2doorPrimaryBlue, // Changed color for contrast
+        icon: Icon(Icons.info_outline_rounded, color: Colors.white),
+      ),
+    );
+
+    // Always provide a return to dashboard button
+    buttons.add(
+      CustomButton(
         text: 'Return to Dashboard',
         onPressed: () {
           Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
@@ -750,9 +850,12 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         },
         color: themeProvider.gas2doorTeal,
         icon: Icon(Icons.dashboard_outlined,
-            color: themeProvider.infoColorOnDarkBgs, size: 20)));
+            color: themeProvider.infoColorOnDarkBgs, size: 20),
+      ),
+    );
 
-    if (normalizedStatus == "delivered") {
+    // If order is delivered, allow feedback
+    if (order.status.toLowerCase() == "delivered") {
       buttons.add(CustomButton(
         text: 'Submit Feedback',
         onPressed: () {
@@ -778,8 +881,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                 fontWeight: FontWeight.w500)),
         onPressed: () {
           HapticFeedback.lightImpact();
-          _showFeedbackSnackbar(
-              'Support channel not yet implemented.', context);
+          _showFeedbackSnackbar('Support channel not yet implemented.',
+              isError: false); // Removed BuildContext context argument
         },
         style: TextButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 10)),
@@ -793,5 +896,35 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
             .map((button) => Padding(
                 padding: const EdgeInsets.only(top: 14.0), child: button))
             .toList());
+  }
+
+  // Helper method for status color (kept as is, but can be reviewed for new statuses)
+  Color _getStatusColor(String status, ThemeProvider themeProvider) {
+    String normalizedStatus = status.toLowerCase();
+    if (normalizedStatus.contains('delivered')) {
+      return themeProvider.successColor;
+    } else if (normalizedStatus.contains('cancelled')) {
+      return themeProvider.errorColor;
+    } else if (normalizedStatus.contains('confirmed')) {
+      return themeProvider.gas2doorPrimaryBlue;
+    } else if (normalizedStatus.contains('placed')) {
+      return themeProvider.gas2doorTeal;
+    } else if (normalizedStatus.contains('driver assigned')) {
+      return themeProvider.warningColor;
+    } else if (normalizedStatus.contains('enroute') ||
+        (normalizedStatus.contains('delivery') &&
+            !normalizedStatus.contains('delivered'))) {
+      return themeProvider.warningColor;
+    } else if (normalizedStatus.contains('processing') ||
+        normalizedStatus.contains('refilling')) {
+      return themeProvider.warningColor;
+    } else if (normalizedStatus.contains('pending payment')) {
+      return themeProvider.secondaryText.withOpacity(0.8);
+    } else if (normalizedStatus.contains('payment discrepancy')) {
+      return themeProvider.errorColor;
+    } else if (normalizedStatus.contains('failed')) {
+      return themeProvider.errorColor;
+    }
+    return themeProvider.secondaryText;
   }
 }
