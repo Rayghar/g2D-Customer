@@ -8,20 +8,16 @@ import 'package:provider/provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/card.dart';
-import './track_driver_screen.dart'; // Ensure this is imported if used
-import './chat_screen.dart'; // Ensure this is imported if used
-import './feedback_screen.dart'; // Ensure this is imported if used
-import './order_details_screen.dart'; // Ensure OrderDetailsScreen is imported
+import './track_driver_screen.dart';
+import './chat_screen.dart';
+import './feedback_screen.dart';
+import './order_details_screen.dart';
 import '../../models/order.dart' as app_order;
-import '../../models/driver_info_for_order.dart'; // Ensure this is imported if used
+import '../../models/driver_info_for_order.dart';
 import '../../services/api_service.dart';
 import '../customer/customer_dashboard_screen.dart';
-import '../../models/user.dart'; // Import User model, as it's typically used in this flow.
-// If not strictly needed, it can be removed.
-// import 'package:logger/logger.dart'; // Example if using external logger package
-// final logger = Logger(); // If using an external logger instance
+import '../../models/user.dart';
 
-// OrderStatusStep definition (kept as is, though it's duplicated from order_details_screen)
 class OrderStatusStep {
   final String title;
   final String? subtitle;
@@ -84,6 +80,11 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
   @override
   void initState() {
     super.initState();
+    print(
+        '[OrderSummaryScreen] initState: Screen initialized for Order ID: ${widget.orderId}');
+    print(
+        '[OrderSummaryScreen] initState: showConfirmation: ${widget.showConfirmation}, isVerifyingPayment: ${widget.isVerifyingPayment}');
+
     _entryAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -93,7 +94,7 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
             CurvedAnimation(
                 parent: _entryAnimController, curve: Curves.easeOutCubic));
 
-    _fetchOrderDetails(); // Always fetch initial order details
+    _fetchOrderDetails();
     if (widget.isVerifyingPayment) {
       _startPollingPaymentStatus();
     }
@@ -101,17 +102,25 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
 
   @override
   void dispose() {
+    print(
+        '[OrderSummaryScreen] dispose: Disposing controllers and stopping polling timer.');
     _entryAnimController.dispose();
     _pollingTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _fetchOrderDetails({bool forceRefresh = false}) async {
-    if (!mounted) return;
+    if (!mounted) {
+      print(
+          '[OrderSummaryScreen] _fetchOrderDetails: Widget not mounted, aborting fetch.');
+      return;
+    }
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
+    print(
+        '[OrderSummaryScreen] _fetchOrderDetails: Fetching order details for Order ID: ${widget.orderId}. Force Refresh: $forceRefresh');
 
     try {
       final fetchedOrder = await _apiService.getOrderDetails(widget.orderId);
@@ -121,10 +130,12 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
           _isLoading = false;
         });
         _entryAnimController.forward();
+        print(
+            '[OrderSummaryScreen] _fetchOrderDetails: Order details fetched successfully. Status: ${_orderData?.status}, Payment Status: ${_orderData?.paymentStatus}');
       }
     } catch (e) {
       if (mounted) {
-        print("Error fetching order details in OrderSummaryScreen: $e");
+        print("[OrderSummaryScreen] Error fetching order details: $e");
         setState(() {
           _errorMessage = e.toString().replaceFirst("Exception: ", "");
           _isLoading = false;
@@ -137,26 +148,34 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
   }
 
   void _startPollingPaymentStatus() {
+    print(
+        '[OrderSummaryScreen] _startPollingPaymentStatus: Starting polling for payment status (interval: ${_pollInterval.inSeconds}s, max attempts: $_maxPollAttempts).');
     _pollingTimer = Timer.periodic(_pollInterval, (timer) async {
       _pollAttempt++;
+      print(
+          '[OrderSummaryScreen] _startPollingPaymentStatus: Poll attempt $_pollAttempt for Order ID: ${widget.orderId}.');
+
       if (_pollAttempt > _maxPollAttempts) {
         timer.cancel();
         _showFeedbackSnackbar(
             'Payment verification timed out. Please check order details later.',
             isError: true);
+        print(
+            '[OrderSummaryScreen] _startPollingPaymentStatus: Max poll attempts reached. Polling stopped.');
         return;
       }
 
       try {
         final String currentPaymentStatus =
             await _apiService.getOrderPaymentStatus(widget.orderId);
+        print(
+            '[OrderSummaryScreen] _startPollingPaymentStatus: Backend reported payment status: "$currentPaymentStatus" for Order ID: ${widget.orderId}.');
+
         if (mounted) {
-          // UPDATE 1: Removed direct assignment to _orderData?.paymentStatus as it's final.
-          // Instead, if status changes to Completed/Failed, re-fetch full order details.
-          // This ensures _orderData is fully reloaded with the new immutable state.
           if (_orderData?.paymentStatus != currentPaymentStatus) {
-            // Only re-fetch if the status actually changed to avoid unnecessary API calls
-            await _fetchOrderDetails();
+            print(
+                '[OrderSummaryScreen] _startPollingPaymentStatus: Payment status changed from "${_orderData?.paymentStatus}" to "$currentPaymentStatus". Refetching full order details.');
+            await _fetchOrderDetails(); // This will update _orderData
           }
         }
 
@@ -164,23 +183,29 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
           timer.cancel();
           _showFeedbackSnackbar('Payment confirmed by server!',
               isSuccess: true);
-          // _fetchOrderDetails(forceRefresh: true); // Already called above if status changed
+          print(
+              '[OrderSummaryScreen] _startPollingPaymentStatus: Payment Completed. Polling stopped.');
         } else if (currentPaymentStatus == 'Failed' ||
             currentPaymentStatus.contains('Discrepancy')) {
           timer.cancel();
           _showFeedbackSnackbar(
               'Payment failed or has an issue. Please contact support.',
               isError: true);
-          // _fetchOrderDetails(forceRefresh: true); // Already called above if status changed
+          print(
+              '[OrderSummaryScreen] _startPollingPaymentStatus: Payment Failed or Discrepancy. Polling stopped.');
+        } else {
+          print(
+              '[OrderSummaryScreen] _startPollingPaymentStatus: Payment still pending: "$currentPaymentStatus". Continuing polling.');
         }
       } catch (e) {
-        print(
-            'Error during polling payment status: $e'); // Using print, replace with logger if available
+        print('[OrderSummaryScreen] Error during polling payment status: $e');
         if (_pollAttempt == _maxPollAttempts) {
           timer.cancel();
           _showFeedbackSnackbar(
               'Failed to verify payment status due to network issues.',
               isError: true);
+          print(
+              '[OrderSummaryScreen] _startPollingPaymentStatus: Polling stopped due to network error and max attempts.');
         }
       }
     });
@@ -188,7 +213,10 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
 
   void _showFeedbackSnackbar(String message,
       {bool isError = false, bool isSuccess = false}) {
-    if (!mounted) return;
+    if (!mounted) {
+      print('[OrderSummaryScreen] Snackbar not shown, widget not mounted.');
+      return;
+    }
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
@@ -203,11 +231,17 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
       margin: const EdgeInsets.all(12),
       elevation: 6,
     ));
+    print(
+        '[OrderSummaryScreen] Showing Snackbar: "$message" (isError: $isError, isSuccess: $isSuccess)');
   }
 
   void _navigateToOrderDetailsScreen() {
     HapticFeedback.lightImpact();
+    print(
+        '[OrderSummaryScreen] _navigateToOrderDetailsScreen: User initiated navigation to Order Details.');
     if (_orderData?.id != null && widget.customerId.isNotEmpty) {
+      print(
+          '[OrderSummaryScreen] Navigating to OrderDetailsScreen for Order ID: ${_orderData!.id}');
       Navigator.of(context, rootNavigator: true)
           .pushNamed(OrderDetailsScreen.routeName, arguments: {
         'orderId': _orderData!.id,
@@ -217,6 +251,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
       _showFeedbackSnackbar(
           'Tracking details are not available. Customer or Order ID missing.',
           isError: true);
+      print(
+          '[OrderSummaryScreen] Cannot navigate to Order Details: Order or Customer ID missing.');
     }
   }
 
@@ -225,10 +261,11 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
     final themeProvider = Provider.of<ThemeProvider>(context);
     final appBarTitle =
         widget.showConfirmation ? 'Order Confirmed!' : 'Order Summary';
-    final currencyFormat = NumberFormat.currency(
-        locale: 'en_NG',
-        symbol: '₦',
-        decimalDigits: 2); // Corrected to 2 decimal places
+    final currencyFormat =
+        NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 2);
+
+    print(
+        '[OrderSummaryScreen] build: Rebuilding OrderSummaryScreen. AppBarTitle: $appBarTitle');
 
     return Scaffold(
       backgroundColor: themeProvider.appSecondaryBackground,
@@ -248,6 +285,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
             icon: Icon(Icons.arrow_back_ios_new_rounded,
                 color: themeProvider.primaryText),
             onPressed: () {
+              print(
+                  '[OrderSummaryScreen] AppBar back button pressed. showConfirmation: ${widget.showConfirmation}');
               if (widget.showConfirmation) {
                 Navigator.of(context, rootNavigator: true)
                     .pushNamedAndRemoveUntil(
@@ -284,7 +323,7 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                                 'Order Confirmed',
                                 'Processing',
                                 'Cancelled',
-                                'Pending Payment' // Include this status for driver info visibility
+                                'Pending Payment'
                               ].contains(_orderData!.status))
                             Padding(
                               padding: const EdgeInsets.only(bottom: 16.0),
@@ -307,6 +346,7 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
   }
 
   Widget _buildLoadingState(ThemeProvider themeProvider) {
+    print('[OrderSummaryScreen] Displaying loading state.');
     return Center(
       child:
           CircularProgressIndicator(color: themeProvider.gas2doorPrimaryBlue),
@@ -314,6 +354,7 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
   }
 
   Widget _buildErrorState(ThemeProvider themeProvider, String message) {
+    print('[OrderSummaryScreen] Displaying error state: $message');
     return Center(
         child: Padding(
             padding: const EdgeInsets.all(20),
@@ -335,7 +376,10 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
               const SizedBox(height: 24),
               CustomButton(
                   text: 'Retry',
-                  onPressed: _fetchOrderDetails,
+                  onPressed: () {
+                    print('[OrderSummaryScreen] Retry button pressed.');
+                    _fetchOrderDetails();
+                  },
                   color: themeProvider.gas2doorPrimaryBlue),
             ])));
   }
@@ -345,29 +389,32 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
     IconData icon = Icons.check_circle_outline_rounded;
     Color color = themeProvider.successColor;
 
-    // UPDATE 2: Dynamically determine confirmation message based on payment status.
     if (_orderData?.paymentStatus == 'Completed') {
       message = 'Your order has been placed and payment confirmed!';
       icon = Icons.check_circle_outline_rounded;
       color = themeProvider.successColor;
+      print('[OrderSummaryScreen] Confirmation message: Payment Completed.');
     } else if (_orderData?.paymentStatus == 'Pending') {
       message = 'Order placed. Payment is pending confirmation.';
       icon = Icons.pending_actions_outlined;
       color = themeProvider.warningColor;
+      print('[OrderSummaryScreen] Confirmation message: Payment Pending.');
     } else if (_orderData?.paymentStatus == 'Failed') {
       message = 'Order placed, but payment failed. Please try again.';
       icon = Icons.error_outline_rounded;
       color = themeProvider.errorColor;
+      print('[OrderSummaryScreen] Confirmation message: Payment Failed.');
     } else if (_orderData?.paymentStatus?.contains('Discrepancy') ?? false) {
-      // Handle discrepancy status
       message =
           'Order placed, but payment amount mismatch. Please contact support.';
       icon = Icons.warning_amber_rounded;
       color = themeProvider.errorColor;
+      print('[OrderSummaryScreen] Confirmation message: Payment Discrepancy.');
     } else {
       message = 'Order placed. Verifying payment...';
       icon = Icons.info_outline;
       color = themeProvider.gas2doorPrimaryBlue;
+      print('[OrderSummaryScreen] Confirmation message: Payment Verifying.');
     }
 
     return CustomCard(
@@ -405,7 +452,7 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         statusIcon = Icons.check_circle_outline_rounded;
         statusColor = themeProvider.successColor;
         break;
-      case 'order confirmed': // This status might be redundant if 'Order Placed' is used after payment
+      case 'order confirmed':
         statusIcon = Icons.thumb_up_alt_outlined;
         statusColor = themeProvider.gas2doorPrimaryBlue;
         break;
@@ -428,7 +475,7 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         statusColor = themeProvider.warningColor;
         break;
       case 'cancelled':
-      case 'canceled by customer': // Ensure consistency with your backend statuses
+      case 'canceled by customer':
       case 'canceled by admin':
         statusIcon = Icons.cancel_outlined;
         statusColor = themeProvider.errorColor;
@@ -441,11 +488,11 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         statusIcon = Icons.payment_outlined;
         statusColor = themeProvider.warningColor.withOpacity(0.8);
         break;
-      case 'payment discrepancy': // If you have this status from backend
+      case 'payment discrepancy':
         statusIcon = Icons.warning_amber_rounded;
         statusColor = themeProvider.errorColor;
         break;
-      case 'failed': // For general failed status
+      case 'failed':
         statusIcon = Icons.error_outline_rounded;
         statusColor = themeProvider.errorColor;
         break;
@@ -453,6 +500,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         statusIcon = Icons.info_outline;
         statusColor = themeProvider.secondaryText;
     }
+    print(
+        '[OrderSummaryScreen] Order Info Card: Order ID: ${order.shortOrderId}, Status: ${order.status}, Payment Status: ${order.paymentStatus}');
 
     return CustomCard(
       color: themeProvider.cardBackground,
@@ -501,8 +550,6 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                 ],
               ),
             ),
-            // UPDATE 3: Modified _buildDetailRow to directly pass text style properties
-            // as 'valueColor' is not a parameter of the internal _buildDetailRow.
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 6.0),
               child: Row(
@@ -541,6 +588,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
     final currencyFormatWithKobo =
         NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 2);
 
+    print(
+        '[OrderSummaryScreen] Items Ordered Card: ${order.items.length} items.');
     return CustomCard(
       color: themeProvider.cardBackground,
       borderRadius: themeProvider.cardBorderRadiusValue,
@@ -561,6 +610,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
               itemCount: order.items.length,
               itemBuilder: (context, index) {
                 final item = order.items[index];
+                print(
+                    '[OrderSummaryScreen] Item: ${item.quantity}x ${item.productName} at ${item.unitPrice / 100} each.');
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8.0),
                   child: Row(children: [
@@ -596,6 +647,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
 
   Widget _buildDeliveryAddressCard(
       app_order.Order order, ThemeProvider themeProvider) {
+    print(
+        '[OrderSummaryScreen] Delivery Address Card: ${order.deliveryAddressSnapshot.fullAddress}');
     return CustomCard(
       color: themeProvider.cardBackground,
       borderRadius: themeProvider.cardBorderRadiusValue,
@@ -637,6 +690,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
     final currencyFormatWithKobo =
         NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 2);
 
+    print(
+        '[OrderSummaryScreen] Pricing Summary Card: Items Subtotal: ${order.itemsSubtotal / 100}, VAT: ${order.vatAmount / 100}, Service Fee: ${order.serviceFeeAmount / 100}, Delivery Fee: ${order.deliveryFee / 100}, Discount: ${order.discountAmount / 100}, Wallet Used: ${order.walletAmountUsed / 100}, Final Paid: ${order.finalAmountPaid / 100}');
     return CustomCard(
       color: themeProvider.cardBackground,
       borderRadius: themeProvider.cardBorderRadiusValue,
@@ -730,6 +785,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
 
   Widget _buildDriverInfoCard(DriverInfoForOrder driver, app_order.Order order,
       ThemeProvider themeProvider, BuildContext context) {
+    print(
+        '[OrderSummaryScreen] Driver Info Card: Driver: ${driver.name}, Vehicle: ${driver.vehicleType}, License: ${driver.licensePlate}');
     return CustomCard(
       color: themeProvider.cardBackground,
       borderRadius: themeProvider.cardBorderRadiusValue,
@@ -782,6 +839,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                       icon: Icon(Icons.call_outlined,
                           color: themeProvider.gas2doorPrimaryBlue, size: 26),
                       onPressed: () {
+                        print(
+                            '[OrderSummaryScreen] Call Driver button pressed for ${driver.name}.');
                         // Call logic can be implemented here
                       },
                       tooltip: "Call Driver"),
@@ -790,10 +849,14 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                         color: themeProvider.gas2doorPrimaryBlue, size: 26),
                     onPressed: () {
                       HapticFeedback.lightImpact();
+                      print(
+                          '[OrderSummaryScreen] Chat with Driver button pressed for ${driver.name}.');
                       if (order.customer?.id == null) {
                         _showFeedbackSnackbar(
                             "Cannot initiate chat: User details missing.",
                             isError: true);
+                        print(
+                            '[OrderSummaryScreen] Cannot initiate chat: Order customer ID is null.');
                         return;
                       }
                       Navigator.of(context, rootNavigator: true).pushNamed(
@@ -820,13 +883,13 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
       BuildContext context) {
     List<Widget> buttons = [];
 
-    // UPDATE 4: Added a 'View Full Order Details' button.
     buttons.add(
       CustomButton(
         text: 'View Full Order Details',
         onPressed: () {
           HapticFeedback.lightImpact();
-          // Navigates to OrderDetailsScreen, replacing the current screen in the navigation stack.
+          print(
+              '[OrderSummaryScreen] View Full Order Details button pressed for Order ID: ${order.id}.');
           Navigator.of(context).pushReplacementNamed(
             OrderDetailsScreen.routeName,
             arguments: {
@@ -835,16 +898,16 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
             },
           );
         },
-        color: themeProvider.gas2doorPrimaryBlue, // Changed color for contrast
+        color: themeProvider.gas2doorPrimaryBlue,
         icon: Icon(Icons.info_outline_rounded, color: Colors.white),
       ),
     );
 
-    // Always provide a return to dashboard button
     buttons.add(
       CustomButton(
         text: 'Return to Dashboard',
         onPressed: () {
+          print('[OrderSummaryScreen] Return to Dashboard button pressed.');
           Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
               CustomerDashboardScreen.routeName, (route) => false);
         },
@@ -854,12 +917,15 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
       ),
     );
 
-    // If order is delivered, allow feedback
     if (order.status.toLowerCase() == "delivered") {
+      print(
+          '[OrderSummaryScreen] Order status is "Delivered", adding Submit Feedback button.');
       buttons.add(CustomButton(
         text: 'Submit Feedback',
         onPressed: () {
           HapticFeedback.lightImpact();
+          print(
+              '[OrderSummaryScreen] Submit Feedback button pressed for Order ID: ${order.id}.');
           Navigator.of(context, rootNavigator: true).pushNamed(
               FeedbackScreen.routeName,
               arguments: {'orderId': order.id});
@@ -882,14 +948,18 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         onPressed: () {
           HapticFeedback.lightImpact();
           _showFeedbackSnackbar('Support channel not yet implemented.',
-              isError: false); // Removed BuildContext context argument
+              isError: false);
+          print('[OrderSummaryScreen] Get Help / Support button pressed.');
         },
         style: TextButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 10)),
       ),
     ));
 
-    if (buttons.isEmpty) return const SizedBox.shrink();
+    if (buttons.isEmpty) {
+      print('[OrderSummaryScreen] No action buttons to display.');
+      return const SizedBox.shrink();
+    }
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: buttons
@@ -898,7 +968,6 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
             .toList());
   }
 
-  // Helper method for status color (kept as is, but can be reviewed for new statuses)
   Color _getStatusColor(String status, ThemeProvider themeProvider) {
     String normalizedStatus = status.toLowerCase();
     if (normalizedStatus.contains('delivered')) {

@@ -4,16 +4,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-// UPDATE 1: Import TransactionStatus from monnify_payment_sdk to resolve undefined name errors.
 import 'package:monnify_payment_sdk/src/models/transaction_status.dart';
 import 'package:monnify_payment_sdk/src/models/transaction_response.dart';
 import 'package:monnify_payment_sdk/monnify_payment_sdk.dart';
 
-import '../../services/api_service.dart'; // Still needed for other API calls
+import '../../services/api_service.dart';
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/card.dart';
-import './order_summary_screen.dart'; // Navigation target
+import './order_summary_screen.dart';
 import '../../models/user.dart' as app_user;
 
 class PaymentScreen extends StatefulWidget {
@@ -45,26 +44,32 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   void initState() {
     super.initState();
+    print(
+        '[PaymentScreen] initState: Screen initialized for Order ID: ${widget.orderId}');
     _initializeMonnify();
   }
 
   Future<void> _initializeMonnify() async {
+    print(
+        '[PaymentScreen] _initializeMonnify: Attempting to initialize Monnify SDK.');
     try {
       // Hardcoded keys for analysis purposes ONLY. Not recommended for production.
-      final apiKey = "MK_TEST_L969MNXY0V"; //
-      final contractCode = "8609686503"; //
-      // Note: MONNIFY_SECRET_KEY=2Z659QCSA4GCPR0VKTPQTB81A3R7XHK4 is a backend secret and should NEVER be used client-side.
-      // It is not included in this client-side file.
+      final apiKey = "MK_TEST_L969MNXY0V";
+      final contractCode = "8609686503";
+
+      print(
+          '[PaymentScreen] _initializeMonnify: Using API Key (first 5 chars): ${apiKey.substring(0, 5)}..., Contract Code: $contractCode');
 
       if (apiKey.isEmpty || contractCode.isEmpty) {
+        print(
+            '[PaymentScreen] _initializeMonnify: Monnify credentials are empty. Throwing exception.');
         throw Exception("Monnify credentials are not configured.");
       }
 
       final monnifyInstance = await Monnify.initialize(
         apiKey: apiKey,
         contractCode: contractCode,
-        applicationMode:
-            ApplicationMode.TEST, // Use ApplicationMode.LIVE for production
+        applicationMode: ApplicationMode.TEST,
       );
 
       if (mounted) {
@@ -72,6 +77,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
           _monnify = monnifyInstance;
           _statusMessage = 'Pay Now';
         });
+        print(
+            '[PaymentScreen] _initializeMonnify: Monnify SDK initialized successfully. Status message: "Pay Now".');
       }
     } catch (e) {
       if (mounted) {
@@ -79,13 +86,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _showFeedbackSnackbar(
             'Could not initialize payment SDK: ${e.toString().replaceFirst("Exception: ", "")}',
             isError: true);
+        print(
+            '[PaymentScreen] _initializeMonnify: Monnify SDK initialization failed: $e. Status message: "Initialization Failed".');
       }
     }
   }
 
   void _showFeedbackSnackbar(String message,
       {bool isError = false, bool isSuccess = false}) {
-    if (!mounted) return;
+    if (!mounted) {
+      print('[PaymentScreen] Snackbar not shown, widget not mounted.');
+      return;
+    }
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -98,12 +110,16 @@ class _PaymentScreenState extends State<PaymentScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
+    print(
+        '[PaymentScreen] Showing Snackbar: "$message" (isError: $isError, isSuccess: $isSuccess)');
   }
 
   Future<void> _handlePayment() async {
+    print('[PaymentScreen] _handlePayment: User initiated payment process.');
     if (_monnify == null) {
       _showFeedbackSnackbar('Payment SDK not initialized. Please wait.',
           isError: true);
+      print('[PaymentScreen] _handlePayment: Monnify SDK is not initialized.');
       return;
     }
 
@@ -111,6 +127,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
       _isProcessing = true;
       _statusMessage = 'Redirecting to Monnify...';
     });
+    print(
+        '[PaymentScreen] _handlePayment: Setting _isProcessing to true, status message to "Redirecting to Monnify...".');
 
     final transactionDetails = TransactionDetails(
       amount: widget.amount / 100.0, // Convert from Kobo to Naira
@@ -122,35 +140,64 @@ class _PaymentScreenState extends State<PaymentScreen> {
       paymentMethods: [PaymentMethod.CARD, PaymentMethod.ACCOUNT_TRANSFER],
     );
 
+    print(
+        '[PaymentScreen] _handlePayment: Preparing TransactionDetails for Monnify. Amount: ${transactionDetails.amount}, Ref: ${transactionDetails.paymentReference}');
+    // FIX: Log individual properties instead of calling .toJson() on TransactionDetails
+    print('[PaymentScreen] _handlePayment: Transaction Details properties: '
+        'Amount: ${transactionDetails.amount}, '
+        'Currency: ${transactionDetails.currencyCode}, '
+        'Customer Name: ${transactionDetails.customerName}, '
+        'Customer Email: ${transactionDetails.customerEmail}, '
+        'Payment Reference: ${transactionDetails.paymentReference}, '
+        'Payment Description: ${transactionDetails.paymentDescription}, '
+        'Payment Methods: ${transactionDetails.paymentMethods.map((m) => m.toString().split('.').last).join(', ')}.');
+
     try {
       final TransactionResponse? response =
           await _monnify!.initializePayment(transaction: transactionDetails);
 
       if (mounted) {
-        // UPDATE 2: Corrected 'response.status' to 'response.transactionStatus'
-        // UPDATE 3: Used TransactionStatus enum for comparison (e.g., TransactionStatus.PAID.toString().split('.').last to get 'PAID')
-        if (response != null &&
-            response.transactionStatus ==
-                TransactionStatus.PAID.toString().split('.').last) {
+        // FIX: Log individual properties of TransactionResponse. Use `responseMessage` instead of `errorMessage`.
+        print(
+            '[PaymentScreen] _handlePayment: Monnify SDK callback received. Response properties: '
+            'Transaction Status: ${response?.transactionStatus}, '
+            'Transaction Reference: ${response?.transactionReference}, '
+            'Payment Reference: ${response?.paymentReference}, '
+            'Amount Paid: ${response?.amountPaid}, '
+            'Currency: ${response?.currencyCode}, '
+            'Payment Method: ${response?.paymentMethod}, ');
+
+        final String? monnifyTransactionStatus = response?.transactionStatus;
+
+        if (monnifyTransactionStatus ==
+            TransactionStatus.PAID.toString().split('.').last) {
           _showFeedbackSnackbar(
               'Payment initiated. Verifying status with server...',
               isSuccess: true);
+          print(
+              '[PaymentScreen] _handlePayment: Monnify reported "PAID". Now calling backend to verify payment status.');
           try {
+            print(
+                '[PaymentScreen] _handlePayment: Calling _apiService.getOrderPaymentStatus for Order ID: ${widget.orderId}');
             final String confirmedStatus =
                 await _apiService.getOrderPaymentStatus(widget.orderId);
+            print(
+                '[PaymentScreen] _handlePayment: Backend confirmed payment status as: "$confirmedStatus" for Order ID: ${widget.orderId}');
 
             if (mounted) {
               if (confirmedStatus == 'Completed') {
                 _showFeedbackSnackbar(
                     'Payment successfully confirmed by server!',
                     isSuccess: true);
+                print(
+                    '[PaymentScreen] _handlePayment: Backend confirmed "Completed". Navigating to OrderSummaryScreen (showConfirmation: true, isVerifyingPayment: false).');
                 Navigator.of(context).pushReplacementNamed(
                   OrderSummaryScreen.routeName,
                   arguments: {
                     'orderId': widget.orderId,
                     'customerId': widget.customer.id,
                     'showConfirmation': true,
-                    'transactionRef': response.transactionReference,
+                    'transactionRef': response!.transactionReference,
                     'isVerifyingPayment': false,
                   },
                 );
@@ -158,13 +205,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 _showFeedbackSnackbar(
                     'Payment confirmation pending or failed. Please check order details later.',
                     isError: true);
+                print(
+                    '[PaymentScreen] _handlePayment: Backend did NOT confirm "Completed". Status: "$confirmedStatus". Navigating to OrderSummaryScreen (isVerifyingPayment: true).');
                 Navigator.of(context).pushReplacementNamed(
                   OrderSummaryScreen.routeName,
                   arguments: {
                     'orderId': widget.orderId,
                     'customerId': widget.customer.id,
                     'showConfirmation': false,
-                    'transactionRef': response.transactionReference,
+                    'transactionRef': response!.transactionReference,
                     'isVerifyingPayment': true,
                   },
                 );
@@ -175,23 +224,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
               _showFeedbackSnackbar(
                   'Error communicating with server for payment confirmation: ${e.toString().replaceFirst("Exception: ", "")}',
                   isError: true);
+              print(
+                  '[PaymentScreen] _handlePayment: Error during backend payment confirmation check: $e. Navigating to OrderSummaryScreen (isVerifyingPayment: true).');
               Navigator.of(context).pushReplacementNamed(
                 OrderSummaryScreen.routeName,
                 arguments: {
                   'orderId': widget.orderId,
                   'customerId': widget.customer.id,
                   'showConfirmation': false,
-                  'transactionRef': response.transactionReference,
+                  'transactionRef': response!.transactionReference,
                   'isVerifyingPayment': true,
                 },
               );
             }
           }
-          // UPDATE 4: Corrected 'response.status' to 'response.transactionStatus' and used TransactionStatus enum.
-        } else if (response != null &&
-            response.transactionStatus ==
-                TransactionStatus.CANCELLED.toString().split('.').last) {
+        } else if (monnifyTransactionStatus ==
+            TransactionStatus.CANCELLED.toString().split('.').last) {
           _showFeedbackSnackbar('Payment cancelled by user.', isError: true);
+          print(
+              '[PaymentScreen] _handlePayment: Monnify reported "CANCELLED" by user.');
           if (mounted) {
             setState(() {
               _isProcessing = false;
@@ -199,10 +250,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
             });
           }
         } else {
-          // UPDATE 5: Removed 'response.message' as it's not a property of TransactionResponse.
-          // Provided a generic error message.
           _showFeedbackSnackbar('Payment failed: Unknown error from Monnify.',
               isError: true);
+          print(
+              '[PaymentScreen] _handlePayment: Monnify reported unknown or failed status: "$monnifyTransactionStatus".');
           if (mounted) {
             setState(() {
               _isProcessing = false;
@@ -214,6 +265,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _showFeedbackSnackbar(
             'Payment process ended unexpectedly. Please check your order status.',
             isError: true);
+        print(
+            '[PaymentScreen] _handlePayment: Widget unmounted during payment process, or unexpected null response from Monnify. Navigating to OrderSummaryScreen (isVerifyingPayment: true).');
         if (mounted) {
           Navigator.of(context).pushReplacementNamed(
             OrderSummaryScreen.routeName,
@@ -236,7 +289,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _showFeedbackSnackbar(
             "Payment initiation failed: ${e.toString().replaceFirst("Exception: ", "")}",
             isError: true);
-        print('Monnify SDK initiation error: $e');
+        print(
+            '[PaymentScreen] _handlePayment: Critical error initiating Monnify SDK payment: $e');
       }
     }
   }
@@ -247,6 +301,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
     final displayAmount = widget.amount / 100;
     final currencyFormat =
         NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 2);
+
+    // print('[PaymentScreen] build: Rebuilding PaymentScreen. Display Amount: $displayAmount'); // Too frequent for debug
 
     return Scaffold(
       backgroundColor: themeProvider.appSecondaryBackground,
@@ -259,7 +315,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new_rounded,
               color: themeProvider.primaryText),
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: () {
+            print('[PaymentScreen] AppBar back button pressed.');
+            Navigator.of(context).pop(false);
+          },
         ),
       ),
       body: SingleChildScrollView(
@@ -267,7 +326,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // New Order Details Card
             CustomCard(
               color: themeProvider.cardBackground,
               child: Padding(
@@ -325,7 +383,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
               ),
             ),
             const SizedBox(height: 20),
-            // Existing Secure Payment Card, slightly enhanced
             CustomCard(
               color: themeProvider.cardBackground,
               child: Padding(

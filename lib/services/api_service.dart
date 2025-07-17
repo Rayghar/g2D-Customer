@@ -4,37 +4,35 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter/material.dart'; // Re-added for BuildContext in Flutter
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Make sure this is imported if using .env for baseUrl
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../utils/constants.dart';
 import '../models/feedback.dart' as app_feedback;
 import '../models/location.dart' as app_location;
 import '../models/notification.dart';
 import '../models/user.dart' as app_user;
 import '../models/address_model.dart';
-import '../models/system_config_model.dart'; // Import the PLAIN model
-import '../models/admin/admin_config_model.dart'
-    as admin_model; // Use prefix for admin model
+import '../models/system_config_model.dart';
+import '../models/admin/admin_config_model.dart' as admin_model;
 import '../models/place_order_response_model.dart';
-import '../models/order.dart' as app_order; // Import the Order model
+import '../models/order.dart' as app_order;
 import '../models/deal_model.dart';
-import '../models/chat_thread_model.dart'; // Import the new model
-import '../models/driver_stats_model.dart'; // Import the new model
-import '../models/driver_profile_model.dart'; // Import the new model
-import '../models/admin/dashboard_stats_model.dart'; // Import the new model
+import '../models/chat_thread_model.dart';
+import '../models/driver_stats_model.dart';
+import '../models/driver_profile_model.dart';
+import '../models/admin/dashboard_stats_model.dart';
 import '../models/admin/admin_customer_summary_model.dart';
 import '../models/admin/admin_driver_summary_model.dart';
-import '../models/admin/admin_order_summary_model.dart'; // Uncommented
-import '../models/admin/admin_order_detail_model.dart'; // Corrected to plural
-import '../models/admin/admin_run_management_model.dart'
-    as admin_run_models; // Corrected to plural
+import '../models/admin/admin_order_summary_model.dart';
+import '../models/admin/admin_order_detail_model.dart';
+import '../models/admin/admin_run_management_model.dart' as admin_run_models;
 import '../models/admin/admin_driver_detail_model.dart';
 import '../models/admin/admin_customer_detail_model.dart';
 import '../models/admin/admin_promotion_model.dart';
-import '../models/referral_model.dart'; // Import ReferralModel
-import '../models/wallet_transaction.dart'; // Ensure wallet transaction model is imported if needed elsewhere
-import '../models/admin/admin_referral_summary_model.dart'; // Import AdminReferralSummaryModel
-import '../models/payment_method_model.dart'; // Added missing import for PaymentMethodModel
+import '../models/referral_model.dart';
+import '../models/wallet_transaction.dart';
+import '../models/admin/admin_referral_summary_model.dart';
+import '../models/payment_method_model.dart';
 
 class ApiService {
   final _storage = const FlutterSecureStorage();
@@ -42,13 +40,16 @@ class ApiService {
       'https://primejet-backend.onrender.com/api/v1';
 
   Future<String?> _getToken() async {
-    return await _storage.read(key: 'jwt_token');
+    final token = await _storage.read(key: 'jwt_token');
+    print(
+        '[ApiService] Fetched token: ${token != null ? 'Present' : 'Absent'}');
+    return token;
   }
 
   // Auth methods
   Future<Map<String, dynamic>> login(String email, String password) async {
     final String apiUrl = '$baseUrl/auth/login';
-    print('ApiService: Attempting login to $apiUrl');
+    print('[ApiService] Attempting login to $apiUrl for email: $email');
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
@@ -56,6 +57,8 @@ class ApiService {
         body: jsonEncode({'email': email, 'password': password}),
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] Login Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
         final token = responseBody['token'] as String?;
         final userId = responseBody['userId'] as String?;
@@ -65,6 +68,8 @@ class ApiService {
             userId != null &&
             userName != null &&
             userRole != null) {
+          print(
+              '[ApiService] Login successful for user: $userName ($userRole)');
           return {
             'token': token,
             'userId': userId,
@@ -73,14 +78,19 @@ class ApiService {
             'message': responseBody['message'] ?? 'Login successful.'
           };
         } else {
+          print(
+              '[ApiService] Login response missing essential data. Body: $responseBody');
           throw Exception('Login response missing essential data.');
         }
       } else {
         final errorMessage =
             responseBody['error'] ?? 'Login failed: ${response.statusCode}';
+        print('[ApiService] Login failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } catch (e) {
+      print(
+          '[ApiService] An unexpected error occurred during login: ${e.toString()}');
       throw Exception(
           'An unexpected error occurred during login: ${e.toString()}');
     }
@@ -88,16 +98,19 @@ class ApiService {
 
   Future<void> logout() async {
     await _storage.delete(key: 'jwt_token');
-    print('ApiService: Logged out, token deleted.');
+    print('[ApiService] Logged out, token deleted.');
   }
 
   // User methods
   Future<app_user.User> getMyProfile() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated. Please log in.');
+    if (token == null) {
+      print('[ApiService] getMyProfile: Not authenticated, token is null.');
+      throw Exception('Not authenticated. Please log in.');
+    }
 
     final String apiUrl = '$baseUrl/users/me';
-    print('ApiService: Getting my profile from $apiUrl');
+    print('[ApiService] Getting my profile from $apiUrl');
 
     try {
       final response = await http.get(
@@ -106,18 +119,20 @@ class ApiService {
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getMyProfile Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        // The response body is the user object
         return app_user.User.fromJson(responseBody);
       } else {
         final errorMessage = responseBody['error'] ?? 'Failed to get profile';
         throw Exception(errorMessage);
       }
     } on SocketException {
+      print('[ApiService] Network error fetching profile.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('ApiService: Error fetching profile: ${e.toString()}');
+      print('[ApiService] Error fetching profile: ${e.toString()}');
       rethrow;
     }
   }
@@ -125,10 +140,11 @@ class ApiService {
   Future<List<AddressModel>> getMyAddresses() async {
     final token = await _getToken();
     if (token == null) {
+      print('[ApiService] getMyAddresses: Not authenticated, token is null.');
       throw Exception('Not authenticated.');
     }
     final String apiUrl = '$baseUrl/addresses';
-    print('ApiService: Getting addresses from $apiUrl');
+    print('[ApiService] Getting addresses from $apiUrl');
 
     try {
       final response = await http.get(
@@ -139,6 +155,8 @@ class ApiService {
         },
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getMyAddresses Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
         final List<dynamic> addressesJson =
             responseBody as List<dynamic>? ?? [];
@@ -151,16 +169,20 @@ class ApiService {
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error fetching addresses: $e');
+      print('[ApiService] Error fetching addresses: $e');
       throw Exception('Failed to fetch addresses: ${e.toString()}');
     }
   }
 
   Future<AddressModel> addAddress(AddressModel address) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] addAddress: Not authenticated, token is null.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/addresses';
-    print('ApiService: Creating address via $apiUrl');
+    print(
+        '[ApiService] Creating address via $apiUrl with payload: ${address.toJson()}');
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
@@ -171,6 +193,8 @@ class ApiService {
         body: jsonEncode(address.toJson()),
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] addAddress Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 201) {
         return AddressModel.fromJson(responseBody);
       } else {
@@ -180,15 +204,19 @@ class ApiService {
         throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error creating address: ${e.toString()}');
       throw Exception('Failed to create address: ${e.toString()}');
     }
   }
 
   Future<Map<String, dynamic>> deleteAddress(String addressId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] deleteAddress: Not authenticated, token is null.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/addresses/$addressId';
-    print('ApiService: Deleting address $addressId via $apiUrl');
+    print('[ApiService] Deleting address $addressId via $apiUrl');
 
     try {
       final response = await http.delete(
@@ -199,8 +227,11 @@ class ApiService {
         },
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] deleteAddress Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        print('ApiService: Delete address successful. Response: $responseBody');
+        print(
+            '[ApiService] Delete address successful. Response: $responseBody');
         return responseBody;
       } else {
         final errorMessage = responseBody['error'] ??
@@ -209,7 +240,7 @@ class ApiService {
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error deleting address $addressId: $e');
+      print('[ApiService] Error deleting address $addressId: $e');
       throw Exception('Failed to delete address: ${e.toString()}');
     }
   }
@@ -217,8 +248,8 @@ class ApiService {
   Future<SystemConfigModel> getSystemConfig() async {
     final token = await _getToken();
 
-    final String apiUrl = '$baseUrl/config'; // Corrected endpoint path
-    print('ApiService: Getting system configuration from $apiUrl');
+    final String apiUrl = '$baseUrl/config';
+    print('[ApiService] Getting system configuration from $apiUrl');
 
     try {
       final response = await http.get(
@@ -229,24 +260,31 @@ class ApiService {
         },
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getSystemConfig Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        // Return the plain data model
         return SystemConfigModel.fromJson(responseBody);
       } else {
         throw Exception(
             responseBody['error'] ?? 'Failed to get system configuration');
       }
     } catch (e) {
+      print('[ApiService] Error fetching system config: ${e.toString()}');
       rethrow;
     }
   }
 
   Future<String> getOrderPaymentStatus(String orderId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Authentication token not found.');
+    if (token == null) {
+      print(
+          '[ApiService] getOrderPaymentStatus: Authentication token not found.');
+      throw Exception('Authentication token not found.');
+    }
 
     final String apiUrl = '$baseUrl/orders/$orderId/payment-status';
-    print('ApiService: Fetching payment status for order $orderId via $apiUrl');
+    print(
+        '[ApiService] Fetching payment status for order $orderId via $apiUrl');
 
     try {
       final response = await http.get(
@@ -258,30 +296,36 @@ class ApiService {
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getOrderPaymentStatus Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        return responseBody['paymentStatus']
-            as String; // Expects a string like 'Completed', 'Pending', 'Failed'
+        final paymentStatus = responseBody['paymentStatus'] as String;
+        print(
+            '[ApiService] getOrderPaymentStatus: Received status "$paymentStatus" for order $orderId.');
+        return paymentStatus;
       } else {
-        final errorMessage = responseBody['message'] ??
-            'Failed to fetch payment status'; // Changed from 'error' to 'message'
+        final errorMessage =
+            responseBody['message'] ?? 'Failed to fetch payment status';
+        print(
+            '[ApiService] getOrderPaymentStatus failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('Error fetching payment status: $e');
+      print('[ApiService] Error fetching payment status: $e');
       rethrow;
     }
   }
 
   // Order methods
-  /// simply creates the order and returns its details without initializing any payment.
   Future<PlaceOrderResponseModel> placeOrder(
       Map<String, dynamic> orderPayload) async {
     final token = await _getToken();
     if (token == null) {
+      print('[ApiService] placeOrder: Not authenticated to place order.');
       throw Exception('Not authenticated to place order.');
     }
     final String apiUrl = '$baseUrl/orders';
-    print('ApiService: Placing order to $apiUrl');
+    print('[ApiService] Placing order to $apiUrl with payload: $orderPayload');
 
     try {
       final response = await http.post(
@@ -294,24 +338,33 @@ class ApiService {
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] placeOrder Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 201) {
+        print(
+            '[ApiService] Order placed successfully. Order ID: ${responseBody['order']['id']}');
         return PlaceOrderResponseModel.fromJson(responseBody);
       } else {
         final errorMessage = responseBody['error'] ?? 'Order placement failed';
+        print('[ApiService] Order placement failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } catch (e) {
+      print(
+          '[ApiService] An unexpected error occurred while placing your order: ${e.toString()}');
       throw Exception('An unexpected error occurred while placing your order.');
     }
   }
 
-  // New method to fetch order by ID for polling
   Future<app_order.Order> fetchOrderById(String orderId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] fetchOrderById: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/orders/$orderId';
-    print('ApiService: Fetching order $orderId from $apiUrl');
+    print('[ApiService] Fetching order $orderId from $apiUrl');
 
     try {
       final response = await http.get(
@@ -322,28 +375,33 @@ class ApiService {
         },
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] fetchOrderById Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        print(
-            'ApiService: Order $orderId fetched successfully. Response: $responseBody');
+        print('[ApiService] Order $orderId fetched successfully.');
         return app_order.Order.fromJson(responseBody);
       } else {
         final errorMessage =
             (responseBody is Map ? responseBody['error'] : null) ??
                 (responseBody is Map ? responseBody['message'] : null) ??
                 'Failed to fetch order $orderId: ${response.statusCode}';
+        print('[ApiService] fetchOrderById failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Failed to fetch order $orderId: ${e.toString()}');
       throw Exception('Failed to fetch order $orderId: ${e.toString()}');
     }
   }
 
   Future<List<app_order.Order>> getMyOrders() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
-    final String apiUrl =
-        '$baseUrl/orders/me'; // Assuming an endpoint for user's orders
-    print('ApiService: Fetched user orders successfully.');
+    if (token == null) {
+      print('[ApiService] getMyOrders: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
+    final String apiUrl = '$baseUrl/orders/me';
+    print('[ApiService] Fetching user orders from $apiUrl');
 
     try {
       final response = await http.get(
@@ -351,29 +409,32 @@ class ApiService {
         headers: {'Authorization': 'Bearer $token'},
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getMyOrders Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
+        print('[ApiService] Fetched user orders successfully.');
         return (responseBody['orders'] as List)
             .map((json) => app_order.Order.fromJson(json))
             .toList();
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to get orders');
+        final errorMessage = responseBody['error'] ?? 'Failed to get orders';
+        print('[ApiService] getMyOrders failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching user orders: ${e.toString()}');
       rethrow;
     }
   }
 
-  // !!! IMPORTANT: The client-side confirmOrderPayment method is removed
-  // as payment confirmation is now handled securely via Monnify webhooks on the backend.
-  // The method was previously commented out, now it's fully removed as per instruction.
-
   Future<Map<String, dynamic>> cancelOrder(String orderId) async {
     final token = await _getToken();
     if (token == null) {
+      print('[ApiService] cancelOrder: Not authenticated.');
       throw Exception('Not authenticated.');
     }
     final String apiUrl = '$baseUrl/orders/$orderId';
-    print('ApiService: Attempting to cancel order $orderId via $apiUrl');
+    print('[ApiService] Attempting to cancel order $orderId via $apiUrl');
 
     try {
       final response = await http.delete(
@@ -384,8 +445,10 @@ class ApiService {
         },
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] cancelOrder Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        print('ApiService: Order cancel successful. Response: $responseBody');
+        print('[ApiService] Order cancel successful. Response: $responseBody');
         return responseBody;
       } else {
         final errorMessage =
@@ -393,20 +456,23 @@ class ApiService {
                 (responseBody is Map ? responseBody['message'] : null) ??
                 'Failed to cancel order: ${response.statusCode}';
         print(
-            'ApiService: Order cancel failed. Status: ${response.statusCode}, Error: $errorMessage');
+            '[ApiService] Order cancel failed. Status: ${response.statusCode}, Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error cancelling order $orderId: $e');
+      print('[ApiService] Error cancelling order $orderId: $e');
       throw Exception('Failed to cancel order: ${e.toString()}');
     }
   }
 
   Future<app_order.Order> getOrderDetails(String orderId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getOrderDetails: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/orders/$orderId';
-    print('ApiService: Getting order details from $apiUrl');
+    print('[ApiService] Getting order details from $apiUrl');
 
     try {
       final response = await http.get(
@@ -417,27 +483,33 @@ class ApiService {
         },
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getOrderDetails Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        print(
-            'ApiService: Order details fetched successfully. Response: $responseBody');
+        print('[ApiService] Order details fetched successfully.');
         return app_order.Order.fromJson(responseBody);
       } else {
         final errorMessage =
             (responseBody is Map ? responseBody['error'] : null) ??
                 (responseBody is Map ? responseBody['message'] : null) ??
                 'Failed to get order details: ${response.statusCode}';
+        print('[ApiService] getOrderDetails failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Failed to fetch order details: ${e.toString()}');
       throw Exception('Failed to fetch order details: ${e.toString()}');
     }
   }
 
   Future<List<app_order.Order>> getCustomerConsumptionData() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getCustomerConsumptionData: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/orders/me/consumption-data';
-    print('ApiService: Getting consumption data from $apiUrl');
+    print('[ApiService] Getting consumption data from $apiUrl');
 
     try {
       final response = await http.get(
@@ -446,30 +518,41 @@ class ApiService {
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getCustomerConsumptionData Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
+        print('[ApiService] Consumption data fetched successfully.');
         final List<dynamic> ordersJson = responseBody as List<dynamic>? ?? [];
         return ordersJson
             .map((json) =>
                 app_order.Order.fromJson(json as Map<String, dynamic>))
             .toList();
       } else {
-        throw Exception((responseBody as Map<String, dynamic>)['error'] ??
-            'Failed to get consumption data');
+        final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
+            'Failed to get consumption data';
+        print(
+            '[ApiService] getCustomerConsumptionData failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching consumption data: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Initiates a chat session for an order between the current user and a recipient.
   Future<String> initiateChatSession(
       {required String orderId, required String recipientId}) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] initiateChatSession: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/chat/initiate';
     print(
-        'ApiService: Initiating chat for order $orderId with recipient $recipientId');
+        '[ApiService] Initiating chat for order $orderId with recipient $recipientId via $apiUrl');
+    final payload = {'orderId': orderId, 'recipientId': recipientId};
+    print('[ApiService] initiateChatSession Payload: $payload');
 
     try {
       final response = await http.post(
@@ -478,32 +561,38 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({
-          'orderId': orderId,
-          'recipientId': recipientId,
-        }),
+        body: jsonEncode(payload),
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] initiateChatSession Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 201) {
+        print(
+            '[ApiService] Chat session initiated. Chat ID: ${responseBody['chatId']}');
         return responseBody['chatId'] as String;
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to initiate chat session');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to initiate chat session';
+        print('[ApiService] initiateChatSession failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error initiating chat session: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Fetches the authenticated user's wallet balance and recent transactions.
   Future<Map<String, dynamic>> getWalletDetails() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getWalletDetails: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/wallet';
-    print('ApiService: Getting wallet details from $apiUrl');
+    print('[ApiService] Getting wallet details from $apiUrl');
 
     try {
       final response = await http.get(
@@ -511,14 +600,20 @@ class ApiService {
         headers: {'Authorization': 'Bearer $token'},
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getWalletDetails Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Wallet details fetched successfully.');
         return responseBody;
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to load wallet details');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load wallet details';
+        print('[ApiService] getWalletDetails failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching wallet details: ${e.toString()}');
       rethrow;
     }
   }
@@ -529,38 +624,50 @@ class ApiService {
     required String senderId,
   }) async {
     final token = await _getToken();
-    if (token == null) return;
+    if (token == null) {
+      print('[ApiService] updateChatThread: Not authenticated.');
+      return;
+    }
 
     final String apiUrl = '$baseUrl/chat/update-thread';
-    print('ApiService: Updating chat thread $chatId');
+    print(
+        '[ApiService] Updating chat thread $chatId with last message: "$lastMessage" by sender: $senderId');
+    final payload = {
+      'chatId': chatId,
+      'lastMessage': lastMessage,
+      'senderId': senderId
+    };
+    print('[ApiService] updateChatThread Payload: $payload');
 
     try {
-      await http.post(
+      final response = await http.post(
         Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
-        body: jsonEncode({
-          'chatId': chatId,
-          'lastMessage': lastMessage,
-          'senderId': senderId,
-        }),
+        body: jsonEncode(payload),
       );
+      print(
+          '[ApiService] updateChatThread Response Status: ${response.statusCode}, Body: ${response.body}');
     } catch (e) {
-      print('ApiService: Could not update chat thread summary: $e');
+      print('[ApiService] Could not update chat thread summary: $e');
     }
   }
 
-  /// Updates the online/offline availability status for the logged-in driver.
   Future<Map<String, dynamic>> updateDriverAvailability(
       bool isAvailable) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated. Please log in.');
+    if (token == null) {
+      print('[ApiService] updateDriverAvailability: Not authenticated.');
+      throw Exception('Not authenticated. Please log in.');
+    }
 
     final String apiUrl = '$baseUrl/users/driver/availability';
     print(
-        'ApiService: Updating driver availability to $isAvailable via $apiUrl');
+        '[ApiService] Updating driver availability to $isAvailable via $apiUrl');
+    final payload = {'isAvailableOnline': isAvailable};
+    print('[ApiService] updateDriverAvailability Payload: $payload');
 
     try {
       final response = await http.put(
@@ -569,80 +676,95 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'isAvailableOnline': isAvailable}),
+        body: jsonEncode(payload),
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] updateDriverAvailability Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        // Backend returns { message, driver }
+        print('[ApiService] Driver availability updated successfully.');
         return responseBody;
       } else {
         final errorMessage =
             responseBody['error'] ?? 'Failed to update availability';
+        print(
+            '[ApiService] updateDriverAvailability failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } on SocketException {
+      print('[ApiService] Network error updating driver availability.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('ApiService: Error updating availability: ${e.toString()}');
+      print('[ApiService] Error updating driver availability: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Fetches performance statistics for the currently authenticated driver.
   Future<DriverStatsModel> getDriverStats({String period = 'allTime'}) async {
     final token = await _getToken();
-    if (token == null)
-      return DriverStatsModel
-          .empty(); // Changed: Return empty model if not auth'd
+    if (token == null) {
+      print(
+          '[ApiService] getDriverStats: Not authenticated, returning empty model.');
+      return DriverStatsModel.empty();
+    }
 
-    // Changed: API URL to match working version
     final uri = Uri.parse('$baseUrl/users/me/stats')
         .replace(queryParameters: {'period': period});
-    print('ApiService: Getting driver stats from $uri');
+    print('[ApiService] Getting driver stats from $uri');
     try {
       final response =
           await http.get(uri, headers: {'Authorization': 'Bearer $token'});
+      final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getDriverStats Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        return DriverStatsModel.fromJson(jsonDecode(response.body));
+        print('[ApiService] Driver stats fetched successfully.');
+        return DriverStatsModel.fromJson(responseBody);
       } else {
-        // If endpoint is not found or other error, return a default empty model
         print(
-            'ApiService: Failed to load driver stats (${response.statusCode}), returning default.');
+            '[ApiService] Failed to load driver stats (${response.statusCode}), returning default. Error: ${responseBody['error'] ?? responseBody['message']}');
         return DriverStatsModel.empty();
       }
     } catch (e) {
-      print('ApiService: Error fetching driver stats: $e. Returning default.');
+      print('[ApiService] Error fetching driver stats: $e. Returning default.');
       return DriverStatsModel.empty();
     }
   }
 
-  // Renamed from getDriverProfile() to getMyDriverProfile() for clarity
   Future<DriverProfileModel> getMyDriverProfile() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated. Please log in.');
+    if (token == null) {
+      print('[ApiService] getMyDriverProfile: Not authenticated.');
+      throw Exception('Not authenticated. Please log in.');
+    }
 
-    final String apiUrl = '$baseUrl/users/me'; // Uses /users/me endpoint
-    print('ApiService: Getting current driver profile from $apiUrl');
+    final String apiUrl = '$baseUrl/users/me';
+    print('[ApiService] Getting current driver profile from $apiUrl');
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getMyDriverProfile Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
+        print('[ApiService] Driver profile fetched successfully.');
         return DriverProfileModel.fromJson(responseBody);
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to get profile');
+        final errorMessage = responseBody['error'] ?? 'Failed to get profile';
+        print('[ApiService] getMyDriverProfile failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } on SocketException {
+      print('[ApiService] Network error fetching driver profile.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('ApiService: Error fetching driver profile: ${e.toString()}');
+      print('[ApiService] Error fetching driver profile: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Allows a driver to update the status of a specific stop within a run.
   Future<Map<String, dynamic>> driverUpdateStopStatus({
     required String runId,
     required String stopId,
@@ -650,17 +772,21 @@ class ApiService {
     String? notes,
   }) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] driverUpdateStopStatus: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl =
         '$baseUrl/runs/driver/runs/$runId/stops/$stopId/update-status';
     print(
-        'ApiService: Updating stop $stopId in run $runId to status $newStatus');
+        '[ApiService] Updating stop $stopId in run $runId to status $newStatus via $apiUrl');
 
     final body = <String, String>{'status': newStatus};
     if (notes != null && notes.isNotEmpty) {
       body['notes'] = notes;
     }
+    print('[ApiService] driverUpdateStopStatus Payload: $body');
 
     try {
       final response = await http.post(
@@ -672,15 +798,21 @@ class ApiService {
         body: jsonEncode(body),
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] driverUpdateStopStatus Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        return responseBody; // Assuming backend returns { message, ... }
+        print('[ApiService] Stop status updated successfully.');
+        return responseBody;
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to update stop status');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to update stop status';
+        print(
+            '[ApiService] driverUpdateStopStatus failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error updating stop status: ${e.toString()}');
+      print('[ApiService] Error updating stop status: ${e.toString()}');
       rethrow;
     }
   }
@@ -688,10 +820,15 @@ class ApiService {
   Future<admin_run_models.AdminActiveRunDetailModel> adminCreateRunFromOrders(
       List<String> orderIds) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminCreateRunFromOrders: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/runs/admin/create-batch';
-    print('ApiService: Creating run from orders: $orderIds');
+    print('[ApiService] Creating run from orders: $orderIds via $apiUrl');
+    final payload = {'orderIds': orderIds};
+    print('[ApiService] adminCreateRunFromOrders Payload: $payload');
 
     try {
       final response = await http.post(
@@ -700,101 +837,37 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'orderIds': orderIds}),
+        body: jsonEncode(payload),
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminCreateRunFromOrders Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 201) {
-        // Assuming the backend returns the newly created run object
+        print('[ApiService] Run created successfully.');
         return admin_run_models.AdminActiveRunDetailModel.fromJson(
             responseBody);
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to create run');
+        final errorMessage = responseBody['error'] ?? 'Failed to create run';
+        print(
+            '[ApiService] adminCreateRunFromOrders failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error creating run from batch: $e');
+      print('[ApiService] Error creating run from batch: $e');
       rethrow;
     }
   }
 
   Future<Map<String, dynamic>> endRun(String runId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
-
-    final String apiUrl =
-        '$baseUrl/runs/driver/runs/$runId/end'; // Assuming this endpoint
-    print('ApiService: Ending run $runId via $apiUrl');
-
-    try {
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        // Assuming the body is empty or requires specific data, adjust as needed
-        // body: jsonEncode({}),
-      );
-      final responseBody = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        return responseBody; // Assuming backend returns { message, ... }
-      } else {
-        throw Exception(responseBody['error'] ?? 'Failed to end run');
-      }
-    } on SocketException {
-      throw Exception('Network error. Please check your connection.');
-    } catch (e) {
-      rethrow;
+    if (token == null) {
+      print('[ApiService] endRun: Not authenticated.');
+      throw Exception('Not authenticated.');
     }
-  }
 
-  Future<Map<String, dynamic>> createStripePaymentIntent(String orderId) async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Authentication token not found.');
-
-    final String apiUrl = '$baseUrl/payments/stripe/intent';
-    print(
-        'ApiService: Creating Stripe Payment Intent for order $orderId via $apiUrl');
-
-    try {
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({'orderId': orderId}),
-      );
-
-      final responseBody = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        print(
-            'ApiService: Stripe Payment Intent created successfully: $responseBody');
-        if (responseBody['clientSecret'] == null) {
-          throw Exception('Client secret not found in PaymentIntent response.');
-        }
-        return responseBody;
-      } else {
-        final errorMessage = responseBody['error'] ??
-            responseBody['message'] ??
-            'Failed to create Stripe Payment Intent: ${response.statusCode}';
-        throw Exception(errorMessage);
-      }
-    } catch (e) {
-      print('ApiService: Error creating Stripe Payment Intent: $e');
-      throw Exception('Failed to create payment intent: ${e.toString()}');
-    }
-  }
-
-  /// Sends a confirmed PaymentMethod ID from a specific gateway to be saved.
-  Future<PaymentMethodModel> attachPaymentMethod({
-    required String stripePaymentMethodId,
-    required String gateway,
-  }) async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
-
-    final String apiUrl = '$baseUrl/payments/attach-method';
+    final String apiUrl = '$baseUrl/runs/driver/runs/$runId/end';
+    print('[ApiService] Ending run $runId via $apiUrl');
 
     try {
       final response = await http.post(
@@ -803,20 +876,118 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json'
         },
-        body: jsonEncode({
-          'paymentMethodId': stripePaymentMethodId,
-          'gateway': gateway,
-        }),
       );
       final responseBody = jsonDecode(response.body);
-
-      if (response.statusCode == 201) {
-        return PaymentMethodModel.fromJson(responseBody);
+      print(
+          '[ApiService] endRun Response Status: ${response.statusCode}, Body: $responseBody');
+      if (response.statusCode == 200) {
+        print('[ApiService] Run ended successfully.');
+        return responseBody;
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to save payment method');
+        final errorMessage = responseBody['error'] ?? 'Failed to end run';
+        throw Exception(errorMessage);
+      }
+    } on SocketException {
+      print('[ApiService] Network error ending run.');
+      throw Exception('Network error. Please check your connection.');
+    } catch (e) {
+      print('[ApiService] Error ending run: ${e.toString()}');
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> createStripePaymentIntent(String orderId) async {
+    final token = await _getToken();
+    if (token == null) {
+      print(
+          '[ApiService] createStripePaymentIntent: Authentication token not found.');
+      throw Exception('Authentication token not found.');
+    }
+
+    final String apiUrl = '$baseUrl/payments/stripe/intent';
+    print(
+        '[ApiService] Creating Stripe Payment Intent for order $orderId via $apiUrl');
+    final payload = {'orderId': orderId};
+    print('[ApiService] createStripePaymentIntent Payload: $payload');
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(payload),
+      );
+
+      final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] createStripePaymentIntent Response Status: ${response.statusCode}, Body: $responseBody');
+      if (response.statusCode == 200) {
+        print('[ApiService] Stripe Payment Intent created successfully.');
+        if (responseBody['clientSecret'] == null) {
+          print(
+              '[ApiService] Client secret not found in PaymentIntent response. Body: $responseBody');
+          throw Exception('Client secret not found in PaymentIntent response.');
+        }
+        return responseBody;
+      } else {
+        final errorMessage = responseBody['error'] ??
+            responseBody['message'] ??
+            'Failed to create Stripe Payment Intent: ${response.statusCode}';
+        print(
+            '[ApiService] createStripePaymentIntent failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error creating Stripe Payment Intent: $e');
+      throw Exception('Failed to create payment intent: ${e.toString()}');
+    }
+  }
+
+  Future<PaymentMethodModel> attachPaymentMethod({
+    required String stripePaymentMethodId,
+    required String gateway,
+  }) async {
+    final token = await _getToken();
+    if (token == null) {
+      print('[ApiService] attachPaymentMethod: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
+
+    final String apiUrl = '$baseUrl/payments/attach-method';
+    print(
+        '[ApiService] Attaching payment method $stripePaymentMethodId for gateway $gateway via $apiUrl');
+    final payload = {
+      'paymentMethodId': stripePaymentMethodId,
+      'gateway': gateway
+    };
+    print('[ApiService] attachPaymentMethod Payload: $payload');
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json'
+        },
+        body: jsonEncode(payload),
+      );
+      final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] attachPaymentMethod Response Status: ${response.statusCode}, Body: $responseBody');
+
+      if (response.statusCode == 201) {
+        print('[ApiService] Payment method attached successfully.');
+        return PaymentMethodModel.fromJson(responseBody);
+      } else {
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to save payment method';
+        print('[ApiService] attachPaymentMethod failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      print('[ApiService] Error attaching payment method: ${e.toString()}');
       rethrow;
     }
   }
@@ -828,6 +999,16 @@ class ApiService {
     required String password,
   }) async {
     final String apiUrl = '$baseUrl/auth/register/customer';
+    print(
+        '[ApiService] Attempting customer registration to $apiUrl for email: $email');
+    final payload = {
+      'name': name,
+      'email': email,
+      'phone': phone,
+      'password': '***'
+    }; // Mask password
+    print('[ApiService] registerCustomer Payload: $payload');
+
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
@@ -840,44 +1021,57 @@ class ApiService {
         }),
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] registerCustomer Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 201) {
+        print('[ApiService] Customer registration successful.');
         return responseBody;
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Customer registration failed');
+        final errorMessage =
+            responseBody['error'] ?? 'Customer registration failed';
+        print(
+            '[ApiService] Customer registration failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error during customer registration: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Verifies the OTP for a given email address.
   Future<Map<String, dynamic>> verifyOtp({
     required String email,
     required String otp,
   }) async {
     final String apiUrl = '$baseUrl/auth/verify-otp';
-    print('ApiService: Verifying OTP for $email at $apiUrl');
+    print('[ApiService] Verifying OTP for $email at $apiUrl');
+    final payload = {'email': email, 'otp': otp};
+    print('[ApiService] verifyOtp Payload: $payload');
 
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'otp': otp}),
+        body: jsonEncode(payload),
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] verifyOtp Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        return responseBody; // Expects { message: '...' }
+        print('[ApiService] OTP verification successful.');
+        return responseBody;
       } else {
         final errorMessage = responseBody['error'] ?? 'OTP verification failed';
+        print('[ApiService] OTP verification failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } on SocketException {
+      print('[ApiService] Network error during OTP verification.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('ApiService: Error during OTP verification: $e');
+      print('[ApiService] Error during OTP verification: $e');
       rethrow;
     }
   }
@@ -890,7 +1084,14 @@ class ApiService {
   }) async {
     final String apiUrl = '$baseUrl/auth/register/admin';
     print(
-        'ApiService: Attempting admin self-registration to $apiUrl for $email');
+        '[ApiService] Attempting admin self-registration to $apiUrl for $email');
+    final payload = {
+      'name': name,
+      'email': email,
+      'phone': phone,
+      'password': '***'
+    };
+    print('[ApiService] selfRegisterAdmin Payload: $payload');
 
     try {
       final response = await http.post(
@@ -905,27 +1106,28 @@ class ApiService {
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] selfRegisterAdmin Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 201) {
-        print(
-            'ApiService: Admin self-registration successful. Response: $responseBody');
+        print('[ApiService] Admin self-registration successful.');
         return responseBody;
       } else {
         final errorMessage = responseBody['error'] ??
             (responseBody['message'] ??
                 'Admin registration failed: ${response.statusCode}');
         print(
-            'ApiService: Admin self-registration failed. Status: ${response.statusCode}, Error: $errorMessage');
+            '[ApiService] Admin self-registration failed. Status: ${response.statusCode}, Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } on SocketException catch (e) {
-      print('ApiService: Network error during admin self-registration: $e');
+      print('[ApiService] Network error during admin self-registration: $e');
       throw Exception('Network error: Please check your connection.');
     } on HttpException catch (e) {
-      print('ApiService: HTTP error during admin self-registration: $e');
+      print('[ApiService] HTTP error during admin self-registration: $e');
       throw Exception('HTTP error: Could not connect to the server.');
     } catch (e) {
-      print('ApiService: Unexpected error during admin self-registration: $e');
+      print('[ApiService] Unexpected error during admin self-registration: $e');
       throw Exception(
           'An unexpected error occurred during admin registration: ${e.toString()}');
     }
@@ -942,10 +1144,19 @@ class ApiService {
     final token = await _getToken();
 
     if (token == null) {
+      print('[ApiService] adminCreateUser: Admin not authenticated.');
       throw Exception('Admin not authenticated. Cannot create user.');
     }
 
-    print('ApiService: Admin creating user ($role) via $apiUrl for $email');
+    print('[ApiService] Admin creating user ($role) via $apiUrl for $email');
+    final payload = {
+      'name': name,
+      'email': email,
+      'phone': phone,
+      'password': '***',
+      'role': role.toLowerCase()
+    };
+    print('[ApiService] adminCreateUser Payload: $payload');
 
     try {
       final response = await http.post(
@@ -964,38 +1175,41 @@ class ApiService {
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminCreateUser Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 201) {
-        print(
-            'ApiService: User creation by admin successful. Response: $responseBody');
+        print('[ApiService] User creation by admin successful.');
         return app_user.User.fromJson(responseBody);
       } else {
         final errorMessage = responseBody['error'] ??
             'Admin user creation failed: ${response.statusCode}';
         print(
-            'ApiService: Admin user creation failed. Status: ${response.statusCode}, Error: $errorMessage');
+            '[ApiService] Admin user creation failed. Status: ${response.statusCode}, Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } on SocketException catch (e) {
-      print('ApiService: Network error during admin user creation: $e');
+      print('[ApiService] Network error during admin user creation: $e');
       throw Exception('Network error: Please check your connection.');
     } on HttpException catch (e) {
-      print('ApiService: HTTP error during admin user creation: $e');
+      print('[ApiService] HTTP error during admin user creation: $e');
       throw Exception('HTTP error: Could not connect to the server.');
     } catch (e) {
-      print('ApiService: Unexpected error during admin user creation: $e');
+      print('[ApiService] Unexpected error during admin user creation: $e');
       throw Exception(
           'An unexpected error occurred during user creation: ${e.toString()}');
     }
   }
 
-  /// Fetches the main dashboard statistics for the admin panel.
   Future<DashboardStatsModel> getAdminDashboardStats() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getAdminDashboardStats: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/admin/dashboard-stats';
-    print('ApiService: Getting admin dashboard stats from $apiUrl');
+    print('[ApiService] Getting admin dashboard stats from $apiUrl');
 
     try {
       final response = await http.get(
@@ -1003,32 +1217,41 @@ class ApiService {
         headers: {'Authorization': 'Bearer $token'},
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getAdminDashboardStats Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Admin dashboard stats fetched successfully.');
         return DashboardStatsModel.fromJson(responseBody);
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to load dashboard stats');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load dashboard stats';
+        print(
+            '[ApiService] getAdminDashboardStats failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } on SocketException {
+      print('[ApiService] Network error fetching admin dashboard stats.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('ApiService: Error fetching admin stats: ${e.toString()}');
+      print('[ApiService] Error fetching admin stats: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Fetches a paginated and searchable list of all customers for the admin panel.
   Future<Map<String, dynamic>> adminGetCustomers({
     int page = 1,
     int limit = 15,
     String? searchQuery,
   }) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetCustomers: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final queryParams = <String, String>{
-      'role': 'customer', // Hardcode the role for this specific function
+      'role': 'customer',
       'page': page.toString(),
       'limit': limit.toString(),
     };
@@ -1039,15 +1262,17 @@ class ApiService {
 
     final uri =
         Uri.parse('$baseUrl/users/admin').replace(queryParameters: queryParams);
-    print('ApiService: Getting admin customers from $uri');
+    print('[ApiService] Getting admin customers from $uri');
 
     try {
       final response =
           await http.get(uri, headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetCustomers Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        // Backend returns { users: [...], currentPage, totalPages, totalUsers }
+        print('[ApiService] Admin customers fetched successfully.');
         final List<AdminCustomerSummaryModel> customers =
             (responseBody['users'] as List)
                 .map((data) => AdminCustomerSummaryModel.fromJson(
@@ -1060,21 +1285,29 @@ class ApiService {
           'totalPages': responseBody['totalPages'],
         };
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to load customers');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load customers';
+        print('[ApiService] adminGetCustomers failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error fetching admin customers: ${e.toString()}');
+      print('[ApiService] Error fetching admin customers: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Assigns a driver to a single order. Admin only.
   Future<void> adminAssignDriver(String orderId, String driverId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminAssignDriver: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/orders/admin/$orderId/assign-driver';
-    print('ApiService: Admin assigning driver $driverId to order $orderId');
+    print(
+        '[ApiService] Admin assigning driver $driverId to order $orderId via $apiUrl');
+    final payload = {'driverId': driverId};
+    print('[ApiService] adminAssignDriver Payload: $payload');
 
     try {
       final response = await http.post(
@@ -1083,49 +1316,68 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'driverId': driverId}),
+        body: jsonEncode(payload),
       );
+      print(
+          '[ApiService] adminAssignDriver Response Status: ${response.statusCode}, Body: ${response.body}');
 
       if (response.statusCode != 200) {
         final body = jsonDecode(response.body);
-        throw Exception(body['error'] ?? 'Failed to assign driver');
+        final errorMessage = body['error'] ?? 'Failed to assign driver';
+        print('[ApiService] adminAssignDriver failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Driver assigned to order successfully.');
       }
     } catch (e) {
+      print('[ApiService] Error assigning driver to order: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Fetches the detailed profile of a specific driver for an admin.
   Future<AdminDriverDetailModel> adminGetDriverDetails(String driverId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetDriverDetails: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/users/admin/$driverId';
-    print('ApiService: Getting driver details for $driverId from $apiUrl');
+    print('[ApiService] Getting driver details for $driverId from $apiUrl');
 
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetDriverDetails Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        // The service is now expected to return the enhanced object with stats
+        print('[ApiService] Driver details fetched successfully.');
         return AdminDriverDetailModel.fromJson(responseBody);
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to load driver details');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load driver details';
+        print(
+            '[ApiService] adminGetDriverDetails failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching driver details: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Updates the account status (e.g., Active, Suspended) of any user by an admin.
   Future<void> adminUpdateUserStatus(String userId, String status) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminUpdateUserStatus: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/users/admin/$userId/status';
-    print('ApiService: Updating user $userId status to $status');
+    print('[ApiService] Updating user $userId status to $status via $apiUrl');
+    final payload = {'status': status};
+    print('[ApiService] adminUpdateUserStatus Payload: $payload');
 
     try {
       final response = await http.put(
@@ -1134,27 +1386,39 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json'
         },
-        body: jsonEncode({'status': status}),
+        body: jsonEncode(payload),
       );
+      print(
+          '[ApiService] adminUpdateUserStatus Response Status: ${response.statusCode}, Body: ${response.body}');
       if (response.statusCode != 200) {
         final responseBody = jsonDecode(response.body);
-        throw Exception(
-            responseBody['error'] ?? 'Failed to update user status');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to update user status';
+        print(
+            '[ApiService] adminUpdateUserStatus failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] User status updated successfully.');
       }
     } catch (e) {
+      print('[ApiService] Error updating user status: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Forces a driver's availability status (online/offline) by an admin.
   Future<void> adminSetDriverAvailability(
       String driverId, bool isAvailable) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminSetDriverAvailability: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/users/admin/$driverId';
     print(
-        'ApiService: Admin setting availability for driver $driverId to $isAvailable');
+        '[ApiService] Admin setting availability for driver $driverId to $isAvailable via $apiUrl');
+    final payload = {'isAvailableOnline': isAvailable};
+    print('[ApiService] adminSetDriverAvailability Payload: $payload');
 
     try {
       final response = await http.put(
@@ -1163,14 +1427,23 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json'
         },
-        body: jsonEncode({'isAvailableOnline': isAvailable}),
+        body: jsonEncode(payload),
       );
+      print(
+          '[ApiService] adminSetDriverAvailability Response Status: ${response.statusCode}, Body: ${response.body}');
       if (response.statusCode != 200) {
         final responseBody = jsonDecode(response.body);
-        throw Exception(
-            responseBody['error'] ?? 'Failed to update availability');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to update availability';
+        print(
+            '[ApiService] adminSetDriverAvailability failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print(
+            '[ApiService] Driver availability updated successfully by admin.');
       }
     } catch (e) {
+      print('[ApiService] Error setting driver availability: ${e.toString()}');
       rethrow;
     }
   }
@@ -1178,93 +1451,123 @@ class ApiService {
   Future<admin_run_models.AdminActiveRunDetailModel> adminGetRunDetails(
       String runId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetRunDetails: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/runs/$runId';
-    print('ApiService: Getting admin run details for $runId from $apiUrl');
+    print('[ApiService] Getting admin run details for $runId from $apiUrl');
 
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetRunDetails Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Admin run details fetched successfully.');
         return admin_run_models.AdminActiveRunDetailModel.fromJson(
             responseBody);
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to load run details');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load run details';
+        print('[ApiService] adminGetRunDetails failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching admin run details: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Fetches pending runs (batches) for the admin run management screen.
   Future<List<admin_run_models.AdminPickupBatchSummary>>
       adminGetPendingBatches() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetPendingBatches: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/runs/admin/pending-batches';
+    print('[ApiService] Getting admin pending batches from $apiUrl');
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetPendingBatches Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
+        print('[ApiService] Admin pending batches fetched successfully.');
         return (responseBody as List)
             .map((data) =>
                 admin_run_models.AdminPickupBatchSummary.fromJson(data))
             .toList();
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to load pending batches');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load pending batches';
+        print(
+            '[ApiService] adminGetPendingBatches failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print(
+          '[ApiService] Error fetching admin pending batches: ${e.toString()}');
       rethrow;
     }
   }
 
-  // Fetches active runs for the admin run management screen.
   Future<List<admin_run_models.AdminActiveRunInfo>> adminGetActiveRuns() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetActiveRuns: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/runs/admin/active';
+    print('[ApiService] Getting admin active runs from $apiUrl');
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetActiveRuns Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
+        print('[ApiService] Admin active runs fetched successfully.');
         return (responseBody as List)
             .map((data) => admin_run_models.AdminActiveRunInfo.fromJson(data))
             .toList();
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to load active runs');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load active runs';
+        print('[ApiService] adminGetActiveRuns failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching admin active runs: ${e.toString()}');
       rethrow;
     }
   }
 
-  // Fetches unassigned orders (a specific subset of all orders).
-  // Integrated logic from the non-working version.
   Future<List<admin_run_models.AdminUnassignedOrder>>
       adminGetUnassignedOrders() async {
+    print('[ApiService] Attempting to fetch unassigned orders...');
     try {
       final Map<String, dynamic> response =
           await adminGetOrders(status: "Order Confirmed");
       final List<AdminOrderSummaryModel> orders =
           response['orders'] as List<AdminOrderSummaryModel>? ?? [];
+      print(
+          '[ApiService] Successfully fetched ${orders.length} unassigned orders.');
       return orders
           .map((order) =>
               admin_run_models.AdminUnassignedOrder.fromOrderSummary(order))
           .toList();
     } catch (e) {
-      print('ApiService: Could not fetch unassigned orders. Error: $e');
+      print('[ApiService] Could not fetch unassigned orders. Error: $e');
       return [];
     }
   }
 
-  /// Fetches a paginated and filtered list of all orders for the admin panel.
-  // This method was missing from the provided 'working' file but present and needed in the 'non-working' one.
   Future<Map<String, dynamic>> adminGetOrders({
     int page = 1,
     int limit = 15,
@@ -1274,7 +1577,10 @@ class ApiService {
     DateTime? endDate,
   }) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetOrders (filtered): Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final queryParams = <String, String>{
       'page': page.toString(),
@@ -1292,13 +1598,18 @@ class ApiService {
 
     final uri = Uri.parse('$baseUrl/orders/admin')
         .replace(queryParameters: queryParams);
+    print(
+        '[ApiService] Getting admin orders from $uri with query: $queryParams');
 
     try {
       final response =
           await http.get(uri, headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetOrders (filtered) Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Admin orders fetched successfully.');
         final List<AdminOrderSummaryModel> orders = (responseBody['orders']
                 as List)
             .map((data) =>
@@ -1311,106 +1622,126 @@ class ApiService {
           'totalPages': responseBody['totalPages'],
         };
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to load orders');
+        final errorMessage = responseBody['error'] ?? 'Failed to load orders';
+        print(
+            '[ApiService] adminGetOrders (filtered) failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print(
+          '[ApiService] Error fetching admin orders (filtered): ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Fetches available drivers and returns the correct, aliased type.
   Future<List<admin_run_models.AvailableDriverForMap>>
       adminGetAvailableDrivers() async {
+    print('[ApiService] Attempting to fetch available drivers...');
     try {
-      // Kept 'limit: 100' from the non-working version as a functional preference
       final Map<String, dynamic> response =
           await adminGetDrivers(isAvailableOnline: true, limit: 100);
       final List<AdminDriverSummaryModel> drivers =
           response['drivers'] as List<AdminDriverSummaryModel>? ?? [];
+      print(
+          '[ApiService] Successfully fetched ${drivers.length} available drivers.');
       return drivers
           .map((driver) =>
               admin_run_models.AvailableDriverForMap.fromDriverSummary(driver))
           .toList();
     } catch (e) {
-      print('ApiService: Could not fetch available drivers. Error: $e');
+      print('[ApiService] Could not fetch available drivers. Error: $e');
       return [];
     }
   }
 
-  // Renamed from adminAssignRunToDriver and consolidated logic based on working file
   Future<void> adminAssignDriverToRun(String runId, String driverId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
-    final String apiUrl =
-        '$baseUrl/runs/admin/$runId/assign-driver'; // Uses /admin and POST
+    if (token == null) {
+      print('[ApiService] adminAssignDriverToRun: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
+    final String apiUrl = '$baseUrl/runs/admin/$runId/assign-driver';
+    print(
+        '[ApiService] Admin assigning driver $driverId to run $runId via $apiUrl');
+    final payload = {'driverId': driverId};
+    print('[ApiService] adminAssignDriverToRun Payload: $payload');
     try {
       final response = await http.post(
-        // Uses POST method
         Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json'
         },
-        body: jsonEncode({'driverId': driverId}),
+        body: jsonEncode(payload),
       );
+      print(
+          '[ApiService] adminAssignDriverToRun Response Status: ${response.statusCode}, Body: ${response.body}');
       if (response.statusCode != 200) {
         final body = jsonDecode(response.body);
-        throw Exception(body['error'] ?? 'Failed to assign driver to run');
+        final errorMessage = body['error'] ?? 'Failed to assign driver to run';
+        print(
+            '[ApiService] adminAssignDriverToRun failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Driver assigned to run successfully.');
       }
     } catch (e) {
+      print('[ApiService] Error assigning driver to run: ${e.toString()}');
       rethrow;
     }
   }
 
   Future<Map<String, dynamic>> requestPasswordReset(String email) async {
     final String apiUrl = '$baseUrl/auth/request-password-reset';
-    print('ApiService: Requesting password reset for $email to $apiUrl');
+    print('[ApiService] Requesting password reset for $email to $apiUrl');
+    final payload = {'email': email};
+    print('[ApiService] requestPasswordReset Payload: $payload');
 
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email}),
+        body: jsonEncode(payload),
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] requestPasswordReset Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        print(
-            'ApiService: Password reset request successful. Response: $responseBody');
+        print('[ApiService] Password reset request successful.');
         return responseBody;
       } else {
         final errorMessage = responseBody['error'] ??
             (responseBody['message'] ??
                 'Password reset request failed: ${response.statusCode}');
         print(
-            'ApiService: Password reset request failed. Status: ${response.statusCode}, Error: $errorMessage, Body: $responseBody');
+            '[ApiService] Password reset request failed. Status: ${response.statusCode}, Error: $errorMessage, Body: $responseBody');
         throw Exception(errorMessage);
       }
     } on SocketException catch (e) {
-      print('ApiService: Network error during password reset request: $e');
+      print('[ApiService] Network error during password reset request: $e');
       throw Exception(
           'Network error: Please check your connection and ensure local server is running.');
     } on HttpException catch (e) {
-      print('ApiService: HTTP error during password reset request: $e');
+      print('[ApiService] HTTP error during password reset request: $e');
       throw Exception('HTTP error: Could not connect to the server.');
     } catch (e) {
-      print('ApiService: Unexpected error during password reset request: $e');
+      print('[ApiService] Unexpected error during password reset request: $e');
       throw Exception(
           'An unexpected error occurred while requesting password reset: ${e.toString()}');
     }
   }
 
-  /// Fetches the authenticated user's referral information.
-  /// If no referral info exists, the backend will create and return it.
   Future<Map<String, dynamic>> getReferralInfo() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getReferralInfo: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
-    // Note: The backend endpoint is `/referrals`, no customerId in path.
-    // The `authMiddleware` identifies the user.
     final String apiUrl = '$baseUrl/referrals';
-    print('ApiService: Getting referral info from $apiUrl');
+    print('[ApiService] Getting referral info from $apiUrl');
 
     try {
       final response = await http.get(
@@ -1418,14 +1749,20 @@ class ApiService {
         headers: {'Authorization': 'Bearer $token'},
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getReferralInfo Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Referral info fetched successfully.');
         return responseBody;
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to load referral info');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load referral info';
+        print('[ApiService] getReferralInfo failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching referral info: ${e.toString()}');
       rethrow;
     }
   }
@@ -1433,7 +1770,9 @@ class ApiService {
   Future<Map<String, dynamic>> resetPassword(
       String token, String newPassword) async {
     final String apiUrl = '$baseUrl/auth/reset-password';
-    print('ApiService: Attempting to reset password with token to $apiUrl');
+    print('[ApiService] Attempting to reset password with token to $apiUrl');
+    final payload = {'token': token, 'newPassword': '***'};
+    print('[ApiService] resetPassword Payload: $payload');
 
     try {
       final response = await http.post(
@@ -1446,26 +1785,28 @@ class ApiService {
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] resetPassword Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        print('ApiService: Password reset successful. Response: $responseBody');
+        print('[ApiService] Password reset successful.');
         return responseBody;
       } else {
         final errorMessage = responseBody['error'] ??
             (responseBody['message'] ??
                 'Password reset failed: ${response.statusCode}');
         print(
-            'ApiService: Password reset failed. Status: ${response.statusCode}, Error: $errorMessage, Body: $responseBody');
+            '[ApiService] Password reset failed. Status: ${response.statusCode}, Error: $errorMessage, Body: $responseBody');
         throw Exception(errorMessage);
       }
     } on SocketException catch (e) {
-      print('ApiService: Network error during password reset: $e');
+      print('[ApiService] Network error during password reset: $e');
       throw Exception('Network error: Please check your connection.');
     } on HttpException catch (e) {
-      print('ApiService: HTTP error during password reset: $e');
+      print('[ApiService] HTTP error during password reset: $e');
       throw Exception('HTTP error: Could not connect to the server.');
     } catch (e) {
-      print('ApiService: Unexpected error during password reset: $e');
+      print('[ApiService] Unexpected error during password reset: $e');
       throw Exception(
           'An unexpected error occurred while resetting password: ${e.toString()}');
     }
@@ -1473,12 +1814,15 @@ class ApiService {
 
   Future<List<DealModel>> getActivePromotions() async {
     final String apiUrl = '$baseUrl/promotions/active';
-    print('ApiService: Getting active promotions from $apiUrl');
+    print('[ApiService] Getting active promotions from $apiUrl');
     try {
       final response = await http.get(Uri.parse(apiUrl));
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getActivePromotions Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Active promotions fetched successfully.');
         final List<dynamic> promotionsJson =
             responseBody as List<dynamic>? ?? [];
         return promotionsJson
@@ -1488,47 +1832,59 @@ class ApiService {
       } else {
         final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
             'Failed to get active promotions: ${response.statusCode}';
+        print('[ApiService] getActivePromotions failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error fetching active promotions: $e');
+      print('[ApiService] Error fetching active promotions: $e');
       throw Exception('Failed to fetch promotions: ${e.toString()}');
     }
   }
 
-  // --- PROMOTIONS ---
-
-  /// Fetches all promotions for the admin panel.
   Future<List<AdminPromotionModel>> adminGetPromotions() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetPromotions: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/promotions';
+    print('[ApiService] Getting all promotions for admin from $apiUrl');
 
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetPromotions Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        // The backend returns a paginated object { promotions: [...] }
+        print('[ApiService] Admin promotions fetched successfully.');
         final List<dynamic> promotionsJson =
             responseBody['promotions'] as List<dynamic>? ?? [];
         return promotionsJson
             .map((data) => AdminPromotionModel.fromJson(data))
             .toList();
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to load promotions');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load promotions';
+        print('[ApiService] adminGetPromotions failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching admin promotions: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Creates a new promotion.
   Future<void> adminCreatePromotion(Map<String, dynamic> promotionData) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminCreatePromotion: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/promotions';
+    print(
+        '[ApiService] Creating promotion via $apiUrl with payload: $promotionData');
 
     try {
       final response = await http.post(
@@ -1539,21 +1895,32 @@ class ApiService {
         },
         body: jsonEncode(promotionData),
       );
+      print(
+          '[ApiService] adminCreatePromotion Response Status: ${response.statusCode}, Body: ${response.body}');
       if (response.statusCode != 201) {
         final body = jsonDecode(response.body);
-        throw Exception(body['error'] ?? 'Failed to create promotion');
+        final errorMessage = body['error'] ?? 'Failed to create promotion';
+        print('[ApiService] adminCreatePromotion failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Promotion created successfully.');
       }
     } catch (e) {
+      print('[ApiService] Error creating promotion: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Updates an existing promotion (used for both full edits and status toggles).
   Future<void> adminUpdatePromotion(
       String promoId, Map<String, dynamic> updateData) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminUpdatePromotion: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/promotions/$promoId';
+    print(
+        '[ApiService] Updating promotion $promoId via $apiUrl with payload: $updateData');
 
     try {
       final response = await http.put(
@@ -1564,34 +1931,50 @@ class ApiService {
         },
         body: jsonEncode(updateData),
       );
+      print(
+          '[ApiService] adminUpdatePromotion Response Status: ${response.statusCode}, Body: ${response.body}');
       if (response.statusCode != 200) {
         final body = jsonDecode(response.body);
-        throw Exception(body['error'] ?? 'Failed to update promotion');
+        final errorMessage = body['error'] ?? 'Failed to update promotion';
+        print('[ApiService] adminUpdatePromotion failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Promotion updated successfully.');
       }
     } catch (e) {
+      print('[ApiService] Error updating promotion: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Deletes a promotion.
   Future<void> adminDeletePromotion(String promoId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminDeletePromotion: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/promotions/$promoId';
+    print('[ApiService] Deleting promotion $promoId via $apiUrl');
 
     try {
       final response = await http.delete(Uri.parse(apiUrl),
           headers: {'Authorization': 'Bearer $token'});
+      print(
+          '[ApiService] adminDeletePromotion Response Status: ${response.statusCode}, Body: ${response.body}');
       if (response.statusCode != 200) {
         final body = jsonDecode(response.body);
-        throw Exception(body['error'] ?? 'Failed to delete promotion');
+        final errorMessage = body['error'] ?? 'Failed to delete promotion';
+        print('[ApiService] adminDeletePromotion failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Promotion deleted successfully.');
       }
     } catch (e) {
+      print('[ApiService] Error deleting promotion: ${e.toString()}');
       rethrow;
     }
   }
 
-  // --- REFINED & CORRECTED getCustomerOrders METHOD ---
   Future<Map<String, dynamic>> getCustomerOrders({
     String? status,
     int page = 1,
@@ -1599,7 +1982,10 @@ class ApiService {
     String? sortBy = '-orderDate',
   }) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getCustomerOrders: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final queryParameters = <String, String>{
       'page': page.toString(),
@@ -1609,12 +1995,13 @@ class ApiService {
       queryParameters['status'] = status;
     }
     if (sortBy != null && sortBy.isNotEmpty) {
-      queryParameters['sortBy'] = sortBy; // Corrected variable name
+      queryParameters['sortBy'] = sortBy;
     }
 
     final uri =
         Uri.parse('$baseUrl/orders').replace(queryParameters: queryParameters);
-    print('ApiService: Getting customer orders from $uri');
+    print(
+        '[ApiService] Getting customer orders from $uri with query: $queryParameters');
 
     try {
       final response = await http.get(
@@ -1625,7 +2012,10 @@ class ApiService {
         },
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getCustomerOrders Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
+        print('[ApiService] Customer orders fetched successfully.');
         final List<dynamic> ordersJson =
             responseBody['orders'] as List<dynamic>? ?? [];
         final List<app_order.Order> typedOrders = ordersJson
@@ -1634,7 +2024,7 @@ class ApiService {
             .toList();
 
         return {
-          'orders': typedOrders, // Return a typed list
+          'orders': typedOrders,
           'currentPage': responseBody['currentPage'] as int? ?? 1,
           'totalPages': responseBody['totalPages'] as int? ?? 1,
           'totalOrders': responseBody['totalOrders'] as int? ?? 0,
@@ -1642,11 +2032,11 @@ class ApiService {
       } else {
         final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
             'Failed to fetch orders: ${response.statusCode}';
+        print('[ApiService] getCustomerOrders failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error fetching orders: $e');
-      // Rethrowing the original error can be more informative
+      print('[ApiService] Error fetching orders: ${e.toString()}');
       throw Exception('Failed to list orders due to an unexpected error.');
     }
   }
@@ -1659,7 +2049,15 @@ class ApiService {
     required Map<String, String> bankDetails,
   }) async {
     final String apiUrl = '$baseUrl/auth/register/driver';
-    print('ApiService: Attempting driver registration to $apiUrl for $email');
+    print('[ApiService] Attempting driver registration to $apiUrl for $email');
+    final payload = {
+      'name': name,
+      'email': email,
+      'phone': phone,
+      'password': '***',
+      'bankDetails': bankDetails
+    };
+    print('[ApiService] registerDriver Payload: $payload');
 
     try {
       final response = await http.post(
@@ -1675,121 +2073,150 @@ class ApiService {
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] registerDriver Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 201) {
-        print(
-            'ApiService: Driver registration successful. Response: $responseBody');
+        print('[ApiService] Driver registration successful.');
         return responseBody;
       } else {
         final errorMessage = responseBody['error'] ??
             (responseBody['message'] ??
                 'Driver registration failed: ${response.statusCode}');
         print(
-            'ApiService: Driver registration failed. Status: ${response.statusCode}, Error: $errorMessage');
+            '[ApiService] Driver registration failed. Status: ${response.statusCode}, Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } on SocketException catch (e) {
-      print('ApiService: Network error during driver registration: $e');
+      print('[ApiService] Network error during driver registration: $e');
       throw Exception(
           'Network error: Please check your connection and ensure local server is running.');
     } on HttpException catch (e) {
-      print('ApiService: HTTP error during driver registration: $e');
+      print('[ApiService] HTTP error during driver registration: $e');
       throw Exception('HTTP error: Could not connect to the server.');
     } catch (e) {
-      print('ApiService: Unexpected error during driver registration: $e');
+      print('[ApiService] Unexpected error during driver registration: $e');
       throw Exception(
           'An unexpected error occurred during driver registration: ${e.toString()}');
     }
   }
 
-  // This method is confirmed to be correct from the previous analysis.
   Future<List<admin_run_models.AdminActiveRunInfo>> getAssignedRuns() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getAssignedRuns: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/runs/driver/assigned-runs';
-    print('ApiService: Fetching assigned runs for driver from $apiUrl');
+    print('[ApiService] Fetching assigned runs for driver from $apiUrl');
 
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getAssignedRuns Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Assigned runs for driver fetched successfully.');
         final List<dynamic> runsJson = responseBody as List<dynamic>? ?? [];
         return runsJson
             .map((json) => admin_run_models.AdminActiveRunInfo.fromJson(
                 json as Map<String, dynamic>))
             .toList();
       } else {
-        throw Exception((responseBody as Map<String, dynamic>)['error'] ??
-            'Failed to fetch assigned runs');
+        final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
+            'Failed to fetch assigned runs';
+        print('[ApiService] getAssignedRuns failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error fetching assigned runs: ${e.toString()}');
+      print('[ApiService] Error fetching assigned runs: ${e.toString()}');
       rethrow;
     }
   }
 
-  // To get a specific run's details
   Future<admin_run_models.AdminActiveRunDetailModel> getRunDetails(
       String runId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getRunDetails: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
-    final String apiUrl =
-        '$baseUrl/runs/$runId'; // Assuming an endpoint like /runs/:runId
-    print('ApiService: Fetching details for run $runId');
+    final String apiUrl = '$baseUrl/runs/$runId';
+    print('[ApiService] Fetching details for run $runId from $apiUrl');
 
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getRunDetails Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
+        print('[ApiService] Run details fetched successfully.');
         return admin_run_models.AdminActiveRunDetailModel.fromJson(
             responseBody as Map<String, dynamic>);
       } else {
-        throw Exception((responseBody as Map<String, dynamic>)['error'] ??
-            'Failed to fetch run details');
+        final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
+            'Failed to fetch run details';
+        print('[ApiService] getRunDetails failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching run details: ${e.toString()}');
       throw Exception('Error fetching run details: ${e.toString()}');
     }
   }
 
-  // Fetches the complete details for a single order for an admin.
   Future<AdminOrderDetailModel> adminGetOrderDetails(String orderId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetOrderDetails: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/orders/$orderId';
+    print('[ApiService] Getting admin order details for $orderId from $apiUrl');
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetOrderDetails Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Admin order details fetched successfully.');
         return AdminOrderDetailModel.fromJson(responseBody);
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to load order details');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load order details';
+        print('[ApiService] adminGetOrderDetails failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching admin order details: ${e.toString()}');
       rethrow;
     }
   }
 
-  // Updates the status of an order. Admin only.
   Future<void> adminUpdateOrderStatus(String orderId, String newStatus,
       {String? notes}) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminUpdateOrderStatus: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/orders/admin/$orderId/status';
+    print(
+        '[ApiService] Updating order $orderId status to $newStatus via $apiUrl');
 
     final payload = <String, String>{'status': newStatus};
     if (notes != null && notes.isNotEmpty) {
       payload['notes'] = notes;
     }
+    print('[ApiService] adminUpdateOrderStatus Payload: $payload');
 
     try {
       final response = await http.put(
@@ -1800,22 +2227,35 @@ class ApiService {
         },
         body: jsonEncode(payload),
       );
+      print(
+          '[ApiService] adminUpdateOrderStatus Response Status: ${response.statusCode}, Body: ${response.body}');
       if (response.statusCode != 200) {
         final body = jsonDecode(response.body);
-        throw Exception(body['error'] ?? 'Failed to update order status');
+        final errorMessage = body['error'] ?? 'Failed to update order status';
+        print(
+            '[ApiService] adminUpdateOrderStatus failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Order status updated successfully by admin.');
       }
     } catch (e) {
+      print('[ApiService] Error updating order status: ${e.toString()}');
       rethrow;
     }
   }
 
-  // Adds an internal note to an order. Admin only.
   Future<void> adminAddNoteToOrder(String orderId, String noteText) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminAddNoteToOrder: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
-    // Assumes new backend endpoint POST /api/v1/orders/admin/:orderId/notes
     final String apiUrl = '$baseUrl/orders/admin/$orderId/notes';
+    print(
+        '[ApiService] Adding note to order $orderId via $apiUrl with note: "$noteText"');
+    final payload = {'note': noteText};
+    print('[ApiService] adminAddNoteToOrder Payload: $payload');
 
     try {
       final response = await http.post(
@@ -1824,23 +2264,33 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json'
         },
-        body: jsonEncode({'note': noteText}),
+        body: jsonEncode(payload),
       );
+      print(
+          '[ApiService] adminAddNoteToOrder Response Status: ${response.statusCode}, Body: ${response.body}');
       if (response.statusCode != 200) {
         final body = jsonDecode(response.body);
-        throw Exception(body['error'] ?? 'Failed to add note');
+        final errorMessage = body['error'] ?? 'Failed to add note';
+        print('[ApiService] adminAddNoteToOrder failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Note added to order successfully by admin.');
       }
     } catch (e) {
+      print('[ApiService] Error adding note to order: ${e.toString()}');
       rethrow;
     }
   }
 
   Future<List<ChatThreadModel>> getChatThreads() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getChatThreads: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/chat/my-threads';
-    print('ApiService: Getting chat threads from $apiUrl');
+    print('[ApiService] Getting chat threads from $apiUrl');
 
     try {
       final response = await http.get(
@@ -1848,32 +2298,39 @@ class ApiService {
         headers: {'Authorization': 'Bearer $token'},
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getChatThreads Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Chat threads fetched successfully.');
         final List<dynamic> threadsJson = responseBody as List<dynamic>? ?? [];
         return threadsJson
             .map((json) =>
                 ChatThreadModel.fromJson(json as Map<String, dynamic>))
             .toList();
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to load messages');
+        final errorMessage = responseBody['error'] ?? 'Failed to load messages';
+        print('[ApiService] getChatThreads failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } on SocketException {
+      print('[ApiService] Network error fetching chat threads.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('ApiService: Error fetching chat threads: ${e.toString()}');
+      print('[ApiService] Error fetching chat threads: ${e.toString()}');
       rethrow;
     }
   }
 
-  // This method is also confirmed.
   Future<Map<String, dynamic>> acceptRun(String runId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] acceptRun: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
-    // The backend route uses :batchId, but it corresponds to our runId.
     final String apiUrl = '$baseUrl/runs/driver/runs/$runId/accept';
-    print('ApiService: Accepting run $runId via $apiUrl');
+    print('[ApiService] Accepting run $runId via $apiUrl');
 
     try {
       final response = await http.post(Uri.parse(apiUrl), headers: {
@@ -1881,22 +2338,30 @@ class ApiService {
         'Content-Type': 'application/json'
       });
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] acceptRun Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        return responseBody; // Returns { message, run }
+        print('[ApiService] Run accepted successfully.');
+        return responseBody;
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to accept run');
+        final errorMessage = responseBody['error'] ?? 'Failed to accept run';
+        print('[ApiService] acceptRun failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error accepting run: ${e.toString()}');
+      print('[ApiService] Error accepting run: ${e.toString()}');
       rethrow;
     }
   }
 
   Future<AddressModel> setDefaultAddress(String addressId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] setDefaultAddress: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/addresses/$addressId/default';
-    print('ApiService: Setting default address $addressId via $apiUrl');
+    print('[ApiService] Setting default address $addressId via $apiUrl');
 
     try {
       final response = await http.post(
@@ -1907,10 +2372,10 @@ class ApiService {
         },
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] setDefaultAddress Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        print(
-            'ApiService: Set default address successful. Response: $responseBody');
-        // The backend returns a complex object, but we only need the address part
+        print('[ApiService] Set default address successful.');
         return AddressModel.fromJson(
             responseBody['address'] as Map<String, dynamic>);
       } else {
@@ -1920,16 +2385,20 @@ class ApiService {
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error setting default address $addressId: $e');
+      print('[ApiService] Error setting default address $addressId: $e');
       throw Exception('Failed to set default address: ${e.toString()}');
     }
   }
 
   Future<AddressModel> createAddress(Map<String, dynamic> addressData) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] createAddress: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/addresses';
-    print('ApiService: Creating address via $apiUrl');
+    print(
+        '[ApiService] Creating address via $apiUrl with payload: $addressData');
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
@@ -1940,7 +2409,10 @@ class ApiService {
         body: jsonEncode(addressData),
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] createAddress Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 201) {
+        print('[ApiService] Address created successfully.');
         return AddressModel.fromJson(responseBody);
       } else {
         final errorMessage = responseBody['error'] ??
@@ -1949,6 +2421,7 @@ class ApiService {
         throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Failed to create address: ${e.toString()}');
       throw Exception('Failed to create address: ${e.toString()}');
     }
   }
@@ -1956,9 +2429,13 @@ class ApiService {
   Future<AddressModel> updateAddress(
       String addressId, Map<String, dynamic> addressData) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] updateAddress: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/addresses/$addressId';
-    print('ApiService: Updating address $addressId via $apiUrl');
+    print(
+        '[ApiService] Updating address $addressId via $apiUrl with payload: $addressData');
     try {
       final response = await http.put(
         Uri.parse(apiUrl),
@@ -1969,7 +2446,10 @@ class ApiService {
         body: jsonEncode(addressData),
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] updateAddress Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
+        print('[ApiService] Address updated successfully.');
         return AddressModel.fromJson(responseBody);
       } else {
         final errorMessage = responseBody['error'] ??
@@ -1978,18 +2458,21 @@ class ApiService {
         throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Failed to update address: ${e.toString()}');
       throw Exception('Failed to update address: ${e.toString()}');
     }
   }
 
-  /// Updates the system configuration. Admin only.
-  /// Takes the admin-specific model and converts it to JSON.
   Future<void> updateSystemConfig(admin_model.SystemConfigModel config) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] updateSystemConfig: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
-    final String apiUrl = '$baseUrl/config'; // Corrected endpoint path
-    print('ApiService: Updating system configuration at $apiUrl');
+    final String apiUrl = '$baseUrl/config';
+    print(
+        '[ApiService] Updating system configuration at $apiUrl with payload: ${config.toJson()}');
 
     try {
       final response = await http.put(
@@ -1998,23 +2481,32 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        // The toJson() method on the admin model correctly extracts controller text
         body: jsonEncode(config.toJson()),
       );
+      print(
+          '[ApiService] updateSystemConfig Response Status: ${response.statusCode}, Body: ${response.body}');
 
       if (response.statusCode != 200) {
         final responseBody = jsonDecode(response.body);
-        throw Exception(
-            responseBody['error'] ?? 'Failed to update configuration');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to update configuration';
+        print('[ApiService] updateSystemConfig failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] System configuration updated successfully.');
       }
     } catch (e) {
+      print('[ApiService] Error updating system config: ${e.toString()}');
       rethrow;
     }
   }
 
   Future<List<app_user.User>> getUsers() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getUsers: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final response = await http.get(
       Uri.parse('$baseUrl/users/admin'),
       headers: {
@@ -2022,18 +2514,27 @@ class ApiService {
         'Content-Type': 'application/json'
       },
     );
+    final responseBody = jsonDecode(response.body);
+    print(
+        '[ApiService] getUsers Response Status: ${response.statusCode}, Body: $responseBody');
     if (response.statusCode == 200) {
-      final Map<String, dynamic> data = jsonDecode(response.body);
+      print('[ApiService] Users fetched successfully.');
+      final Map<String, dynamic> data = responseBody;
       final List<dynamic> usersList = data['users'];
       return usersList.map((json) => app_user.User.fromJson(json)).toList();
     } else {
+      final errorMessage = responseBody['error'] ?? 'Failed to fetch users';
+      print('[ApiService] getUsers failed. Error: $errorMessage');
       throw Exception('Failed to fetch users: ${response.body}');
     }
   }
 
   Future<void> deleteUser(String userId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] deleteUser: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final response = await http.delete(
       Uri.parse('$baseUrl/users/admin/$userId'),
       headers: {
@@ -2041,43 +2542,62 @@ class ApiService {
         'Content-Type': 'application/json'
       },
     );
+    print(
+        '[ApiService] deleteUser Response Status: ${response.statusCode}, Body: ${response.body}');
     if (response.statusCode != 200) {
       final responseBody = jsonDecode(response.body);
       final errorMessage = responseBody['error'] ??
           responseBody['message'] ??
           'Failed to delete user';
+      print('[ApiService] deleteUser failed. Error: $errorMessage');
       throw Exception('$errorMessage: ${response.statusCode}');
+    } else {
+      print('[ApiService] User deleted successfully.');
     }
   }
 
   Future<void> updateUserRole(String userId, String role) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] updateUserRole: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
+    final payload = {'role': role};
+    print(
+        '[ApiService] Updating role for user $userId to $role via $baseUrl/users/admin/$userId');
+    print('[ApiService] updateUserRole Payload: $payload');
     final response = await http.put(
       Uri.parse('$baseUrl/users/admin/$userId'),
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json'
       },
-      body: jsonEncode({'role': role}),
+      body: jsonEncode(payload),
     );
+    print(
+        '[ApiService] updateUserRole Response Status: ${response.statusCode}, Body: ${response.body}');
     if (response.statusCode != 200) {
       final responseBody = jsonDecode(response.body);
       final errorMessage = responseBody['error'] ??
           responseBody['message'] ??
           'Failed to update role';
+      print('[ApiService] updateUserRole failed. Error: $errorMessage');
       throw Exception('$errorMessage: ${response.statusCode}');
+    } else {
+      print('[ApiService] User role updated successfully.');
     }
   }
 
-  /// Updates the currently authenticated user's profile.
-  /// The `updateData` is a Map containing the fields to update, e.g., {'phone': '12345'}.
   Future<app_user.User> updateProfile(Map<String, dynamic> updateData) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated. Please log in.');
+    if (token == null) {
+      print('[ApiService] updateProfile: Not authenticated.');
+      throw Exception('Not authenticated. Please log in.');
+    }
 
     final String apiUrl = '$baseUrl/users/me';
-    print('ApiService: Updating my profile at $apiUrl');
+    print(
+        '[ApiService] Updating my profile at $apiUrl with payload: $updateData');
 
     try {
       final response = await http.put(
@@ -2090,19 +2610,23 @@ class ApiService {
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] updateProfile Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        // The backend returns the updated user object in the 'user' field of the response
+        print('[ApiService] Profile updated successfully.');
         return app_user.User.fromJson(responseBody['user']);
       } else {
         final errorMessage =
             responseBody['error'] ?? 'Failed to update profile';
+        print('[ApiService] updateProfile failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } on SocketException {
+      print('[ApiService] Network error updating profile.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('ApiService: Error updating profile: ${e.toString()}');
+      print('[ApiService] Error updating profile: ${e.toString()}');
       rethrow;
     }
   }
@@ -2110,33 +2634,48 @@ class ApiService {
   Future<void> processPayment(
       String orderId, double amount, String transactionId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] processPayment: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
+    final payload = {
+      'orderId': orderId,
+      'amount': (amount * 100).toInt(),
+      'transactionId': transactionId
+    };
+    print(
+        '[ApiService] Processing payment for order $orderId via $baseUrl/orders/$orderId/payment');
+    print('[ApiService] processPayment Payload: $payload');
     final response = await http.post(
       Uri.parse('$baseUrl/orders/$orderId/payment'),
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json'
       },
-      body: jsonEncode({
-        'orderId': orderId,
-        'amount': (amount * 100).toInt(),
-        'transactionId': transactionId
-      }),
+      body: jsonEncode(payload),
     );
+    print(
+        '[ApiService] processPayment Response Status: ${response.statusCode}, Body: ${response.body}');
     if (response.statusCode != 200) {
       final responseBody = jsonDecode(response.body);
       final errorMessage =
           responseBody['error'] ?? responseBody['message'] ?? 'Payment failed';
+      print('[ApiService] processPayment failed. Error: $errorMessage');
       throw Exception('$errorMessage: ${response.statusCode}');
+    } else {
+      print(
+          '[ApiService] Payment processed successfully on backend (legacy method).');
     }
   }
 
-  // Fetches all notifications for the currently authenticated user.
   Future<List<NotificationModel>> getNotifications() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getNotifications: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/notifications';
-    print('ApiService: Fetching notifications from $apiUrl');
+    print('[ApiService] Fetching notifications from $apiUrl');
 
     try {
       final response = await http.get(
@@ -2144,8 +2683,11 @@ class ApiService {
         headers: {'Authorization': 'Bearer $token'},
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getNotifications Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Notifications fetched successfully.');
         final List<dynamic> notificationsJson =
             responseBody as List<dynamic>? ?? [];
         return notificationsJson
@@ -2153,64 +2695,103 @@ class ApiService {
                 NotificationModel.fromJson(json as Map<String, dynamic>))
             .toList();
       } else {
-        throw Exception((responseBody as Map<String, dynamic>)['error'] ??
-            'Failed to load notifications');
+        final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
+            'Failed to load notifications';
+        print('[ApiService] getNotifications failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching notifications: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Marks a single notification as read on the backend.
   Future<void> markNotificationAsRead(String notificationId) async {
     final token = await _getToken();
-    if (token == null) return;
+    if (token == null) {
+      print('[ApiService] markNotificationAsRead: Not authenticated.');
+      return;
+    }
     final String apiUrl = '$baseUrl/notifications/$notificationId/read';
+    print(
+        '[ApiService] Marking notification $notificationId as read via $apiUrl');
     try {
-      await http.post(
+      final response = await http.post(
         Uri.parse(apiUrl),
         headers: {'Authorization': 'Bearer $token'},
       );
+      print(
+          '[ApiService] markNotificationAsRead Response Status: ${response.statusCode}, Body: ${response.body}');
+      if (response.statusCode != 200) {
+        print(
+            '[ApiService] Failed to mark notification $notificationId as read. Status: ${response.statusCode}, Body: ${response.body}');
+      } else {
+        print('[ApiService] Notification marked as read successfully.');
+      }
     } catch (e) {
       print(
-          'ApiService: Could not mark notification $notificationId as read: $e');
-      // Optionally rethrow if you want to handle the error in the UI
+          '[ApiService] Could not mark notification $notificationId as read: $e');
     }
   }
 
-  /// Marks all of the user's notifications as read.
   Future<void> markAllNotificationsAsRead() async {
     final token = await _getToken();
-    if (token == null) return;
+    if (token == null) {
+      print('[ApiService] markAllNotificationsAsRead: Not authenticated.');
+      return;
+    }
     final String apiUrl = '$baseUrl/notifications/mark-all-read';
+    print('[ApiService] Marking all notifications as read via $apiUrl');
     try {
-      await http.post(
+      final response = await http.post(
         Uri.parse(apiUrl),
         headers: {'Authorization': 'Bearer $token'},
       );
+      print(
+          '[ApiService] markAllNotificationsAsRead Response Status: ${response.statusCode}, Body: ${response.body}');
+      if (response.statusCode != 200) {
+        print(
+            '[ApiService] Failed to mark all notifications as read. Status: ${response.statusCode}, Body: ${response.body}');
+      } else {
+        print('[ApiService] All notifications marked as read successfully.');
+      }
     } catch (e) {
-      print('ApiService: Could not mark all notifications as read: $e');
+      print('[ApiService] Could not mark all notifications as read: $e');
     }
   }
 
-  /// Deletes all of the user's notifications.
   Future<void> clearAllNotifications() async {
     final token = await _getToken();
-    if (token == null) return;
+    if (token == null) {
+      print('[ApiService] clearAllNotifications: Not authenticated.');
+      return;
+    }
     final String apiUrl = '$baseUrl/notifications/all';
+    print('[ApiService] Clearing all notifications via $apiUrl');
     try {
-      await http.delete(
+      final response = await http.delete(
         Uri.parse(apiUrl),
         headers: {'Authorization': 'Bearer $token'},
       );
+      print(
+          '[ApiService] clearAllNotifications Response Status: ${response.statusCode}, Body: ${response.body}');
+      if (response.statusCode != 200) {
+        print(
+            '[ApiService] Failed to clear all notifications. Status: ${response.statusCode}, Body: ${response.body}');
+      } else {
+        print('[ApiService] All notifications cleared successfully.');
+      }
     } catch (e) {
-      print('ApiService: Could not clear all notifications: $e');
+      print('[ApiService] Could not clear all notifications: $e');
     }
   }
 
   Future<List<app_location.Location>> getLocationHistory(String orderId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getLocationHistory: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final response = await http.get(
       Uri.parse('$baseUrl/orders/$orderId/location-history'),
       headers: {
@@ -2218,28 +2799,34 @@ class ApiService {
         'Content-Type': 'application/json'
       },
     );
+    final responseBody = jsonDecode(response.body);
+    print(
+        '[ApiService] getLocationHistory Response Status: ${response.statusCode}, Body: $responseBody');
     if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body);
+      print('[ApiService] Location history fetched successfully.');
+      final List<dynamic> data = responseBody;
       return data.map((json) => app_location.Location.fromJson(json)).toList();
     } else {
-      final responseBody = jsonDecode(response.body);
       final errorMessage = responseBody['error'] ??
           responseBody['message'] ??
           'Failed to fetch location history';
+      print('[ApiService] getLocationHistory failed. Error: $errorMessage');
       throw Exception('$errorMessage: ${response.statusCode}');
     }
   }
 
-  /// Fetches a paginated and filtered list of all drivers for the admin panel.
   Future<Map<String, dynamic>> adminGetDrivers({
     int page = 1,
     int limit = 15,
     String? searchQuery,
-    String? accountStatus, // e.g., "Active", "Suspended"
-    bool? isAvailableOnline, // e.g., true for "Online", false for "Offline"
+    String? accountStatus,
+    bool? isAvailableOnline,
   }) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetDrivers: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final queryParams = <String, String>{
       'role': 'driver',
@@ -2259,14 +2846,18 @@ class ApiService {
 
     final uri =
         Uri.parse('$baseUrl/users/admin').replace(queryParameters: queryParams);
-    print('ApiService: Getting admin drivers from $uri');
+    print(
+        '[ApiService] Getting admin drivers from $uri with query: $queryParams');
 
     try {
       final response =
           await http.get(uri, headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetDrivers Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Admin drivers fetched successfully.');
         final List<AdminDriverSummaryModel> drivers = (responseBody['users']
                 as List)
             .map((data) =>
@@ -2279,61 +2870,84 @@ class ApiService {
           'totalPages': responseBody['totalPages'],
         };
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to load drivers');
+        final errorMessage = responseBody['error'] ?? 'Failed to load drivers';
+        print('[ApiService] adminGetDrivers failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error fetching admin drivers: ${e.toString()}');
+      print('[ApiService] Error fetching admin drivers: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Fetches the detailed profile of a specific customer for an admin.
   Future<AdminCustomerDetailModel> adminGetCustomerDetails(
       String customerId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetCustomerDetails: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/users/admin/$customerId';
-    print('ApiService: Getting customer details for $customerId from $apiUrl');
+    print('[ApiService] Getting customer details for $customerId from $apiUrl');
 
     try {
       final response = await http
           .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetCustomerDetails Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        // Assumes backend service is enhanced to return the full detail model
+        print('[ApiService] Customer details fetched successfully by admin.');
         return AdminCustomerDetailModel.fromJson(responseBody);
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to load customer details');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load customer details';
+        print(
+            '[ApiService] adminGetCustomerDetails failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print(
+          '[ApiService] Error fetching admin customer details: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Triggers a password reset email for a given user email address.
   Future<void> adminTriggerPasswordReset(String email) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminTriggerPasswordReset: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
-    // This endpoint is public but we call it as an authenticated admin action
     final String apiUrl = '$baseUrl/auth/request-password-reset';
-    print('ApiService: Admin triggering password reset for $email');
+    print(
+        '[ApiService] Admin triggering password reset for $email via $apiUrl');
+    final payload = {'email': email};
+    print('[ApiService] adminTriggerPasswordReset Payload: $payload');
 
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email}),
+        body: jsonEncode(payload),
       );
+      print(
+          '[ApiService] adminTriggerPasswordReset Response Status: ${response.statusCode}, Body: ${response.body}');
 
       if (response.statusCode != 200) {
         final responseBody = jsonDecode(response.body);
-        throw Exception(
-            responseBody['error'] ?? 'Failed to trigger password reset');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to trigger password reset';
+        print(
+            '[ApiService] adminTriggerPasswordReset failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Password reset triggered successfully by admin.');
       }
     } catch (e) {
+      print('[ApiService] Error triggering password reset: ${e.toString()}');
       rethrow;
     }
   }
@@ -2341,28 +2955,40 @@ class ApiService {
   Future<Map<String, dynamic>> submitFeedback(
       String orderId, app_feedback.Feedback feedback) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] submitFeedback: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
+    final payload = feedback.toJson();
+    print(
+        '[ApiService] Submitting feedback for order $orderId via $baseUrl/orders/$orderId/feedback with payload: $payload');
     final response = await http.post(
       Uri.parse('$baseUrl/orders/$orderId/feedback'),
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json'
       },
-      body: jsonEncode(feedback.toJson()),
+      body: jsonEncode(payload),
     );
+    final responseBody = jsonDecode(response.body);
+    print(
+        '[ApiService] submitFeedback Response Status: ${response.statusCode}, Body: $responseBody');
     if (response.statusCode == 201) {
-      return jsonDecode(response.body);
+      print('[ApiService] Feedback submitted successfully.');
+      return responseBody;
     } else {
-      final responseBody = jsonDecode(response.body);
       final errorMessage = responseBody['error'] ??
           responseBody['message'] ??
           'Failed to submit feedback';
+      print('[ApiService] submitFeedback failed. Error: $errorMessage');
       throw Exception('$errorMessage: ${response.statusCode}');
     }
   }
 
   Future<Map<String, dynamic>> googleSignIn(String idToken) async {
     final String apiUrl = '$baseUrl/auth/google/mobile-signin';
+    print('[ApiService] Attempting Google Sign-In with ID Token via $apiUrl');
+    // Don't log full ID token
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
@@ -2370,28 +2996,33 @@ class ApiService {
         body: jsonEncode({'idToken': idToken}),
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] googleSignIn Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
+        print('[ApiService] Google Sign-In successful.');
         return responseBody;
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Google Sign-In failed on the server.');
+        final errorMessage =
+            responseBody['error'] ?? 'Google Sign-In failed on the server.';
+        print('[ApiService] Google Sign-In failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error during Google Sign-In: ${e.toString()}');
       rethrow;
     }
   }
 
-  // --- REFERRALS (CUSTOMER) ---
-  /// Fetches the current user's referral information.
   Future<ReferralModel> getReferralInformation(String customerId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getReferralInformation: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
-    // Note: The backend endpoint is `/referrals`, no customerId in path.
-    // The `authMiddleware` identifies the user.
     final String apiUrl = '$baseUrl/referrals';
     print(
-        'ApiService: Getting referral info for customer $customerId from $apiUrl');
+        '[ApiService] Getting referral info for customer $customerId from $apiUrl');
 
     try {
       final response = await http.get(
@@ -2399,30 +3030,39 @@ class ApiService {
         headers: {'Authorization': 'Bearer $token'},
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getReferralInformation Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Referral information fetched successfully.');
         return ReferralModel.fromJson(responseBody);
       } else {
-        throw Exception(
-            responseBody['error'] ?? 'Failed to get referral information');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to get referral information';
+        print(
+            '[ApiService] getReferralInformation failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } on SocketException {
+      print('[ApiService] Network error fetching referral information.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('ApiService: Error fetching referral information: ${e.toString()}');
+      print(
+          '[ApiService] Error fetching referral information: ${e.toString()}');
       rethrow;
     }
   }
 
-  // --- REFERRALS (ADMIN) ---
-  /// Fetches a paginated list of all referral records for the admin panel.
   Future<Map<String, dynamic>> adminGetReferrals({
     int page = 1,
     int limit = 10,
     String? searchQuery,
   }) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetReferrals: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final queryParams = <String, String>{
       'page': page.toString(),
@@ -2434,14 +3074,18 @@ class ApiService {
 
     final uri = Uri.parse('$baseUrl/referrals/admin')
         .replace(queryParameters: queryParams);
-    print('ApiService: Getting admin referrals from $uri');
+    print(
+        '[ApiService] Getting admin referrals from $uri with query: $queryParams');
 
     try {
       final response =
           await http.get(uri, headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetReferrals Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Admin referrals fetched successfully.');
         final List<AdminReferralSummaryModel> referrals =
             (responseBody['referrals'] as List)
                 .map((data) => AdminReferralSummaryModel.fromJson(
@@ -2455,24 +3099,29 @@ class ApiService {
           'totalReferrals': responseBody['totalReferrals'],
         };
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to load referrals');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to load referrals';
+        print('[ApiService] adminGetReferrals failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
-      print('ApiService: Error fetching admin referrals: ${e.toString()}');
+      print('[ApiService] Error fetching admin referrals: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Sends the device's FCM token to the backend to register for push notifications.
   Future<void> registerFcmToken(String token) async {
     final authToken = await _getToken();
     if (authToken == null) {
-      print('ApiService: Cannot register FCM token, user not authenticated.');
+      print(
+          '[ApiService] registerFcmToken: Cannot register FCM token, user not authenticated.');
       return;
     }
 
     final String apiUrl = '$baseUrl/users/me/fcm-token';
-    print('ApiService: Registering FCM token to $apiUrl');
+    print('[ApiService] Registering FCM token to $apiUrl');
+    final payload = {'fcmToken': token};
+    print('[ApiService] registerFcmToken Payload: $payload');
 
     try {
       final response = await http.post(
@@ -2481,31 +3130,35 @@ class ApiService {
           'Authorization': 'Bearer $authToken',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'fcmToken': token}),
+        body: jsonEncode(payload),
       );
+      print(
+          '[ApiService] registerFcmToken Response Status: ${response.statusCode}, Body: ${response.body}');
 
       if (response.statusCode != 200) {
         print(
-            'ApiService: Failed to register FCM token. Status: ${response.statusCode}, Body: ${response.body}');
+            '[ApiService] Failed to register FCM token. Status: ${response.statusCode}, Body: ${response.body}');
       } else {
-        print('ApiService: FCM token registered successfully.');
+        print('[ApiService] FCM token registered successfully.');
       }
     } catch (e) {
-      print('ApiService: Error registering FCM token: $e');
+      print('[ApiService] Error registering FCM token: $e');
     }
   }
 
-  // --- START OF VOICE CALLING WITH AGORA CHANGES ---
-  /// Fetches an Agora RTC token from the backend for initiating a voice call.
-  /// This method is part of the API service.
   Future<String> getAgoraToken(String channelName) async {
     final token = await _getToken();
-    if (token == null)
+    if (token == null) {
+      print(
+          '[ApiService] getAgoraToken: Not authenticated. Cannot get Agora token.');
       throw Exception('Not authenticated. Cannot get Agora token.');
+    }
 
     final String apiUrl = '$baseUrl/voice/agora-token';
     print(
-        'ApiService: Requesting Agora token for channel "$channelName" from $apiUrl');
+        '[ApiService] Requesting Agora token for channel "$channelName" from $apiUrl');
+    final payload = {'channelName': channelName};
+    print('[ApiService] getAgoraToken Payload: $payload');
 
     try {
       final response = await http.post(
@@ -2514,77 +3167,104 @@ class ApiService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'channelName': channelName}),
+        body: jsonEncode(payload),
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getAgoraToken Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
         final String agoraToken = responseBody['token'] as String;
-        print('ApiService: Successfully received Agora token.');
+        print('[ApiService] Successfully received Agora token.');
         return agoraToken;
       } else {
         final errorMessage =
             responseBody['error'] ?? 'Failed to get Agora token';
+        print('[ApiService] getAgoraToken failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } on SocketException {
+      print('[ApiService] Network error getting Agora token.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('ApiService: Error getting Agora token: $e');
+      print('[ApiService] Error getting Agora token: $e');
       rethrow;
     }
   }
-  // --- END OF VOICE CALLING WITH AGORA CHANGES ---
 
   Future<Map<String, dynamic>> adminGetReport({
     required String reportType,
     String period = 'weekly',
   }) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetReport: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final uri = Uri.parse('$baseUrl/reports').replace(queryParameters: {
       'reportType': reportType,
       'period': period,
     });
 
-    print('ApiService: Getting report from $uri');
+    print('[ApiService] Getting report from $uri');
 
     try {
       final response =
           await http.get(uri, headers: {'Authorization': 'Bearer $token'});
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] adminGetReport Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Report fetched successfully.');
         return responseBody;
       } else {
-        throw Exception(responseBody['error'] ?? 'Failed to load report');
+        final errorMessage = responseBody['error'] ?? 'Failed to load report';
+        print('[ApiService] adminGetReport failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error getting report: ${e.toString()}');
       rethrow;
     }
   }
 
   Future<Map<String, dynamic>> initializeCardTokenization() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] initializeCardTokenization: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/payments/tokenize-card/initialize';
+    print('[ApiService] Initializing card tokenization via $apiUrl');
     final response = await http
         .post(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
+    final responseBody = jsonDecode(response.body);
+    print(
+        '[ApiService] initializeCardTokenization Response Status: ${response.statusCode}, Body: $responseBody');
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      print('[ApiService] Card tokenization initialized successfully.');
+      return responseBody;
     } else {
+      final errorMessage =
+          responseBody['error'] ?? 'Failed to initialize card tokenization.';
+      print(
+          '[ApiService] initializeCardTokenization failed. Error: $errorMessage');
       throw Exception('Failed to initialize card tokenization.');
     }
   }
 
   Future<List<PaymentMethodModel>> getPaymentMethods() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] getPaymentMethods: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/payments/methods';
-    print('ApiService: Getting payment methods from $apiUrl');
+    print('[ApiService] Getting payment methods from $apiUrl');
 
     try {
       final response = await http.get(
@@ -2592,125 +3272,190 @@ class ApiService {
         headers: {'Authorization': 'Bearer $token'},
       );
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] getPaymentMethods Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
+        print('[ApiService] Payment methods fetched successfully.');
         final List<dynamic> methodsJson = responseBody as List<dynamic>? ?? [];
         return methodsJson
             .map((json) =>
                 PaymentMethodModel.fromJson(json as Map<String, dynamic>))
             .toList();
       } else {
-        throw Exception((responseBody as Map<String, dynamic>)['error'] ??
-            'Failed to load payment methods');
+        final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
+            'Failed to load payment methods';
+        print('[ApiService] getPaymentMethods failed. Error: $errorMessage');
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Error fetching payment methods: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Creates a SetupIntent using the admin-configured default gateway.
   Future<Map<String, dynamic>> createSetupIntent() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] createSetupIntent: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
     final String apiUrl = '$baseUrl/payments/setup-intent';
+    print('[ApiService] Creating SetupIntent via $apiUrl');
     final response = await http.post(
       Uri.parse(apiUrl),
       headers: {'Authorization': 'Bearer $token'},
     );
+    final responseBody = jsonDecode(response.body);
+    print(
+        '[ApiService] createSetupIntent Response Status: ${response.statusCode}, Body: $responseBody');
     if (response.statusCode == 200) {
-      return jsonDecode(response.body); // Returns { clientSecret, gateway }
+      print('[ApiService] SetupIntent created successfully.');
+      return responseBody;
     } else {
+      final errorMessage =
+          responseBody['error'] ?? 'Failed to initialize card setup';
+      print('[ApiService] createSetupIntent failed. Error: $errorMessage');
       throw Exception('Failed to initialize card setup');
     }
   }
 
-  // --- NEW ADMIN METHODS ---
-
   Future<Map<String, dynamic>> adminGetPaymentConfig() async {
     final token = await _getToken();
-    if (token == null) throw Exception('Admin not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminGetPaymentConfig: Admin not authenticated.');
+      throw Exception('Admin not authenticated.');
+    }
     final String apiUrl = '$baseUrl/admin/config/payment-gateway';
+    print('[ApiService] Getting admin payment config from $apiUrl');
     final response = await http
         .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
+    final responseBody = jsonDecode(response.body);
+    print(
+        '[ApiService] adminGetPaymentConfig Response Status: ${response.statusCode}, Body: $responseBody');
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      print('[ApiService] Admin payment config fetched successfully.');
+      return responseBody;
     } else {
+      final errorMessage =
+          responseBody['error'] ?? 'Failed to fetch payment configuration.';
+      print('[ApiService] adminGetPaymentConfig failed. Error: $errorMessage');
       throw Exception('Failed to fetch payment configuration.');
     }
   }
 
   Future<void> adminUpdatePaymentGateway(String gateway) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Admin not authenticated.');
+    if (token == null) {
+      print('[ApiService] adminUpdatePaymentGateway: Admin not authenticated.');
+      throw Exception('Admin not authenticated.');
+    }
     final String apiUrl = '$baseUrl/admin/config/payment-gateway';
+    print('[ApiService] Updating payment gateway to $gateway via $apiUrl');
+    final payload = {'gateway': gateway};
+    print('[ApiService] adminUpdatePaymentGateway Payload: $payload');
     final response = await http.patch(
       Uri.parse(apiUrl),
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json'
       },
-      body: jsonEncode({'gateway': gateway}),
+      body: jsonEncode(payload),
     );
+    print(
+        '[ApiService] adminUpdatePaymentGateway Response Status: ${response.statusCode}, Body: ${response.body}');
     if (response.statusCode != 200) {
+      final errorMessage = jsonDecode(response.body)['error'] ??
+          'Failed to update payment gateway.';
+      print(
+          '[ApiService] adminUpdatePaymentGateway failed. Error: $errorMessage');
       throw Exception('Failed to update payment gateway.');
+    } else {
+      print('[ApiService] Payment gateway updated successfully by admin.');
     }
   }
 
-  /// Deletes a saved payment method.
   Future<void> deletePaymentMethod(String methodId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] deletePaymentMethod: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/payments/methods/$methodId';
-    print('ApiService: Deleting payment method $methodId');
+    print('[ApiService] Deleting payment method $methodId via $apiUrl');
 
     try {
       final response = await http.delete(
         Uri.parse(apiUrl),
         headers: {'Authorization': 'Bearer $token'},
       );
+      print(
+          '[ApiService] deletePaymentMethod Response Status: ${response.statusCode}, Body: ${response.body}');
 
       if (response.statusCode != 200) {
         final responseBody = jsonDecode(response.body);
-        throw Exception(
-            responseBody['error'] ?? 'Failed to delete payment method');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to delete payment method';
+        print('[ApiService] deletePaymentMethod failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Payment method deleted successfully.');
       }
     } catch (e) {
+      print('[ApiService] Error deleting payment method: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Sets a payment method as the default.
   Future<void> setDefaultPaymentMethod(String methodId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Not authenticated.');
+    if (token == null) {
+      print('[ApiService] setDefaultPaymentMethod: Not authenticated.');
+      throw Exception('Not authenticated.');
+    }
 
     final String apiUrl = '$baseUrl/payments/methods/$methodId/set-default';
-    print('ApiService: Setting payment method $methodId as default');
+    print(
+        '[ApiService] Setting payment method $methodId as default via $apiUrl');
 
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
         headers: {'Authorization': 'Bearer $token'},
       );
+      print(
+          '[ApiService] setDefaultPaymentMethod Response Status: ${response.statusCode}, Body: ${response.body}');
 
       if (response.statusCode != 200) {
         final responseBody = jsonDecode(response.body);
-        throw Exception(
-            responseBody['error'] ?? 'Failed to set default payment method');
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to set default payment method';
+        print(
+            '[ApiService] setDefaultPaymentMethod failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      } else {
+        print('[ApiService] Payment method set as default successfully.');
       }
     } catch (e) {
+      print(
+          '[ApiService] Error setting default payment method: ${e.toString()}');
       rethrow;
     }
   }
 
-  /// Initializes a payment on the backend and gets an access_code.
   Future<Map<String, dynamic>> initializePaymentForOrder(String orderId) async {
     final token = await _getToken();
-    if (token == null) throw Exception('Authentication token not found.');
+    if (token == null) {
+      print(
+          '[ApiService] initializePaymentForOrder: Authentication token not found.');
+      throw Exception('Authentication token not found.');
+    }
 
     final String apiUrl = '$baseUrl/payments/initialize';
-    print('ApiService: Initializing payment for order $orderId via $apiUrl');
+    print('[ApiService] Initializing payment for order $orderId via $apiUrl');
+    final payload = {'orderId': orderId};
+    print('[ApiService] initializePaymentForOrder Payload: $payload');
 
     try {
       final response = await http.post(
@@ -2719,18 +3464,25 @@ class ApiService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({'orderId': orderId}),
+        body: jsonEncode(payload),
       );
 
       final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] initializePaymentForOrder Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
-        return responseBody; // Expects { accessCode, paymentNeeded }
+        print(
+            '[ApiService] Payment initialized successfully. Access code: ${responseBody['accessCode']}');
+        return responseBody;
       } else {
         final errorMessage =
             responseBody['error'] ?? 'Failed to initialize payment';
+        print(
+            '[ApiService] initializePaymentForOrder failed. Error: $errorMessage');
         throw Exception(errorMessage);
       }
     } catch (e) {
+      print('[ApiService] Failed to initialize payment: ${e.toString()}');
       throw Exception('Failed to initialize payment: ${e.toString()}');
     }
   }

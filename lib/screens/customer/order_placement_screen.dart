@@ -23,7 +23,7 @@ import '../../widgets/button.dart';
 import '../../widgets/card.dart';
 import '../../widgets/input.dart';
 import './address_list_screen.dart';
-import './payment_screen.dart'; // Ensure this points to your PaymentScreen
+import './payment_screen.dart';
 import './order_summary_screen.dart';
 import './order_details_screen.dart';
 import '../customer/customer_dashboard_screen.dart';
@@ -83,7 +83,6 @@ class OrderPlacementScreen extends StatefulWidget {
   final List<Map<String, dynamic>>? lastOrderItems;
   final AddressModel? initialAddress;
   final String? customerId;
-  //final String? promoCodeToApply; // Commented out as per previous context
   final String? preselectedCylinderIdFromDeal;
 
   const OrderPlacementScreen({
@@ -92,7 +91,6 @@ class OrderPlacementScreen extends StatefulWidget {
     this.lastOrderItems,
     this.initialAddress,
     this.customerId,
-    //this.promoCodeToApply,
     this.preselectedCylinderIdFromDeal,
   });
 
@@ -138,23 +136,18 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   @override
   void initState() {
     super.initState();
+    print('[OrderPlacementScreen] initState: Screen initialized.');
     if (widget.initialAddress != null) {
       _selectedDeliveryAddress = widget.initialAddress;
       _isLoadingAddress = false;
+      print(
+          '[OrderPlacementScreen] initState: Initial address provided: ${_selectedDeliveryAddress?.fullAddress}');
     }
-    /*
-    if (widget.promoCodeToApply != null &&
-        widget.promoCodeToApply!.isNotEmpty) {
-      _promoCodeController.text = widget.promoCodeToApply!;
-      _appliedUIPromotion = Promotion(
-          code: widget.promoCodeToApply!,
-          description: "Promo code will be attempted");
-    }*/
 
     _entryAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 700));
     _sectionSlideAnimations = List.generate(
-      8, // Increased for new referral card
+      8,
       (index) => Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero)
           .animate(CurvedAnimation(
               parent: _entryAnimController,
@@ -166,18 +159,28 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   }
 
   Future<void> _initializeScreenData() async {
-    if (!mounted) return;
+    if (!mounted) {
+      print(
+          '[OrderPlacementScreen] _initializeScreenData: Widget not mounted, aborting initialization.');
+      return;
+    }
     setState(() {
       _isLoadingInitialData = true;
       _initialDataErrorMessage = null;
     });
+    print(
+        '[OrderPlacementScreen] _initializeScreenData: Starting data initialization.');
 
     try {
       final String? currentUserId =
           widget.customerId ?? await _authService.getUserId();
       if (currentUserId == null || currentUserId.isEmpty) {
+        print(
+            '[OrderPlacementScreen] _initializeScreenData: User not identified. Throwing exception.');
         throw Exception("User not identified. Please login again.");
       }
+      print(
+          '[OrderPlacementScreen] _initializeScreenData: Identified user ID: $currentUserId');
 
       final results = await Future.wait([
         _apiService.getSystemConfig(),
@@ -186,6 +189,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
       final systemConfig = results[0] as SystemConfigModel;
       final userProfile = results[1] as app_user.User;
+      print(
+          '[OrderPlacementScreen] _initializeScreenData: System config and user profile fetched.');
 
       if (mounted) {
         setState(() {
@@ -202,35 +207,52 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                   ))
               .toList();
 
+          print(
+              '[OrderPlacementScreen] _initializeScreenData: Fee settings and cylinder configurations loaded. Wallet Balance: $_walletBalance');
+
           if (_selectedDeliveryAddress == null &&
               userProfile.defaultAddressId != null &&
               userProfile.defaultAddressId!.isNotEmpty) {
+            print(
+                '[OrderPlacementScreen] _initializeScreenData: No initial address, fetching default address: ${userProfile.defaultAddressId}');
             _fetchAndSetDefaultAddress(userProfile.defaultAddressId!);
           } else {
             _isLoadingAddress = false;
+            print(
+                '[OrderPlacementScreen] _initializeScreenData: Either initial address provided or no default address to fetch. _isLoadingAddress set to false.');
           }
 
           _prepopulateItemsIfNeeded();
 
           _isLoadingInitialData = false;
+          print(
+              '[OrderPlacementScreen] _initializeScreenData: Data initialization complete. _isLoadingInitialData set to false.');
         });
         _entryAnimController.forward();
+        print(
+            '[OrderPlacementScreen] _initializeScreenData: Entry animation started.');
       }
     } catch (e) {
       if (mounted) {
-        print("Error initializing OrderPlacementScreen data: $e");
+        print(
+            "[OrderPlacementScreen] Error initializing OrderPlacementScreen data: $e");
         setState(() {
           _initialDataErrorMessage =
               "Error loading page setup: ${e.toString().replaceFirst("Exception: ", "")}";
           _isLoadingInitialData = false;
           _isLoadingAddress = false;
+          print(
+              '[OrderPlacementScreen] _initializeScreenData: Error State: $_initialDataErrorMessage');
         });
       }
     }
   }
 
   Future<void> _fetchAndSetDefaultAddress(String defaultAddressId) async {
+    if (!mounted) return;
     setState(() => _isLoadingAddress = true);
+    print(
+        '[OrderPlacementScreen] _fetchAndSetDefaultAddress: Fetching default address $defaultAddressId.');
     try {
       final allAddresses = await _apiService.getMyAddresses();
       if (allAddresses.isNotEmpty && mounted) {
@@ -241,24 +263,37 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             _selectedDeliveryAddress = foundDefault;
             _isLoadingAddress = false;
           });
+          print(
+              '[OrderPlacementScreen] _fetchAndSetDefaultAddress: Default address set to: ${foundDefault.fullAddress}');
         } else {
           setState(() => _isLoadingAddress = false);
+          print(
+              '[OrderPlacementScreen] _fetchAndSetDefaultAddress: Default address $defaultAddressId not found in user\'s addresses.');
         }
       } else if (mounted) {
         setState(() => _isLoadingAddress = false);
+        print(
+            '[OrderPlacementScreen] _fetchAndSetDefaultAddress: No addresses found for user.');
       }
     } catch (e) {
       if (mounted) {
-        print("Error fetching default address in OrderPlacement: $e");
+        print(
+            "[OrderPlacementScreen] Error fetching default address in OrderPlacement: $e");
         setState(() => _isLoadingAddress = false);
       }
     }
   }
 
   void _prepopulateItemsIfNeeded() {
-    if (_availableCylindersFromConfig.isEmpty) return;
+    if (_availableCylindersFromConfig.isEmpty) {
+      print(
+          '[OrderPlacementScreen] _prepopulateItemsIfNeeded: No cylinders available to prepopulate.');
+      return;
+    }
 
     if (widget.isRefill && widget.lastOrderItems != null) {
+      print(
+          '[OrderPlacementScreen] _prepopulateItemsIfNeeded: Refill order, attempting to prepopulate from last order items.');
       for (var itemData in widget.lastOrderItems!) {
         final cylinderId = itemData['cylinderId'] as String?;
         final quantity = itemData['quantity'] as int?;
@@ -268,20 +303,37 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           if (matchingCylinder != null) {
             _updateOrderItemQuantity(matchingCylinder, quantity,
                 fromInit: true);
+            print(
+                '[OrderPlacementScreen] _prepopulateItemsIfNeeded: Added ${quantity}x ${matchingCylinder.sizeLabel} for refill.');
+          } else {
+            print(
+                '[OrderPlacementScreen] _prepopulateItemsIfNeeded: Matching cylinder for ID $cylinderId not found in config.');
           }
         }
       }
     } else if (widget.preselectedCylinderIdFromDeal != null) {
+      print(
+          '[OrderPlacementScreen] _prepopulateItemsIfNeeded: Preselected cylinder from deal: ${widget.preselectedCylinderIdFromDeal}');
       final matchingCylinder = _availableCylindersFromConfig.firstWhereOrNull(
           (cyl) => cyl.id == widget.preselectedCylinderIdFromDeal);
       if (matchingCylinder != null) {
         _updateOrderItemQuantity(matchingCylinder, 1, fromInit: true);
+        print(
+            '[OrderPlacementScreen] _prepopulateItemsIfNeeded: Added 1x ${matchingCylinder.sizeLabel} from deal.');
+      } else {
+        print(
+            '[OrderPlacementScreen] _prepopulateItemsIfNeeded: Preselected cylinder ${widget.preselectedCylinderIdFromDeal} not found in config.');
       }
+    } else {
+      print(
+          '[OrderPlacementScreen] _prepopulateItemsIfNeeded: No items to prepopulate.');
     }
   }
 
   @override
   void dispose() {
+    print(
+        '[OrderPlacementScreen] dispose: Disposing controllers and animations.');
     _entryAnimController.dispose();
     _promoCodeController.dispose();
     _referralCodeController.dispose();
@@ -292,9 +344,13 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
   Future<void> _handleChangeAddress() async {
     HapticFeedback.lightImpact();
+    print(
+        '[OrderPlacementScreen] _handleChangeAddress: User initiated change address flow.');
     if (widget.customerId == null || widget.customerId!.isEmpty) {
       _showFeedbackSnackbar("User information missing.",
           isError: true, context: context);
+      print(
+          '[OrderPlacementScreen] _handleChangeAddress: Customer ID is null or empty, cannot change address.');
       return;
     }
     final result = await Navigator.of(context, rootNavigator: true).pushNamed(
@@ -312,6 +368,11 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       });
       _showFeedbackSnackbar('Delivery address updated.',
           isSuccess: true, context: context);
+      print(
+          '[OrderPlacementScreen] _handleChangeAddress: New address selected: ${result.fullAddress}');
+    } else {
+      print(
+          '[OrderPlacementScreen] _handleChangeAddress: Address selection cancelled or no new address selected.');
     }
   }
 
@@ -323,12 +384,16 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           _orderItems.indexWhere((item) => item.cylinder.id == cylinder.id);
       if (existingIndex != -1) {
         _orderItems[existingIndex].quantity += change;
+        print(
+            '[OrderPlacementScreen] _updateOrderItemQuantity: Updating ${cylinder.sizeLabel} quantity by $change. New quantity: ${_orderItems[existingIndex].quantity}');
         if (_orderItems[existingIndex].quantity <= 0) {
           _orderItems.removeAt(existingIndex);
           if (!fromInit) {
             _showFeedbackSnackbar('${cylinder.sizeLabel} removed from order.',
                 context: context);
           }
+          print(
+              '[OrderPlacementScreen] _updateOrderItemQuantity: ${cylinder.sizeLabel} quantity is 0 or less, removed from order.');
         }
       } else if (change > 0) {
         _orderItems.add(OrderItem(cylinder: cylinder, quantity: change));
@@ -336,17 +401,34 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           _showFeedbackSnackbar('${cylinder.sizeLabel} added to order.',
               isSuccess: true, context: context);
         }
+        print(
+            '[OrderPlacementScreen] _updateOrderItemQuantity: Adding ${change}x ${cylinder.sizeLabel} to order.');
+      } else {
+        print(
+            '[OrderPlacementScreen] _updateOrderItemQuantity: Attempted to decrease quantity of non-existent item or change is zero: ${cylinder.sizeLabel}');
       }
     });
   }
 
-  double _calculateItemsSubtotal() =>
-      _orderItems.fold(0.0, (sum, item) => sum + item.itemSubtotal);
+  double _calculateItemsSubtotal() {
+    final subtotal =
+        _orderItems.fold(0.0, (sum, item) => sum + item.itemSubtotal);
+    // print('[OrderPlacementScreen] _calculateItemsSubtotal: Calculated subtotal: $subtotal'); // Too frequent for debug
+    return subtotal;
+  }
 
   double _calculateDeliveryFee() {
-    if (_feeSettings == null) return 0.0;
+    if (_feeSettings == null) {
+      print(
+          '[OrderPlacementScreen] _calculateDeliveryFee: Fee settings null, returning 0.');
+      return 0.0;
+    }
     if (_appliedUIPromotion?.freeDelivery == true &&
-        _appliedUIPromotion?.code.isNotEmpty == true) return 0.0;
+        _appliedUIPromotion?.code.isNotEmpty == true) {
+      print(
+          '[OrderPlacementScreen] _calculateDeliveryFee: Free delivery promo applied, returning 0.');
+      return 0.0;
+    }
 
     double totalDeliveryFee = _isExpressDelivery
         ? _feeSettings!.baseDeliveryFee + _feeSettings!.expressDeliverySurcharge
@@ -359,33 +441,54 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
     if (totalQuantity > 1) {
       totalDeliveryFee += (totalQuantity - 1) * perAdditionalCylinderSurcharge;
+      print(
+          '[OrderPlacementScreen] _calculateDeliveryFee: Applied additional cylinder surcharge. Total quantity: $totalQuantity. Surcharge: ${(totalQuantity - 1) * perAdditionalCylinderSurcharge}');
     }
-
+    print(
+        '[OrderPlacementScreen] _calculateDeliveryFee: Calculated delivery fee: $totalDeliveryFee (Express: $_isExpressDelivery)');
     return totalDeliveryFee;
   }
 
   double _calculateVat(double amountSubjectToVat) {
-    if (_feeSettings == null) return 0.0;
-    return amountSubjectToVat * (_feeSettings!.vatPercentage / 100);
+    if (_feeSettings == null) {
+      // print('[OrderPlacementScreen] _calculateVat: Fee settings null, returning 0.'); // Too frequent
+      return 0.0;
+    }
+    final vat = amountSubjectToVat * (_feeSettings!.vatPercentage / 100);
+    // print('[OrderPlacementScreen] _calculateVat: Calculated VAT: $vat for amount: $amountSubjectToVat'); // Too frequent
+    return vat;
   }
 
   double _calculateServiceFee(double subtotal) {
-    if (_feeSettings == null) return 0.0;
-    return subtotal * (_feeSettings!.serviceFeePercentage / 100);
+    if (_feeSettings == null) {
+      // print('[OrderPlacementScreen] _calculateServiceFee: Fee settings null, returning 0.'); // Too frequent
+      return 0.0;
+    }
+    final serviceFee = subtotal * (_feeSettings!.serviceFeePercentage / 100);
+    // print('[OrderPlacementScreen] _calculateServiceFee: Calculated service fee: $serviceFee for subtotal: $subtotal'); // Too frequent
+    return serviceFee;
   }
 
   double _calculateTotalBeforeWallet() {
     final itemsSubtotal = _calculateItemsSubtotal();
-    if (itemsSubtotal == 0 && _orderItems.isEmpty) return 0.0;
+    if (itemsSubtotal == 0 && _orderItems.isEmpty) {
+      print(
+          '[OrderPlacementScreen] _calculateTotalBeforeWallet: No items in order, total is 0.');
+      return 0.0;
+    }
 
     double currentDiscountForDisplay = 0.0;
     if (_appliedUIPromotion != null) {
       if (_appliedUIPromotion!.fixedDiscountAmount > 0) {
         currentDiscountForDisplay =
             _appliedUIPromotion!.fixedDiscountAmount * 100;
+        print(
+            '[OrderPlacementScreen] _calculateTotalBeforeWallet: Fixed discount applied: $currentDiscountForDisplay');
       } else if (_appliedUIPromotion!.discountPercentage > 0) {
         currentDiscountForDisplay =
             itemsSubtotal * _appliedUIPromotion!.discountPercentage;
+        print(
+            '[OrderPlacementScreen] _calculateTotalBeforeWallet: Percentage discount applied: $currentDiscountForDisplay');
       }
     }
     final subtotalAfterDisplayDiscount =
@@ -399,20 +502,27 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
         : itemsSubtotal);
     final deliveryFee = _calculateDeliveryFee();
 
-    return (subtotalAfterDisplayDiscount > 0
+    final total = (subtotalAfterDisplayDiscount > 0
             ? subtotalAfterDisplayDiscount
             : itemsSubtotal) +
         deliveryFee +
         vat +
         serviceFee;
+    print(
+        '[OrderPlacementScreen] _calculateTotalBeforeWallet: Calculated total before wallet: $total (Subtotal: $itemsSubtotal, Discount: $currentDiscountForDisplay, Delivery: $deliveryFee, VAT: $vat, Service: $serviceFee)');
+    return total;
   }
 
   double _getWalletAmountToUseForOrder() {
     final totalBeforeWallet = _calculateTotalBeforeWallet();
     if (!_useWalletBalance ||
         _walletBalance <= 0 ||
-        _currentUserProfile == null) return 0.0;
+        _currentUserProfile == null) {
+      // print('[OrderPlacementScreen] _getWalletAmountToUseForOrder: Wallet not used or insufficient balance, returning 0.'); // Too frequent
+      return 0.0;
+    }
     double amountToUse = min(totalBeforeWallet, _walletBalance);
+    // print('[OrderPlacementScreen] _getWalletAmountToUseForOrder: Calculated wallet amount to use: $amountToUse'); // Too frequent
     return amountToUse > 0 ? amountToUse : 0.0;
   }
 
@@ -420,6 +530,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     final totalBeforeWallet = _calculateTotalBeforeWallet();
     final walletDeduction = _getWalletAmountToUseForOrder();
     final finalAmount = totalBeforeWallet - walletDeduction;
+    // print('[OrderPlacementScreen] _calculateGrandTotalForDisplay: Calculated grand total for display: $finalAmount'); // Too frequent
     return finalAmount > 0 ? finalAmount : 0.0;
   }
 
@@ -427,10 +538,14 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     HapticFeedback.lightImpact();
     final code = _promoCodeController.text.trim().toUpperCase();
     FocusScope.of(context).unfocus();
+    print(
+        '[OrderPlacementScreen] _handleApplyPromoCodeButton: Attempting to apply promo code: "$code"');
 
     if (code.isEmpty) {
       _showFeedbackSnackbar('Please enter a promo code.',
           isError: true, context: context);
+      print(
+          '[OrderPlacementScreen] _handleApplyPromoCodeButton: Promo code is empty.');
       return;
     }
 
@@ -453,6 +568,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           'Promo code "$code" applied for estimation! Final validation by server.',
           isSuccess: true,
           context: context);
+      print(
+          '[OrderPlacementScreen] _handleApplyPromoCodeButton: UI-side promo code "$code" matched and applied: ${_appliedUIPromotion?.description}');
     } else {
       setState(() {
         _appliedUIPromotion = null;
@@ -461,18 +578,26 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           '"$code" will be attempted. Actual discount applied by server.',
           isError: false,
           context: context);
+      print(
+          '[OrderPlacementScreen] _handleApplyPromoCodeButton: UI-side promo code "$code" not matched. Will rely on server validation.');
     }
   }
 
   Future<void> _handlePlaceOrder() async {
+    print(
+        '[OrderPlacementScreen] _handlePlaceOrder: Initiating order placement process.');
     if (_selectedDeliveryAddress == null) {
       _showFeedbackSnackbar("Please select a delivery address.",
           isError: true, context: context);
+      print(
+          '[OrderPlacementScreen] _handlePlaceOrder: Validation failed - No delivery address selected.');
       return;
     }
     if (_orderItems.isEmpty) {
       _showFeedbackSnackbar("Please add at least one item to your order.",
           isError: true, context: context);
+      print(
+          '[OrderPlacementScreen] _handlePlaceOrder: Validation failed - No items in order.');
       return;
     }
     if (!_isSelfRecipient &&
@@ -481,6 +606,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           'Please provide valid recipient details if not for self.',
           isError: true,
           context: context);
+      print(
+          '[OrderPlacementScreen] _handlePlaceOrder: Validation failed - Invalid recipient details.');
       return;
     }
     final String? currentActiveCustomerId =
@@ -488,10 +615,14 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     if (currentActiveCustomerId == null || currentActiveCustomerId.isEmpty) {
       _showFeedbackSnackbar("User not identified. Please re-login.",
           isError: true, context: context);
+      print(
+          '[OrderPlacementScreen] _handlePlaceOrder: Validation failed - Current user ID not found.');
       return;
     }
 
     setState(() => _isPlacingOrder = true);
+    print(
+        '[OrderPlacementScreen] _handlePlaceOrder: Setting _isPlacingOrder to true.');
 
     final List<Map<String, dynamic>> orderItemsPayload =
         _orderItems.map((item) {
@@ -502,6 +633,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
         'unitPrice': item.cylinder.price,
       };
     }).toList();
+    print(
+        '[OrderPlacementScreen] _handlePlaceOrder: Prepared order items payload: $orderItemsPayload');
 
     String recipientNameValue;
     String recipientPhoneValue;
@@ -515,11 +648,17 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             isError: true,
             context: context);
         setState(() => _isPlacingOrder = false);
+        print(
+            '[OrderPlacementScreen] _handlePlaceOrder: Validation failed - Self recipient phone number is empty.');
         return;
       }
+      print(
+          '[OrderPlacementScreen] _handlePlaceOrder: Recipient is self. Name: $recipientNameValue, Phone: $recipientPhoneValue');
     } else {
       recipientNameValue = _recipientNameController.text.trim();
       recipientPhoneValue = _recipientPhoneController.text.trim();
+      print(
+          '[OrderPlacementScreen] _handlePlaceOrder: Recipient is custom. Name: $recipientNameValue, Phone: $recipientPhoneValue');
     }
 
     final Map<String, dynamic> orderPayloadForApi = {
@@ -529,23 +668,31 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       'recipientPhone': recipientPhoneValue,
       'isExpress': _isExpressDelivery,
       'useWalletBalance': _useWalletBalance,
-      // Pass promo code if entered
       if (_promoCodeController.text.trim().isNotEmpty)
         'promoCodeApplied': _promoCodeController.text.trim().toUpperCase(),
-      // Pass referral code if entered
       if (_referralCodeController.text.trim().isNotEmpty)
         'referralCode': _referralCodeController.text.trim().toUpperCase(),
     };
+    print(
+        '[OrderPlacementScreen] _handlePlaceOrder: Final order payload for API: $orderPayloadForApi');
 
     try {
       final PlaceOrderResponseModel response =
           await _apiService.placeOrder(orderPayloadForApi);
+      print(
+          '[OrderPlacementScreen] _handlePlaceOrder: API call to placeOrder returned response. Payment Needed: ${response.paymentNeeded}, Order ID: ${response.order.id}');
 
-      if (!mounted) return;
+      if (!mounted) {
+        print(
+            '[OrderPlacementScreen] _handlePlaceOrder: Widget unmounted after API call.');
+        return;
+      }
 
       if (response.paymentNeeded) {
         _showFeedbackSnackbar("Order confirmed. Proceeding to payment...",
             isError: false, context: context);
+        print(
+            '[OrderPlacementScreen] _handlePlaceOrder: Payment needed. Navigating to PaymentScreen with order ID: ${response.order.id}, amount: ${response.grandTotalToPay}');
 
         Navigator.of(context).pushReplacementNamed(
           PaymentScreen.routeName,
@@ -564,13 +711,16 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                 : "Order placed successfully!",
             isError: false,
             context: context);
+        print(
+            '[OrderPlacementScreen] _handlePlaceOrder: No payment needed. Order placed directly. Navigating to OrderSummaryScreen.');
         Navigator.of(context).pushNamedAndRemoveUntil(
           OrderSummaryScreen.routeName,
           ModalRoute.withName(CustomerDashboardScreen.routeName),
           arguments: {
             'orderId': response.order.id,
             'showConfirmation': true,
-            'orderPayload': response.order,
+            'orderPayload':
+                response.order, // Pass actual order object for summary
           },
         );
       }
@@ -580,10 +730,14 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             "Order placement failed: ${e.toString().replaceFirst("Exception: ", "")}",
             isError: true,
             context: context);
+        print(
+            '[OrderPlacementScreen] _handlePlaceOrder: Error during order placement: $e');
       }
     } finally {
       if (mounted) {
         setState(() => _isPlacingOrder = false);
+        print(
+            '[OrderPlacementScreen] _handlePlaceOrder: Setting _isPlacingOrder to false in finally block.');
       }
     }
   }
@@ -593,6 +747,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     final themeProvider = Provider.of<ThemeProvider>(context);
     final appBarTitle = widget.isRefill ? 'Refill Your Gas' : 'Place New Order';
     final double currentGrandTotalDisplay = _calculateGrandTotalForDisplay();
+    // print('[OrderPlacementScreen] build: Rebuilding with grand total: $currentGrandTotalDisplay'); // Too frequent if called directly here
 
     return Scaffold(
       backgroundColor: themeProvider.appSecondaryBackground,
@@ -608,7 +763,10 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new_rounded,
               color: themeProvider.primaryText),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () {
+            print('[OrderPlacementScreen] AppBar back button pressed.');
+            Navigator.of(context).pop();
+          },
         ),
       ),
       body: _isLoadingInitialData
@@ -649,7 +807,6 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                                 position: _sectionSlideAnimations[4],
                                 child: _buildPromoCodeCard(themeProvider)),
                             const SizedBox(height: 24),
-                            // ### ADDED NEW WIDGET ###
                             SlideTransition(
                                 position: _sectionSlideAnimations[5],
                                 child: _buildReferralCodeCard(themeProvider)),
@@ -723,7 +880,6 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     );
   }
 
-  // ### ADD THIS NEW WIDGET METHOD ###
   Widget _buildReferralCodeCard(ThemeProvider themeProvider) {
     return CustomCard(
       color: themeProvider.cardBackground,
@@ -948,18 +1104,26 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                     style: GoogleFonts.inter(
                         color: themeProvider.primaryText, fontSize: 14.5)),
                 value: _isSelfRecipient,
-                onChanged: (bool value) => setState(() {
-                  _isSelfRecipient = value;
-                  if (value) {
-                    _recipientNameController.clear();
-                    _recipientPhoneController.clear();
-                  } else {
-                    _recipientNameController.text =
-                        _currentUserProfile?.name ?? '';
-                    _recipientPhoneController.text =
-                        _currentUserProfile?.phone ?? '';
-                  }
-                }),
+                onChanged: (bool value) {
+                  print(
+                      '[OrderPlacementScreen] Recipient type changed to self: $value');
+                  setState(() {
+                    _isSelfRecipient = value;
+                    if (value) {
+                      _recipientNameController.clear();
+                      _recipientPhoneController.clear();
+                      print(
+                          '[OrderPlacementScreen] Recipient fields cleared for self-pickup.');
+                    } else {
+                      _recipientNameController.text =
+                          _currentUserProfile?.name ?? '';
+                      _recipientPhoneController.text =
+                          _currentUserProfile?.phone ?? '';
+                      print(
+                          '[OrderPlacementScreen] Recipient fields prefilled for other recipient: Name: ${_recipientNameController.text}, Phone: ${_recipientPhoneController.text}');
+                    }
+                  });
+                },
                 activeColor: themeProvider.gas2doorTeal,
                 contentPadding: EdgeInsets.zero,
               ),
@@ -971,10 +1135,16 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                     hintText: "Enter full name",
                     prefixIcon: Icons.person_outline_rounded,
                     textInputAction: TextInputAction.next,
-                    validator: (val) => (!_isSelfRecipient &&
-                            (val == null || val.trim().isEmpty))
-                        ? 'Recipient name is required'
-                        : null),
+                    validator: (val) {
+                      final isValid = (!_isSelfRecipient &&
+                              (val == null || val.trim().isEmpty))
+                          ? 'Recipient name is required'
+                          : null;
+                      if (isValid != null)
+                        print(
+                            '[OrderPlacementScreen] Recipient name validation failed: $isValid');
+                      return isValid;
+                    }),
                 const SizedBox(height: 16),
                 CustomInput(
                     controller: _recipientPhoneController,
@@ -982,15 +1152,21 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                     hintText: "Enter contact number",
                     prefixIcon: Icons.phone_outlined,
                     keyboardType: TextInputType.phone,
-                    validator: (val) => (!_isSelfRecipient &&
-                            (val == null || val.trim().isEmpty))
-                        ? 'Recipient phone is required'
-                        : (!_isSelfRecipient &&
-                                val != null &&
-                                !RegExp(r'^\+?[0-9]{10,15}$')
-                                    .hasMatch(val.trim()))
-                            ? 'Enter a valid phone number'
-                            : null),
+                    validator: (val) {
+                      final isValid = (!_isSelfRecipient &&
+                              (val == null || val.trim().isEmpty))
+                          ? 'Recipient phone is required'
+                          : (!_isSelfRecipient &&
+                                  val != null &&
+                                  !RegExp(r'^\+?\d{10,15}$')
+                                      .hasMatch(val.trim()))
+                              ? 'Enter a valid phone number'
+                              : null;
+                      if (isValid != null)
+                        print(
+                            '[OrderPlacementScreen] Recipient phone validation failed: $isValid');
+                      return isValid;
+                    }),
               ],
             ],
           ),
@@ -1023,7 +1199,11 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                   style: GoogleFonts.inter(
                       fontSize: 13, color: themeProvider.secondaryText)),
               value: _isExpressDelivery,
-              onChanged: (value) => setState(() => _isExpressDelivery = value),
+              onChanged: (value) {
+                print(
+                    '[OrderPlacementScreen] Express Delivery toggled to: $value');
+                setState(() => _isExpressDelivery = value);
+              },
               activeColor: themeProvider.gas2doorTeal,
               contentPadding: EdgeInsets.zero,
               secondary: Icon(Icons.bolt_rounded,
@@ -1110,7 +1290,11 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           value: _useWalletBalance,
           onChanged: _walletBalance <= 0
               ? null
-              : (bool value) => setState(() => _useWalletBalance = value),
+              : (bool value) {
+                  print(
+                      '[OrderPlacementScreen] Use Wallet Balance toggled to: $value. Current balance: $_walletBalance');
+                  setState(() => _useWalletBalance = value);
+                },
           activeColor: themeProvider.gas2doorTeal,
           secondary: Icon(Icons.account_balance_wallet_outlined,
               color: _useWalletBalance && _walletBalance > 0
@@ -1138,6 +1322,9 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     final grandTotal = _calculateGrandTotalForDisplay();
     final currencyFormat =
         NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 0);
+
+    print(
+        '[OrderPlacementScreen] _buildOrderSummaryCard: Summary values - Items: $itemsSubtotal, Delivery: $deliveryFee, Service: $serviceFee, VAT: $vat, Discount: $uiDiscount, Wallet Used: $walletUsed, Grand Total: $grandTotal');
 
     return CustomCard(
       color: themeProvider.cardBackground.withOpacity(0.7),
@@ -1235,6 +1422,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   }
 
   Widget _buildErrorState(ThemeProvider themeProvider, String message) {
+    print('[OrderPlacementScreen] Displaying error state: $message');
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(20.0),
@@ -1257,7 +1445,10 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             const SizedBox(height: 24),
             CustomButton(
                 text: "Retry",
-                onPressed: _initializeScreenData,
+                onPressed: () {
+                  print('[OrderPlacementScreen] Retry button pressed.');
+                  _initializeScreenData();
+                },
                 color: themeProvider.gas2doorPrimaryBlue,
                 icon: Icon(Icons.refresh_rounded, color: Colors.white))
           ],
@@ -1270,7 +1461,10 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       {required BuildContext context,
       bool isError = false,
       bool isSuccess = false}) {
-    if (!mounted) return;
+    if (!mounted) {
+      print('[OrderPlacementScreen] Snackbar not shown, widget not mounted.');
+      return;
+    }
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     Color backgroundColor = themeProvider.successColor.withOpacity(0.95);
     if (isError) {
@@ -1278,6 +1472,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     } else if (!isSuccess) {
       backgroundColor = themeProvider.gas2doorPrimaryBlue.withOpacity(0.9);
     }
+    print(
+        '[OrderPlacementScreen] Showing Snackbar: "$message" (isError: $isError, isSuccess: $isSuccess)');
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
