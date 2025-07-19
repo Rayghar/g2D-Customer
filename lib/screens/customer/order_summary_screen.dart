@@ -72,10 +72,10 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
         subtitle: "We've received your order."),
   ];
 
-  Timer? _pollingTimer;
   int _pollAttempt = 0;
-  final int _maxPollAttempts = 10;
-  final Duration _pollInterval = const Duration(seconds: 3);
+  final int _maxPollAttempts = 8; // e.g., 8 * 15s = 2 minutes
+  final Duration _pollInterval = const Duration(seconds: 15);
+  Timer? _pollingTimer;
 
   @override
   void initState() {
@@ -95,8 +95,9 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                 parent: _entryAnimController, curve: Curves.easeOutCubic));
 
     _fetchOrderDetails();
+
     if (widget.isVerifyingPayment) {
-      _startPollingPaymentStatus();
+      _startPolling();
     }
   }
 
@@ -147,66 +148,34 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
     }
   }
 
-  void _startPollingPaymentStatus() {
+  void _startPolling() {
     print(
-        '[OrderSummaryScreen] _startPollingPaymentStatus: Starting polling for payment status (interval: ${_pollInterval.inSeconds}s, max attempts: $_maxPollAttempts).');
+        '[OrderSummaryScreen] _startPolling: Starting payment verification polling.');
     _pollingTimer = Timer.periodic(_pollInterval, (timer) async {
-      _pollAttempt++;
-      print(
-          '[OrderSummaryScreen] _startPollingPaymentStatus: Poll attempt $_pollAttempt for Order ID: ${widget.orderId}.');
-
-      if (_pollAttempt > _maxPollAttempts) {
+      if (_pollAttempt >= _maxPollAttempts || !mounted) {
         timer.cancel();
-        _showFeedbackSnackbar(
-            'Payment verification timed out. Please check order details later.',
-            isError: true);
         print(
-            '[OrderSummaryScreen] _startPollingPaymentStatus: Max poll attempts reached. Polling stopped.');
+            '[OrderSummaryScreen] _startPolling: Polling stopped. Attempts: $_pollAttempt, Mounted: $mounted');
         return;
       }
 
+      _pollAttempt++;
+      print(
+          '[OrderSummaryScreen] _startPolling: Polling attempt $_pollAttempt...');
+
       try {
-        final String currentPaymentStatus =
+        final paymentStatus =
             await _apiService.getOrderPaymentStatus(widget.orderId);
-        print(
-            '[OrderSummaryScreen] _startPollingPaymentStatus: Backend reported payment status: "$currentPaymentStatus" for Order ID: ${widget.orderId}.');
-
-        if (mounted) {
-          if (_orderData?.paymentStatus != currentPaymentStatus) {
-            print(
-                '[OrderSummaryScreen] _startPollingPaymentStatus: Payment status changed from "${_orderData?.paymentStatus}" to "$currentPaymentStatus". Refetching full order details.');
-            await _fetchOrderDetails(); // This will update _orderData
-          }
-        }
-
-        if (currentPaymentStatus == 'Completed') {
+        if (paymentStatus == 'Completed') {
           timer.cancel();
-          _showFeedbackSnackbar('Payment confirmed by server!',
+          await _fetchOrderDetails(forceRefresh: true);
+          _showFeedbackSnackbar('Payment confirmed! Order status updated.',
               isSuccess: true);
           print(
-              '[OrderSummaryScreen] _startPollingPaymentStatus: Payment Completed. Polling stopped.');
-        } else if (currentPaymentStatus == 'Failed' ||
-            currentPaymentStatus.contains('Discrepancy')) {
-          timer.cancel();
-          _showFeedbackSnackbar(
-              'Payment failed or has an issue. Please contact support.',
-              isError: true);
-          print(
-              '[OrderSummaryScreen] _startPollingPaymentStatus: Payment Failed or Discrepancy. Polling stopped.');
-        } else {
-          print(
-              '[OrderSummaryScreen] _startPollingPaymentStatus: Payment still pending: "$currentPaymentStatus". Continuing polling.');
+              '[OrderSummaryScreen] _startPolling: Payment confirmed on attempt $_pollAttempt. Polling stopped.');
         }
       } catch (e) {
-        print('[OrderSummaryScreen] Error during polling payment status: $e');
-        if (_pollAttempt == _maxPollAttempts) {
-          timer.cancel();
-          _showFeedbackSnackbar(
-              'Failed to verify payment status due to network issues.',
-              isError: true);
-          print(
-              '[OrderSummaryScreen] _startPollingPaymentStatus: Polling stopped due to network error and max attempts.');
-        }
+        print('[OrderSummaryScreen] _startPolling: Error during poll: $e');
       }
     });
   }
@@ -296,52 +265,62 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
               }
             }),
       ),
-      body: _isLoading
-          ? _buildLoadingState(themeProvider)
-          : _errorMessage != null || _orderData == null
-              ? _buildErrorState(
-                  themeProvider, _errorMessage ?? "Order summary not found.")
-              : FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: SlideTransition(
-                    position: _slideAnimation,
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (widget.showConfirmation)
-                            _buildConfirmationMessage(themeProvider),
-                          const SizedBox(height: 16),
-                          _buildOrderInfoCard(_orderData!, themeProvider),
-                          const SizedBox(height: 16),
-                          _buildItemsOrderedCard(_orderData!, themeProvider),
-                          const SizedBox(height: 16),
-                          if (_orderData!.driver != null &&
-                              ![
-                                'Order Placed',
-                                'Order Confirmed',
-                                'Processing',
-                                'Cancelled',
-                                'Pending Payment'
-                              ].contains(_orderData!.status))
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 16.0),
-                              child: _buildDriverInfoCard(_orderData!.driver!,
-                                  _orderData!, themeProvider, context),
-                            ),
-                          _buildDeliveryAddressCard(_orderData!, themeProvider),
-                          const SizedBox(height: 16),
-                          _buildPricingSummaryCard(_orderData!, themeProvider),
-                          const SizedBox(height: 24),
-                          _buildActionButtons(
-                              _orderData!, themeProvider, context),
-                          const SizedBox(height: 20),
-                        ],
+      body: RefreshIndicator(
+        onRefresh: () {
+          print(
+              '[OrderSummaryScreen] Pull-to-refresh triggered. Refetching order details.');
+          return _fetchOrderDetails(forceRefresh: true);
+        },
+        child: _isLoading
+            ? _buildLoadingState(themeProvider)
+            : _errorMessage != null || _orderData == null
+                ? _buildErrorState(
+                    themeProvider, _errorMessage ?? "Order summary not found.")
+                : FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: SlideTransition(
+                      position: _slideAnimation,
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (widget.showConfirmation)
+                              _buildConfirmationMessage(themeProvider),
+                            const SizedBox(height: 16),
+                            _buildOrderInfoCard(_orderData!, themeProvider),
+                            const SizedBox(height: 16),
+                            _buildItemsOrderedCard(_orderData!, themeProvider),
+                            const SizedBox(height: 16),
+                            if (_orderData!.driver != null &&
+                                ![
+                                  'Order Placed',
+                                  'Order Confirmed',
+                                  'Processing',
+                                  'Cancelled',
+                                  'Pending Payment'
+                                ].contains(_orderData!.status))
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 16.0),
+                                child: _buildDriverInfoCard(_orderData!.driver!,
+                                    _orderData!, themeProvider, context),
+                              ),
+                            _buildDeliveryAddressCard(
+                                _orderData!, themeProvider),
+                            const SizedBox(height: 16),
+                            _buildPricingSummaryCard(
+                                _orderData!, themeProvider),
+                            const SizedBox(height: 24),
+                            _buildActionButtons(
+                                _orderData!, themeProvider, context),
+                            const SizedBox(height: 20),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
+      ),
     );
   }
 

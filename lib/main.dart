@@ -238,9 +238,12 @@ class MyApp extends StatelessWidget {
               return MaterialPageRoute(
                 builder: (_) => OrderSummaryScreen(
                   orderId: args['orderId'] as String,
+                  customerId: args['customerId'] as String,
                   showConfirmation:
                       (args['showConfirmation'] as bool?) ?? false,
-                  customerId: args['customerId'] as String,
+                  transactionRef: args['transactionRef'] as String?,
+                  isVerifyingPayment:
+                      (args['isVerifyingPayment'] as bool?) ?? false,
                 ),
                 settings: settings,
               );

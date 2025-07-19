@@ -13,6 +13,7 @@ import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/card.dart';
 import './order_summary_screen.dart';
+import '../customer/customer_dashboard_screen.dart';
 import '../../models/user.dart' as app_user;
 
 class PaymentScreen extends StatefulWidget {
@@ -203,8 +204,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 );
               } else {
                 _showFeedbackSnackbar(
-                    'Payment confirmation pending or failed. Please check order details later.',
-                    isError: true);
+                    'Payment processing—refresh or wait a moment for confirmation.',
+                    isError: false);
                 print(
                     '[PaymentScreen] _handlePayment: Backend did NOT confirm "Completed". Status: "$confirmedStatus". Navigating to OrderSummaryScreen (isVerifyingPayment: true).');
                 Navigator.of(context).pushReplacementNamed(
