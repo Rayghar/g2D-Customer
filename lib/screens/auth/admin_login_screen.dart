@@ -127,8 +127,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen>
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final String appLogoPath = themeProvider.isDarkMode
-        ? 'assets/images/gas2door_logo_dark.png'
-        : 'assets/images/gas2door_logo_light.png'; // Assuming you have these assets
+        ? 'assets/images/gas2door_logo.png'
+        : 'assets/images/gas2door_logo.png'; // Assuming you have these assets
     final Color adminAccentColor = themeProvider.gas2doorPurple;
 
     return Scaffold(

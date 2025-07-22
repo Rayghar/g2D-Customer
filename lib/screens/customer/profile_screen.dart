@@ -1,4 +1,5 @@
 // File: lib/screens/customer/profile_screen.dart
+// ADVISORY: This file has been updated to align with the new theme strategy.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -13,16 +14,14 @@ import '../../widgets/card.dart';
 import './address_list_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../settings/payment_methods_screen.dart';
-import '../more/refer_friend_screen.dart'; // This is where the customer goes
+import '../more/refer_friend_screen.dart';
 import '../more/help_support_screen.dart';
 import '../more/about_us_screen.dart';
 import '../auth/customer_login_screen.dart';
 import './profile/wallet_screen.dart';
 import './profile/edit_profile_screen.dart';
-
-// --- Services and Models ---
 import '../../services/auth_service.dart';
-import '../../models/user.dart' as app_user; // Use the real User model
+import '../../models/user.dart' as app_user;
 
 class ProfileScreen extends StatefulWidget {
   static const String routeName = '/profile';
@@ -38,7 +37,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen>
     with TickerProviderStateMixin {
   bool _isLoadingProfile = true;
-  app_user.User? _userData; // Use the real User model
+  app_user.User? _userData;
   String? _errorMessage;
   late AnimationController _entryAnimController;
   late List<Animation<Offset>> _tileSlideAnimations;
@@ -67,7 +66,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     super.dispose();
   }
 
-  // FIX: This now fetches data from the real AuthService
   Future<void> _fetchUserProfile({bool isRefresh = false}) async {
     if (!mounted) return;
     setState(() {
@@ -75,7 +73,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (isRefresh) _errorMessage = null;
     });
     try {
-      // Calls the real service to get the logged-in user's profile
       final profile = await _authService.getCurrentUserProfile();
       if (mounted) {
         if (profile != null) {
@@ -101,7 +98,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  // FIX: This now calls the real AuthService logout
   Future<void> _handleLogout() async {
     HapticFeedback.mediumImpact();
     final confirmLogout = await showDialog<bool>(
@@ -140,7 +136,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
 
     if (confirmLogout == true && mounted) {
-      await _authService.logout(); // Use real logout service
+      await _authService.logout();
       _showFeedbackSnackbar('Logged out successfully.');
       Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
           CustomerLoginScreen.routeName, (route) => false);
@@ -168,7 +164,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     return Scaffold(
-      backgroundColor: themeProvider.appPrimaryBackground,
+      backgroundColor: themeProvider.appSecondaryBackground,
       appBar: AppBar(
         title: Text("My Profile",
             style: GoogleFonts.inter(
@@ -246,13 +242,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                                                 });
                                           }
                                         }),
-                                    _buildProfileListTile(
-                                        icon: Icons.credit_card_outlined,
-                                        title: 'Payment Methods',
-                                        themeProvider: themeProvider,
-                                        onTap: () => Navigator.of(context)
-                                            .pushNamed(PaymentMethodsScreen
-                                                .routeName)),
                                   ])),
                           const SizedBox(height: 16),
                           SlideTransition(
@@ -335,10 +324,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                               child: CustomButton(
                                 text: 'Logout',
                                 onPressed: _handleLogout,
-                                color: themeProvider.isDarkMode
-                                    ? themeProvider.errorColor.withOpacity(0.3)
-                                    : themeProvider.errorColor
-                                        .withOpacity(0.15),
+                                color:
+                                    themeProvider.errorColor.withOpacity(0.15),
                                 textStyle: GoogleFonts.inter(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
@@ -367,14 +354,10 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  // FIX: This widget now uses the real app_user.User model
   Widget _buildProfileHeader(
       app_user.User user, ThemeProvider themeProvider, BuildContext context) {
     return CustomCard(
       color: themeProvider.cardBackground,
-      borderRadius: themeProvider.cardBorderRadiusValue,
-      elevation: 2,
-      shadowColor: themeProvider.cardShadowColorGlobal.withOpacity(0.5),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
         child: Column(
@@ -382,14 +365,14 @@ class _ProfileScreenState extends State<ProfileScreen>
             CircleAvatar(
                 radius: 50,
                 backgroundColor:
-                    themeProvider.gas2doorPrimaryBlueLightVer.withOpacity(0.8),
+                    themeProvider.gas2doorPrimaryBlue.withOpacity(0.1),
                 child: Text(
                     user.name.isNotEmpty
                         ? user.name.substring(0, 1).toUpperCase()
                         : 'U',
                     style: GoogleFonts.inter(
                         fontSize: 40,
-                        color: themeProvider.infoColorOnDarkBgs,
+                        color: themeProvider.gas2doorPrimaryBlue,
                         fontWeight: FontWeight.w500))),
             const SizedBox(height: 16),
             Text(user.name,
@@ -406,25 +389,6 @@ class _ProfileScreenState extends State<ProfileScreen>
             Text(user.phone ?? 'No phone number provided',
                 style: GoogleFonts.inter(
                     fontSize: 15, color: themeProvider.secondaryText)),
-            const SizedBox(height: 12),
-            CustomButton(
-              text: "Edit Profile",
-              onPressed: () {
-                if (widget.customerId.isNotEmpty) {
-                  Navigator.of(context).pushNamed(EditProfileScreen.routeName,
-                      arguments: {'customerId': widget.customerId});
-                }
-              },
-              color: themeProvider.appSecondaryBackground,
-              height: 38,
-              elevation: 0,
-              textStyle: GoogleFonts.inter(
-                  color: themeProvider.gas2doorPrimaryBlue,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13),
-              icon: Icon(Icons.edit_outlined,
-                  color: themeProvider.gas2doorPrimaryBlue, size: 16),
-            )
           ],
         ),
       ),
@@ -437,10 +401,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       required ThemeProvider themeProvider}) {
     return CustomCard(
       color: themeProvider.cardBackground,
-      borderRadius: themeProvider.cardBorderRadiusValue,
-      elevation: 1.5,
-      shadowColor: themeProvider.cardShadowColorGlobal.withOpacity(0.3),
-      margin: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -461,7 +421,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 height: 0.5,
                 thickness: 0.3,
                 color: themeProvider.tertiaryText.withOpacity(0.2),
-                indent: 16,
+                indent: 56,
                 endIndent: 16),
           ),
         ],
@@ -500,11 +460,6 @@ class _ProfileScreenState extends State<ProfileScreen>
               onTap();
             }
           : null,
-      shape: RoundedRectangleBorder(
-          borderRadius:
-              BorderRadius.circular(themeProvider.cardBorderRadiusValue / 2)),
-      hoverColor: themeProvider.gas2doorPrimaryBlue.withOpacity(0.04),
-      splashColor: themeProvider.gas2doorTeal.withOpacity(0.08),
     );
   }
 

@@ -1,13 +1,12 @@
 // File: lib/screens/customer/home_screen.dart
+// ADVISORY: This version adds the Order ID to recent orders and the delivery address to the active order card.
 
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
@@ -18,23 +17,8 @@ import '../../models/order.dart' as app_order;
 import '../../services/api_service.dart';
 import './order_placement_screen.dart';
 import './order_details_screen.dart';
+import './order_summary_screen.dart';
 import './promotion_details_screen.dart';
-import '../more/refer_friend_screen.dart';
-import 'chat_screen.dart';
-
-class GasLevelData {
-  final double level;
-  final String displayText;
-  final String etaText;
-  final bool showPrompt;
-
-  GasLevelData({
-    required this.level,
-    required this.displayText,
-    required this.etaText,
-    this.showPrompt = false,
-  });
-}
 
 class PromotionItem {
   final String title;
@@ -47,7 +31,6 @@ class PromotionItem {
   final Map<String, dynamic>? ctaArgs;
   final String? promoCodeToApply;
   final DealModel dealModel;
-
   PromotionItem({
     required this.title,
     required this.description,
@@ -59,17 +42,6 @@ class PromotionItem {
     this.ctaArgs,
     this.promoCodeToApply,
     required this.dealModel,
-  });
-}
-
-class ActiveOrderStatusSummary {
-  final String orderId;
-  final String status;
-  final DateTime? eta;
-  ActiveOrderStatusSummary({
-    required this.orderId,
-    required this.status,
-    this.eta,
   });
 }
 
@@ -100,22 +72,13 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late AnimationController _entryAnimController;
   late List<Animation<Offset>> _sectionSlideAnimations;
-  late AnimationController _gasLevelController;
-  late Animation<double> _gasLevelAnimation;
-  PageController _promotionPageController = PageController();
+  final PageController _promotionPageController = PageController();
   int _currentPromotionPage = 0;
   Timer? _promotionTimer;
 
-  GasLevelData _gasLevelData = GasLevelData(
-    level: 0.0,
-    displayText: '--%',
-    etaText: 'Calculating...',
-    showPrompt: true,
-  );
-
-  List<PromotionItem> _promotionItems = [];
-  ActiveOrderStatusSummary? _activeOrderStatus;
+  app_order.Order? _activeOrder;
   List<app_order.Order> _recentOrders = [];
+  List<PromotionItem> _promotionItems = [];
   String? _errorMessage;
   bool _isLoading = true;
 
@@ -127,24 +90,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _entryAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 700));
     _sectionSlideAnimations = List.generate(
-      6,
-      (index) =>
-          Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero).animate(
-        CurvedAnimation(
-          parent: _entryAnimController,
-          curve: Interval(
-              0.1 + (index * 0.08), (0.7 + (index * 0.08)).clamp(0.0, 1.0),
-              curve: Curves.easeOutCubic),
-        ),
-      ),
-    );
-    _gasLevelController = AnimationController(
-        duration: const Duration(milliseconds: 1200), vsync: this);
-    _gasLevelAnimation = Tween<double>(begin: 0, end: 0.0).animate(
-        CurvedAnimation(
-            parent: _gasLevelController, curve: Curves.easeInOutCubic));
-    _promotionPageController =
-        PageController(initialPage: 0, viewportFraction: 0.9);
+        6,
+        (index) => Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
+            .animate(CurvedAnimation(
+                parent: _entryAnimController,
+                curve: Interval(0.1 + (index * 0.08),
+                    (0.7 + (index * 0.08)).clamp(0.0, 1.0),
+                    curve: Curves.easeOutCubic))));
 
     if (widget.customerIdFromShell?.isNotEmpty ?? false) {
       _loadAllHomeScreenData();
@@ -165,7 +117,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void dispose() {
     _entryAnimController.dispose();
-    _gasLevelController.dispose();
     _promotionPageController.dispose();
     _promotionTimer?.cancel();
     super.dispose();
@@ -180,19 +131,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       });
     }
     if (isRefresh) _entryAnimController.reset();
-
     try {
+      const activeOrderStatuses =
+          'Pending Payment,Order Placed,Processing,Driver Assigned,Out for delivery,Driver enroute to pickup,Driver enroute to gas station,Cylinder Refilling';
+
       final results = await Future.wait([
         _apiService.getActivePromotions(),
         _apiService.getCustomerOrders(
-            limit: 1,
-            status:
-                'Order Placed,Processing,Driver Assigned,Out for delivery,Driver enroute to pickup,Driver enroute to gas station,Cylinder Refilling',
-            sortBy: '-orderDate'),
+            limit: 1, status: activeOrderStatuses, sortBy: '-orderDate'),
         _apiService.getCustomerOrders(limit: 3, sortBy: '-orderDate'),
-        _apiService.getCustomerConsumptionData(),
       ], eagerError: false);
-
       if (!mounted) return;
       _processApiResponse(results);
     } catch (e) {
@@ -211,7 +159,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final List<Color> colorCycle = [
       themeProvider.gas2doorTeal,
       themeProvider.gas2doorPurple,
-      themeProvider.gas2doorPrimaryBlueLightVer,
+      themeProvider.gas2doorPrimaryBlueLightVer
     ];
 
     if (results[0] is List<DealModel>) {
@@ -219,25 +167,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           (results[0] as List<DealModel>).asMap().entries.map((entry) {
         int idx = entry.key;
         DealModel deal = entry.value;
-        final cardColor =
-            colorCycle[idx % colorCycle.length]; // Sequential color
+        final cardColor = colorCycle[idx % colorCycle.length];
         final isDarkCard =
             ThemeData.estimateBrightnessForColor(cardColor) == Brightness.dark;
         return PromotionItem(
-          dealModel: deal,
-          title: deal.title,
-          description: deal.shortDescription,
-          backgroundColor: cardColor,
-          backgroundImage: deal.imageUrl,
-          textColor: deal.textColor ??
-              (isDarkCard
-                  ? Colors.white.withOpacity(0.95)
-                  : themeProvider.primaryText),
-          ctaText: deal.ctaText.isNotEmpty ? deal.ctaText : 'Claim Offer',
-          ctaLink: deal.ctaLink,
-          promoCodeToApply: deal.promoCode,
-          ctaArgs: deal.ctaArgs,
-        );
+            dealModel: deal,
+            title: deal.title,
+            description: deal.shortDescription,
+            backgroundColor: cardColor,
+            backgroundImage: deal.imageUrl,
+            textColor: deal.textColor ??
+                (isDarkCard
+                    ? Colors.white.withOpacity(0.95)
+                    : themeProvider.primaryText),
+            ctaText: deal.ctaText.isNotEmpty ? deal.ctaText : 'Claim Offer',
+            ctaLink: deal.ctaLink,
+            promoCodeToApply: deal.promoCode,
+            ctaArgs: deal.ctaArgs);
       }).toList();
     }
 
@@ -245,12 +191,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final activeOrderResponse = results[1] as Map<String, dynamic>;
       final activeOrders =
           activeOrderResponse['orders'] as List<app_order.Order>? ?? [];
-      _activeOrderStatus = activeOrders.isNotEmpty
-          ? ActiveOrderStatusSummary(
-              orderId: activeOrders.first.id,
-              status: activeOrders.first.status,
-              eta: null)
-          : null;
+      _activeOrder = activeOrders.isNotEmpty ? activeOrders.first : null;
     }
 
     if (results[2] is Map<String, dynamic>) {
@@ -259,101 +200,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           recentOrdersResponse['orders'] as List<app_order.Order>? ?? [];
     }
 
-    if (results[3] is List<app_order.Order>) {
-      _calculateGasLevel(results[3] as List<app_order.Order>);
-    } else {
-      print("Error processing consumption data: ${results[3]}");
-      _calculateGasLevel([]);
-    }
-
     setState(() => _isLoading = false);
     _entryAnimController.forward();
-    _gasLevelController.forward(from: 0.0);
     _startPromotionAutoScroll();
-  }
-
-  // NEW: The core logic for the smart gas indicator
-  void _calculateGasLevel(List<app_order.Order> deliveredOrders) {
-    if (deliveredOrders.isEmpty) {
-      // Case 1: No delivered orders yet
-      setState(() {
-        _gasLevelData = GasLevelData(
-          level: 0.0,
-          displayText: 'N/A',
-          etaText: 'Place your first order!',
-          showPrompt: true,
-        );
-        _gasLevelAnimation = Tween<double>(begin: 0, end: 0.0).animate(
-            CurvedAnimation(
-                parent: _gasLevelController, curve: Curves.easeInOutCubic));
-      });
-      return;
-    }
-
-    if (deliveredOrders.length == 1) {
-      // Case 2: Exactly one order has been delivered
-      setState(() {
-        _gasLevelData = GasLevelData(
-          level: 1.0,
-          displayText: '100%',
-          etaText: 'Usage trend starts after next order',
-        );
-        _gasLevelAnimation =
-            Tween<double>(begin: _gasLevelAnimation.value, end: 1.0).animate(
-                CurvedAnimation(
-                    parent: _gasLevelController, curve: Curves.easeInOutCubic));
-      });
-      return;
-    }
-
-    // Case 3: Two or more delivered orders, calculate the trend
-    final lastOrderDate = deliveredOrders[0].orderDate;
-    final previousOrderDate = deliveredOrders[1].orderDate;
-
-    final consumptionDuration = lastOrderDate.difference(previousOrderDate);
-    final timeSinceLastOrder = DateTime.now().difference(lastOrderDate);
-
-    if (consumptionDuration.inSeconds <= 0) {
-      // Avoid division by zero
-      setState(() {
-        _gasLevelData = GasLevelData(
-            level: 1.0,
-            displayText: '100%',
-            etaText: 'Ready for your next order!');
-        _gasLevelAnimation =
-            Tween<double>(begin: _gasLevelAnimation.value, end: 1.0).animate(
-                CurvedAnimation(
-                    parent: _gasLevelController, curve: Curves.easeInOutCubic));
-      });
-      return;
-    }
-
-    double percentage =
-        1.0 - (timeSinceLastOrder.inSeconds / consumptionDuration.inSeconds);
-    percentage = percentage.clamp(0.0, 1.0);
-
-    final remainingDuration = consumptionDuration - timeSinceLastOrder;
-    String etaText = 'Calculating...';
-    if (remainingDuration.isNegative) {
-      etaText = 'Time to re-order!';
-    } else {
-      final days = remainingDuration.inDays;
-      etaText = days > 0
-          ? 'Est. $days day${days == 1 ? '' : 's'} left'
-          : 'Est. <1 day left';
-    }
-
-    setState(() {
-      _gasLevelData = GasLevelData(
-        level: percentage,
-        displayText: '${(percentage * 100).toInt()}%',
-        etaText: etaText,
-      );
-      _gasLevelAnimation =
-          Tween<double>(begin: _gasLevelAnimation.value, end: percentage)
-              .animate(CurvedAnimation(
-                  parent: _gasLevelController, curve: Curves.easeInOutCubic));
-    });
   }
 
   void _startPromotionAutoScroll() {
@@ -361,10 +210,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (_promotionItems.length > 1) {
       _promotionTimer =
           Timer.periodic(const Duration(seconds: 6), (Timer timer) {
-        if (!_promotionPageController.hasClients || _promotionItems.isEmpty)
+        if (!_promotionPageController.hasClients || _promotionItems.isEmpty) {
           return;
+        }
         int nextPage = _promotionPageController.page!.round() + 1;
-        if (nextPage >= _promotionItems.length) nextPage = 0;
+        if (nextPage >= _promotionItems.length) {
+          nextPage = 0;
+        }
         _promotionPageController.animateToPage(nextPage,
             duration: const Duration(milliseconds: 700),
             curve: Curves.easeInOutCubic);
@@ -375,20 +227,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _showFeedbackSnackbar(String message, {bool isError = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
-        backgroundColor: isError
-            ? themeProvider.errorColor
-            : themeProvider.successColor.withOpacity(0.95),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.all(12),
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
+      backgroundColor: isError
+          ? themeProvider.errorColor
+          : themeProvider.successColor.withOpacity(0.95),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.all(12),
+    ));
   }
 
-  void _navigateToOrderPlacement({String? prefilledPromoCode}) {
+  void _navigateToOrderPlacement(
+      {String? prefilledPromoCode,
+      String? refillCylinderSize,
+      bool isRefill = false}) {
     HapticFeedback.mediumImpact();
     if (widget.customerIdFromShell == null) {
       _showFeedbackSnackbar("Please log in to place an order.", isError: true);
@@ -406,7 +259,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'customerId': widget.customerIdFromShell,
         'initialAddress': widget.currentAddressFromShell,
         'prefilledPromoCode': prefilledPromoCode,
-        'isRefill': false,
+        'isRefill': isRefill,
+        'refillCylinderSize': refillCylinderSize,
       },
     ).then((value) {
       if (value == true) {
@@ -415,96 +269,42 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     });
   }
 
-  void _navigateToRefillOrder(app_order.Order order) {
-    HapticFeedback.mediumImpact();
-    if (widget.customerIdFromShell == null) {
-      _showFeedbackSnackbar("Please log in to place an order.", isError: true);
-      return;
-    }
-    if (widget.currentAddressFromShell == null) {
-      _showFeedbackSnackbar("Please select a delivery address first.",
+  void _navigateToReorder(app_order.Order order) {
+    final firstItem = order.items.isNotEmpty ? order.items.first : null;
+    if (firstItem == null) {
+      _showFeedbackSnackbar("Could not find item details to reorder.",
           isError: true);
-      widget.onChangeAddressTapped();
       return;
     }
-
-    // Convert the order's items to the required format for the placement screen
-    final List<Map<String, dynamic>> lastOrderItems = order.items.map((item) {
-      return {
-        'cylinderId': item.cylinderId,
-        'quantity': item.quantity,
-      };
-    }).toList();
-
-    Navigator.of(context).pushNamed(
-      OrderPlacementScreen.routeName,
-      arguments: {
-        'customerId': widget.customerIdFromShell,
-        'initialAddress': widget.currentAddressFromShell,
-        'isRefill': true,
-        'lastOrderItems': lastOrderItems,
-      },
-    ).then((value) {
-      // Refresh home screen data if an order was successfully placed
-      if (value == true) {
-        _loadAllHomeScreenData(isRefresh: true);
-      }
-    });
+    _navigateToOrderPlacement(
+        refillCylinderSize: firstItem.cylinderSizeKG, isRefill: true);
   }
 
   void _handlePromotionCta(PromotionItem item) {
     HapticFeedback.lightImpact();
-    if (item.ctaLink == OrderPlacementScreen.routeName &&
-        widget.customerIdFromShell == null) {
-      _showFeedbackSnackbar("User information missing. Cannot proceed.",
-          isError: true);
-      return;
-    }
-    if (item.ctaLink == ReferFriendScreen.routeName &&
-        widget.customerIdFromShell == null) {
-      _showFeedbackSnackbar("User information missing for referral.",
-          isError: true);
-      return;
-    }
-
     if (item.ctaLink != null) {
       Map<String, dynamic> navArgs =
           Map<String, dynamic>.from(item.ctaArgs ?? {});
-      if (item.ctaLink == OrderPlacementScreen.routeName) {
-        navArgs['customerId'] = widget.customerIdFromShell;
-        navArgs['initialAddress'] = widget.currentAddressFromShell;
-        if (item.promoCodeToApply != null) {
-          navArgs['prefilledPromoCode'] = item.promoCodeToApply;
-        }
-        navArgs['isRefill'] = navArgs['isRefill'] ?? false;
-      } else if (item.ctaLink == PromotionDetailsScreen.routeName) {
-        navArgs['customerId'] = widget.customerIdFromShell;
-        navArgs['initialAddress'] = widget.currentAddressFromShell;
-        navArgs['promotion'] = item.dealModel;
-      } else if (item.ctaLink == ReferFriendScreen.routeName) {
-        navArgs['customerId'] = widget.customerIdFromShell;
+      navArgs['customerId'] = widget.customerIdFromShell;
+      navArgs['initialAddress'] = widget.currentAddressFromShell;
+      if (item.promoCodeToApply != null) {
+        navArgs['prefilledPromoCode'] = item.promoCodeToApply;
       }
-      Navigator.of(context).pushNamed(
-        item.ctaLink!,
-        arguments: navArgs.isNotEmpty ? navArgs : null,
-      );
+      Navigator.of(context).pushNamed(item.ctaLink!,
+          arguments: navArgs.isNotEmpty ? navArgs : null);
     } else if (item.promoCodeToApply != null) {
       _navigateToOrderPlacement(prefilledPromoCode: item.promoCodeToApply);
     }
-  }
-
-  // UPDATED: Now takes a level parameter
-  Color _getGasLevelColor(ThemeProvider themeProvider, double level) {
-    if (level > 0.6) return themeProvider.successColor;
-    if (level > 0.2) return themeProvider.warningColor;
-    return themeProvider.errorColor;
   }
 
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final String currentUserName = widget.userNameFromShell ?? "Customer";
-    final bool hasActiveOrderData = _activeOrderStatus != null;
+
+    final bool hasActiveOrderData = _activeOrder != null &&
+        _activeOrder!.paymentStatus.toLowerCase() != 'pending payment';
+
     final String ordersActionCardTitle =
         hasActiveOrderData ? 'Track Active Order' : 'My Orders';
     final IconData ordersActionCardIcon =
@@ -513,25 +313,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     VoidCallback ordersActionCardOnTap = () {
       HapticFeedback.lightImpact();
       if (hasActiveOrderData) {
-        if (widget.customerIdFromShell == null || _activeOrderStatus == null) {
-          _showFeedbackSnackbar("Cannot track order: Information missing.",
-              isError: true);
-          return;
-        }
-        Navigator.of(context).pushNamed(
-          OrderDetailsScreen.routeName,
-          arguments: {
-            'orderId': _activeOrderStatus!.orderId,
-            'customerId': widget.customerIdFromShell!,
-          },
-        );
+        _navigateToOrderDetails(_activeOrder!.id);
       } else {
         widget.onSwitchTab(1);
       }
     };
 
     return Scaffold(
-      backgroundColor: themeProvider.appPrimaryBackground,
+      backgroundColor: themeProvider.appSecondaryBackground,
       body: RefreshIndicator(
         onRefresh: () => _loadAllHomeScreenData(isRefresh: true),
         color: themeProvider.gas2doorPrimaryBlue,
@@ -540,9 +329,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SlideTransition(
-                  position: _sectionSlideAnimations[0],
-                  child: _buildAddressDisplayWidget(themeProvider)),
+              _buildAddressDisplayWidget(themeProvider),
               if (_isLoading)
                 Padding(
                     padding: const EdgeInsets.symmetric(vertical: 150.0),
@@ -578,7 +365,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       SlideTransition(
-                          position: _sectionSlideAnimations[1],
+                          position: _sectionSlideAnimations[0],
                           child: Text('Hi, $currentUserName!',
                               style: GoogleFonts.inter(
                                   fontSize: 26.0,
@@ -587,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   height: 1.3))),
                       const SizedBox(height: 20.0),
                       SlideTransition(
-                          position: _sectionSlideAnimations[2],
+                          position: _sectionSlideAnimations[1],
                           child: Row(
                             children: [
                               Expanded(
@@ -617,165 +404,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       const SizedBox(height: 24.0),
                       if (_promotionItems.isNotEmpty)
                         SlideTransition(
-                          position: _sectionSlideAnimations[3],
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                  padding: const EdgeInsets.only(bottom: 8.0),
-                                  child: Text('Don\'t Miss These!',
-                                      style: GoogleFonts.inter(
-                                          fontSize: 18.0,
-                                          fontWeight: FontWeight.bold,
-                                          color: themeProvider.primaryText))),
-                              SizedBox(
-                                height: 181,
-                                child: PageView.builder(
-                                  controller: _promotionPageController,
-                                  itemCount: _promotionItems.length,
-                                  onPageChanged: (int page) => setState(
-                                      () => _currentPromotionPage = page),
-                                  itemBuilder: (context, index) => Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 4.0),
-                                    child: SizedBox(
-                                      // Add height constraint to prevent overflow
-                                      height: 181,
-                                      child: _buildPromotionCarouselItem(
-                                          _promotionItems[index], context,
-                                          themeProvider: themeProvider),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              if (_promotionItems.length > 1)
-                                Padding(
-                                  // Reduce margin to fit within height
-                                  padding: const EdgeInsets.only(top: 8.0),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: List.generate(
-                                      _promotionItems.length,
-                                      (index) => Container(
-                                        width: _currentPromotionPage == index
-                                            ? 10.0
-                                            : 8.0,
-                                        height: _currentPromotionPage == index
-                                            ? 10.0
-                                            : 8.0,
-                                        margin: const EdgeInsets.symmetric(
-                                            horizontal:
-                                                5.0), // Remove vertical margin
-                                        decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: _currentPromotionPage ==
-                                                    index
-                                                ? themeProvider
-                                                    .gas2doorPrimaryBlue
-                                                : themeProvider.secondaryText
-                                                    .withOpacity(0.3)),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              const SizedBox(
-                                  height: 8), // Reduce spacing to 8 pixels
-                            ],
-                          ),
-                        ),
-                      SlideTransition(
-                          position: _sectionSlideAnimations[4],
-                          child: CustomCard(
-                              color: themeProvider.cardBackground,
-                              child: Padding(
-                                  padding: const EdgeInsets.all(16.0),
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Text('Your Gas Level',
-                                                  style: GoogleFonts.inter(
-                                                      fontSize: 18.0,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: themeProvider
-                                                          .primaryText))
-                                            ]),
-                                        const SizedBox(height: 16.0),
-                                        Row(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.center,
-                                            children: [
-                                              _buildGasCylinderIndicator(
-                                                  themeProvider),
-                                              const SizedBox(width: 16.0),
-                                              Expanded(
-                                                  child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                    Text(
-                                                        _gasLevelData
-                                                                    .displayText ==
-                                                                'N/A'
-                                                            ? 'Welcome!'
-                                                            : '${_gasLevelData.displayText} Remaining',
-                                                        style: GoogleFonts.inter(
-                                                            fontSize: 17.0,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                            color: _getGasLevelColor(
-                                                                themeProvider,
-                                                                _gasLevelData
-                                                                    .level))),
-                                                    const SizedBox(height: 6.0),
-                                                    Text(_gasLevelData.etaText,
-                                                        style: GoogleFonts.inter(
-                                                            fontSize: 13.0,
-                                                            color: themeProvider
-                                                                .secondaryText))
-                                                  ])),
-                                              const SizedBox(width: 8),
-                                              if (_gasLevelData.level < 0.25 ||
-                                                  _gasLevelData.showPrompt)
-                                                CustomButton(
-                                                    text: 'Refill Now',
-                                                    onPressed: () =>
-                                                        _navigateToOrderPlacement(),
-                                                    color: themeProvider
-                                                        .errorColor,
-                                                    height: 40,
-                                                    icon: const Icon(
-                                                        Icons
-                                                            .local_fire_department_rounded,
-                                                        color: Colors.white,
-                                                        size: 18),
-                                                    textStyle:
-                                                        GoogleFonts.inter(
-                                                            color: Colors.white,
-                                                            fontSize: 13,
-                                                            fontWeight:
-                                                                FontWeight
-                                                                    .w600))
-                                            ])
-                                      ])))),
-                      const SizedBox(height: 24.0),
+                            position: _sectionSlideAnimations[2],
+                            child: _buildPromotionsSection(themeProvider)),
                       if (hasActiveOrderData)
                         SlideTransition(
-                            position: _sectionSlideAnimations[5],
+                            position: _sectionSlideAnimations[3],
                             child: _buildActiveOrderCard(
-                                themeProvider, _activeOrderStatus!)),
-                      const SizedBox(height: 24.0),
+                                themeProvider, _activeOrder!)),
+                      if (hasActiveOrderData) const SizedBox(height: 24.0),
                       SlideTransition(
-                          position: _sectionSlideAnimations[5],
-                          child: _buildRecentOrdersSection(
+                          position: _sectionSlideAnimations[4],
+                          child: _buildOrderHistorySection(
                               themeProvider: themeProvider,
-                              isLoading: _isLoading,
                               orders: _recentOrders)),
                       const SizedBox(height: 20),
                     ],
@@ -841,59 +481,57 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildGasCylinderIndicator(ThemeProvider themeProvider) {
-    const double cylinderIconSize = 70.0;
-    const double containerHeight = 80.0;
-    const double containerWidth = 70.0;
-    return SizedBox(
-      width: containerWidth,
-      height: containerHeight,
-      child: AnimatedBuilder(
-        animation: _gasLevelAnimation,
-        builder: (context, child) {
-          Color fillColor =
-              _getGasLevelColor(themeProvider, _gasLevelData.level);
-          return Stack(
-            alignment: Alignment.center,
-            children: [
-              Icon(Icons.propane_tank_outlined,
-                  size: cylinderIconSize,
-                  color: themeProvider.isDarkMode
-                      ? Colors.grey[700]
-                      : Colors.grey[400]),
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: ClipRect(
-                  clipper: _GasCylinderFillClipper(
-                      fillLevel: _gasLevelAnimation.value),
-                  child: Icon(Icons.propane_tank_rounded,
-                      size: cylinderIconSize, color: fillColor),
+  Widget _buildPromotionsSection(ThemeProvider themeProvider) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: Text('Don\'t Miss These!',
+                style: GoogleFonts.inter(
+                    fontSize: 18.0,
+                    fontWeight: FontWeight.bold,
+                    color: themeProvider.primaryText))),
+        SizedBox(
+          height: 181,
+          child: PageView.builder(
+            controller: _promotionPageController,
+            itemCount: _promotionItems.length,
+            onPageChanged: (int page) =>
+                setState(() => _currentPromotionPage = page),
+            itemBuilder: (context, index) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: _buildPromotionCarouselItem(
+                  _promotionItems[index], context,
+                  themeProvider: themeProvider),
+            ),
+          ),
+        ),
+        if (_promotionItems.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                _promotionItems.length,
+                (index) => Container(
+                  width: _currentPromotionPage == index ? 10.0 : 8.0,
+                  height: _currentPromotionPage == index ? 10.0 : 8.0,
+                  margin: const EdgeInsets.symmetric(horizontal: 5.0),
+                  decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _currentPromotionPage == index
+                          ? themeProvider.gas2doorPrimaryBlue
+                          : themeProvider.secondaryText.withOpacity(0.3)),
                 ),
               ),
-              Positioned.fill(
-                  child: Center(
-                child: Text(
-                  _gasLevelData.displayText,
-                  style: GoogleFonts.inter(
-                      fontSize: 15.0,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white.withOpacity(0.95),
-                      shadows: [
-                        Shadow(
-                            blurRadius: 2.0,
-                            color: Colors.black.withOpacity(0.7),
-                            offset: Offset(1, 1))
-                      ]),
-                ),
-              )),
-            ],
-          );
-        },
-      ),
+            ),
+          ),
+        const SizedBox(height: 24),
+      ],
     );
   }
 
-  // Updated _buildPromotionCarouselItem to call _handlePromotionCta
   Widget _buildPromotionCarouselItem(PromotionItem item, BuildContext context,
       {required ThemeProvider themeProvider}) {
     return CustomCard(
@@ -908,7 +546,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Positioned.fill(
               child: ClipRRect(
                 borderRadius: themeProvider.cardBorderRadius,
-                child: Image.asset(item.backgroundImage!,
+                child: Image.network(item.backgroundImage!,
                     fit: BoxFit.cover,
                     color: Colors.black.withOpacity(0.3),
                     colorBlendMode: BlendMode.darken),
@@ -947,19 +585,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         fontSize: 15.0,
                         color: item.textColor.withOpacity(0.9))),
                 const Spacer(),
-                if (item.ctaText !=
-                    null) // CTA button always active if text is present
+                if (item.ctaText != null)
                   Align(
                     alignment: Alignment.bottomRight,
                     child: ElevatedButton(
-                      onPressed: () =>
-                          _handlePromotionCta(item), // Calls the new handler
+                      onPressed: () => _handlePromotionCta(item),
                       style: ElevatedButton.styleFrom(
                           backgroundColor: item.textColor,
                           foregroundColor: item.backgroundColor,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(25.0)),
-                          // Adjusted vertical padding from 10 to 8
                           padding: const EdgeInsets.symmetric(
                               horizontal: 24, vertical: 8),
                           textStyle: GoogleFonts.inter(
@@ -1020,150 +655,168 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildActiveOrderStatusStep(
-      String statusText, ThemeProvider themeProvider) {
-    IconData statusIcon;
-    Color statusColor;
-    String normalizedStatus = statusText.toLowerCase();
-    if (normalizedStatus.contains('delivered')) {
-      statusIcon = Icons.check_circle_outline_rounded;
-      statusColor = themeProvider.successColor;
-    } else if (normalizedStatus.contains('cancelled')) {
-      statusIcon = Icons.cancel_outlined;
-      statusColor = themeProvider.errorColor;
-    } else if (normalizedStatus.contains('confirmed')) {
-      statusIcon = Icons.thumb_up_alt_outlined;
-      statusColor = themeProvider.gas2doorPrimaryBlue;
-    } else if (normalizedStatus.contains('placed')) {
-      statusIcon = Icons.playlist_add_check_circle_outlined;
-      statusColor = themeProvider.gas2doorTeal;
-    } else if (normalizedStatus.contains('driver assigned')) {
-      statusIcon = Icons.person_pin_circle_outlined;
-      statusColor = themeProvider.warningColor;
-    } else if (normalizedStatus.contains('enroute') ||
-        (normalizedStatus.contains('delivery') &&
-            !normalizedStatus.contains('delivered'))) {
-      statusIcon = Icons.local_shipping_outlined;
-      statusColor = themeProvider.warningColor;
-    } else if (normalizedStatus.contains('processing') ||
-        normalizedStatus.contains('refilling')) {
-      statusIcon = Icons.hourglass_top_rounded;
-      statusColor = themeProvider.warningColor;
-    } else {
-      statusIcon = Icons.info_outline;
-      statusColor = themeProvider.secondaryText;
-    }
-
-    return Row(
-      children: [
-        Icon(statusIcon, color: statusColor, size: 28),
-        const SizedBox(width: 12),
-        Expanded(
+  // MODIFIED: Active order card now includes the delivery address.
+  Widget _buildActiveOrderCard(
+      ThemeProvider themeProvider, app_order.Order activeOrder) {
+    return CustomCard(
+      color: themeProvider.cardBackground,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          _navigateToOrderDetails(activeOrder.id);
+        },
+        borderRadius: themeProvider.cardBorderRadius,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("Current Status",
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildStatusTag(activeOrder, themeProvider),
+                  Icon(Icons.arrow_forward_ios_rounded,
+                      size: 16, color: themeProvider.secondaryText)
+                ],
+              ),
+              const SizedBox(height: 16.0),
+              Text('Order #${activeOrder.shortOrderId}',
                   style: GoogleFonts.inter(
-                      fontSize: 13, color: themeProvider.secondaryText)),
-              Text(statusText,
-                  style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: statusColor)),
+                      fontSize: 18.0,
+                      fontWeight: FontWeight.bold,
+                      color: themeProvider.primaryText)),
+              const SizedBox(height: 4.0),
+              if (activeOrder.deliveryAddressSnapshot?.fullAddress != null) ...[
+                const SizedBox(height: 8.0),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.location_on_outlined,
+                        color: themeProvider.secondaryText, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        activeOrder.deliveryAddressSnapshot!.fullAddress,
+                        style: GoogleFonts.inter(
+                          fontSize: 13.0,
+                          color: themeProvider.secondaryText,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 12.0),
+              _buildDynamicProgressTrackerWithIcons(
+                  activeOrder.status, themeProvider),
             ],
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActiveOrderCard(
-      ThemeProvider themeProvider, ActiveOrderStatusSummary activeOrderStatus) {
-    final bool hasActiveOrderData = _activeOrderStatus != null;
-    VoidCallback ordersActionCardOnTap = () {
-      HapticFeedback.lightImpact();
-      if (hasActiveOrderData) {
-        if (widget.customerIdFromShell == null || _activeOrderStatus == null) {
-          _showFeedbackSnackbar("Cannot track order: Information missing.",
-              isError: true);
-          return;
-        }
-        Navigator.of(context)
-            .pushNamed(OrderDetailsScreen.routeName, arguments: {
-          'orderId': _activeOrderStatus!.orderId,
-          'customerId': widget.customerIdFromShell!
-        });
-      } else {
-        widget.onSwitchTab(1);
-      }
-    };
-
-    return CustomCard(
-      color: themeProvider.cardBackground,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-                'Active Order: #${activeOrderStatus.orderId.length > 6 ? "...${activeOrderStatus.orderId.substring(activeOrderStatus.orderId.length - 4)}" : activeOrderStatus.orderId}',
-                style: GoogleFonts.inter(
-                    fontSize: 18.0,
-                    fontWeight: FontWeight.bold,
-                    color: themeProvider.primaryText)),
-            const SizedBox(height: 12.0),
-            _buildActiveOrderStatusStep(
-                activeOrderStatus.status, themeProvider),
-            const SizedBox(height: 16.0),
-            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-              TextButton(
-                  onPressed: ordersActionCardOnTap,
-                  child: Text('View Details',
-                      style: GoogleFonts.inter(
-                          color: themeProvider.gas2doorPrimaryBlue,
-                          fontWeight: FontWeight.w600))),
-            ]),
-          ],
         ),
       ),
     );
   }
 
-  Widget _buildRecentOrdersSection({
+  Widget _buildDynamicProgressTrackerWithIcons(
+      String currentStatus, ThemeProvider themeProvider) {
+    final stages = [
+      {
+        'text': 'Order Placed',
+        'icon': Icons.playlist_add_check_circle_outlined
+      },
+      {'text': 'Processing', 'icon': Icons.hourglass_top_rounded},
+      {'text': 'En-route', 'icon': Icons.local_shipping_outlined},
+      {'text': 'Delivered', 'icon': Icons.check_circle_outline_rounded},
+    ];
+    final statusMap = {
+      'pending payment': 0,
+      'order placed': 0,
+      'processing': 1,
+      'driver assigned': 1,
+      'cylinder refilling': 1,
+      'driver enroute to pickup': 1,
+      'driver enroute to gas station': 1,
+      'out for delivery': 2,
+      'delivered': 3,
+    };
+
+    String normalizedStatus = currentStatus.toLowerCase();
+    int currentStageIndex = statusMap[normalizedStatus] ?? 0;
+
+    String currentStageText = stages[currentStageIndex]['text'] as String;
+    IconData currentStageIcon = stages[currentStageIndex]['icon'] as IconData;
+    String? nextStageText = currentStageIndex < stages.length - 1
+        ? stages[currentStageIndex + 1]['text'] as String
+        : null;
+
+    if (normalizedStatus.contains('driver assigned')) {
+      currentStageText = 'Driver Assigned';
+    }
+    if (normalizedStatus.contains('out for delivery')) {
+      currentStageText = 'Out for Delivery';
+    }
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Icon(currentStageIcon, color: themeProvider.gas2doorTeal, size: 18),
+            const SizedBox(width: 8),
+            Text(currentStageText,
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.bold,
+                    color: themeProvider.primaryText)),
+            const Spacer(),
+            if (nextStageText != null)
+              Text(nextStageText,
+                  style: GoogleFonts.inter(color: themeProvider.secondaryText)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (nextStageText != null)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: LinearProgressIndicator(
+              value: (currentStageIndex + 0.5) / stages.length,
+              backgroundColor: themeProvider.tertiaryText.withOpacity(0.2),
+              valueColor:
+                  AlwaysStoppedAnimation<Color>(themeProvider.gas2doorTeal),
+              minHeight: 6,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildOrderHistorySection({
     required ThemeProvider themeProvider,
-    required bool isLoading,
     required List<app_order.Order> orders,
   }) {
     return CustomCard(
       color: themeProvider.cardBackground,
+      elevation: 4,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('Recent Orders',
+              Text('Order History',
                   style: GoogleFonts.inter(
                       fontSize: 18.0,
                       fontWeight: FontWeight.bold,
                       color: themeProvider.primaryText)),
               TextButton(
                   onPressed: () => widget.onSwitchTab(1),
-                  child: Text('View All',
-                      style: GoogleFonts.inter(
-                          color: themeProvider.gas2doorPrimaryBlue,
-                          fontWeight: FontWeight.w600))),
+                  child: const Text('View All')),
             ]),
-            const SizedBox(height: 12.0),
-            if (isLoading)
-              const Center(
-                  child: Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: CircularProgressIndicator()))
-            else if (orders.isEmpty)
+            const SizedBox(height: 16.0),
+            _buildPerformanceStats(themeProvider),
+            const SizedBox(height: 8.0),
+            Divider(color: themeProvider.tertiaryText.withOpacity(0.2)),
+            if (orders.isEmpty)
               Center(
                   child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 20.0),
+                      padding: const EdgeInsets.symmetric(vertical: 30.0),
                       child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -1172,26 +825,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 color: themeProvider.secondaryText
                                     .withOpacity(0.6)),
                             const SizedBox(height: 10),
-                            Text('No recent orders.',
+                            Text('No recent orders to show here.',
                                 style: GoogleFonts.inter(
                                     fontSize: 16,
                                     color: themeProvider.secondaryText)),
                           ])))
             else
-              ListView.separated(
-                physics: const NeverScrollableScrollPhysics(),
-                shrinkWrap: true,
-                itemCount: orders.length,
-                itemBuilder: (context, index) {
-                  final order = orders[index];
-                  return _buildRecentOrderItemEnhanced(
-                      order: order,
-                      themeProvider: themeProvider,
-                      onTap: () => _navigateToOrderDetails(order.id));
-                },
-                separatorBuilder: (context, index) => Divider(
-                    height: 1,
-                    color: themeProvider.tertiaryText.withOpacity(0.1)),
+              Column(
+                children: orders
+                    .map((order) => _buildRecentOrderItemCard(
+                        order: order, themeProvider: themeProvider))
+                    .toList(),
               ),
           ],
         ),
@@ -1199,76 +843,154 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildRecentOrderItemEnhanced(
-      {required app_order.Order order,
-      required ThemeProvider themeProvider,
-      VoidCallback? onTap}) {
-    Color statusColorVal;
-    IconData statusIcon = Icons.info_outline;
-    String orderStatus = order.status.toLowerCase();
-
-    if (orderStatus == 'delivered') {
-      statusColorVal = themeProvider.successColor;
-      statusIcon = Icons.check_circle_outline_rounded;
-    } else if (orderStatus == 'processing' ||
-        orderStatus == 'cylinder refilling') {
-      statusColorVal = themeProvider.warningColor;
-      statusIcon = Icons.hourglass_top_rounded;
-    } else if (orderStatus == 'out for delivery') {
-      statusColorVal = themeProvider.warningColor;
-      statusIcon = Icons.local_shipping_outlined;
-    } else if (orderStatus == 'cancelled') {
-      statusColorVal = themeProvider.errorColor;
-      statusIcon = Icons.cancel_outlined;
-    } else {
-      statusColorVal = themeProvider.secondaryText;
-      statusIcon = Icons.info_outline;
-    }
-
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
-      leading: CircleAvatar(
-          backgroundColor: statusColorVal.withOpacity(0.15),
-          child: Icon(statusIcon, color: statusColorVal, size: 22)),
-      title: Text('Order #${order.shortOrderId}',
-          style: GoogleFonts.inter(
-              fontSize: 15.0,
-              fontWeight: FontWeight.w600,
-              color: themeProvider.primaryText)),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(order.itemsPreview,
-              style: GoogleFonts.inter(
-                  fontSize: 12.0, color: themeProvider.secondaryText)),
-          Text(order.formattedOrderDate,
-              style: GoogleFonts.inter(
-                  fontSize: 12.0, color: themeProvider.secondaryText)),
-        ],
+  // MODIFIED: Recent order card now includes the Order ID.
+  Widget _buildRecentOrderItemCard(
+      {required app_order.Order order, required ThemeProvider themeProvider}) {
+    bool isCompleted = order.status.toLowerCase() == 'delivered';
+    return CustomCard(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      color: themeProvider.cardBackground,
+      surfaceTintColor: themeProvider.gas2doorPurple.withOpacity(0.05),
+      elevation: 2,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          if (order.paymentStatus.toLowerCase() == 'pending payment') {
+            Navigator.of(context, rootNavigator: true).pushNamed(
+              OrderSummaryScreen.routeName,
+              arguments: {
+                'orderId': order.id,
+                'customerId': widget.customerIdFromShell!,
+                'isVerifyingPayment': true,
+              },
+            );
+          } else {
+            _navigateToOrderDetails(order.id);
+          }
+        },
+        borderRadius: themeProvider.cardBorderRadius,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Order #${order.shortOrderId}',
+                            style: GoogleFonts.inter(
+                                color: themeProvider.secondaryText,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 6),
+                        Text(order.itemsPreview,
+                            style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w600,
+                                color: themeProvider.primaryText,
+                                fontSize: 15)),
+                        const SizedBox(height: 4),
+                        Text(
+                          order.formattedOrderDate,
+                          style: GoogleFonts.inter(
+                              color: themeProvider.secondaryText, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _buildStatusTag(order, themeProvider),
+                ],
+              ),
+              if (isCompleted) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.bottomRight,
+                  child: SizedBox(
+                    width: 100,
+                    child: CustomButton(
+                      text: 'Reorder',
+                      onPressed: () => _navigateToReorder(order),
+                      height: 36,
+                      icon: const Icon(Icons.replay_rounded,
+                          size: 16, color: Colors.white),
+                      color: themeProvider.gas2doorTeal,
+                      textStyle: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ]
+            ],
+          ),
+        ),
       ),
-      trailing: Text(order.status,
-          style: GoogleFonts.inter(
-              color: statusColorVal,
-              fontWeight: FontWeight.w500,
-              fontSize: 12)),
-      onTap: onTap,
     );
   }
 
-  Widget _buildSkeletonItem(
-      {double height = 50,
-      double width = double.infinity,
-      EdgeInsetsGeometry? margin,
-      required ThemeProvider themeProvider}) {
+  Widget _buildStatusTag(app_order.Order order, ThemeProvider themeProvider) {
+    Color statusColor;
+    String statusText = order.status;
+    String normalizedStatus = order.status.toLowerCase();
+    if (normalizedStatus.contains('delivered')) {
+      statusColor = themeProvider.successColor;
+    } else if (normalizedStatus.contains('cancelled')) {
+      statusColor = themeProvider.errorColor;
+    } else if (normalizedStatus.contains('pending payment')) {
+      statusColor = themeProvider.warningColor;
+    } else {
+      statusColor = themeProvider.gas2doorTeal;
+    }
     return Container(
-      height: height,
-      width: width,
-      margin: margin ?? const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-          color: themeProvider.isDarkMode
-              ? Colors.grey[800]!.withOpacity(0.5)
-              : Colors.grey[300]!.withOpacity(0.7),
-          borderRadius: BorderRadius.circular(12.0)),
+        color: statusColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(statusText,
+          style: GoogleFonts.inter(
+              color: statusColor, fontWeight: FontWeight.w600, fontSize: 12)),
+    );
+  }
+
+  Widget _buildPerformanceStats(ThemeProvider themeProvider) {
+    final int totalOrders =
+        _recentOrders.length + (_activeOrder != null ? 1 : 0);
+    const String totalKg = "120.5kg";
+    const String avgDays = "21 days";
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceAround,
+      children: [
+        _buildStatItem(themeProvider, totalOrders.toString(), "Total Orders",
+            Icons.shopping_bag_outlined),
+        _buildStatItem(
+            themeProvider, totalKg, "Total KG", Icons.scale_outlined),
+        _buildStatItem(themeProvider, avgDays, "Avg. Between Orders",
+            Icons.timelapse_outlined),
+      ],
+    );
+  }
+
+  Widget _buildStatItem(
+      ThemeProvider themeProvider, String value, String label, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: themeProvider.gas2doorTeal, size: 24),
+        const SizedBox(height: 4),
+        Text(value,
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: themeProvider.primaryText)),
+        Text(label,
+            style: GoogleFonts.inter(
+                fontSize: 11, color: themeProvider.secondaryText)),
+      ],
     );
   }
 
@@ -1280,15 +1002,4 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       });
     }
   }
-}
-
-class _GasCylinderFillClipper extends CustomClipper<Rect> {
-  final double fillLevel;
-  _GasCylinderFillClipper({required this.fillLevel});
-  @override
-  Rect getClip(Size size) => Rect.fromLTWH(
-      0, size.height * (1 - fillLevel), size.width, size.height * fillLevel);
-  @override
-  bool shouldReclip(covariant _GasCylinderFillClipper oldClipper) =>
-      oldClipper.fillLevel != fillLevel;
 }

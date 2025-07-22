@@ -67,6 +67,8 @@ import 'models/address_model.dart';
 import 'models/deal_model.dart';
 import 'models/admin/admin_promotion_model.dart';
 import 'models/admin/faq_item_model.dart';
+import 'models/order.dart' as app_order; // Import the order model
+
 import 'models/user.dart'
     as app_user; // Added app_user import for PaymentScreen arguments
 
@@ -154,8 +156,10 @@ class MyApp extends StatelessWidget {
               return MaterialPageRoute(
                 builder: (_) => OrderPlacementScreen(
                   isRefill: (args['isRefill'] as bool?) ?? false,
-                  lastOrderItems:
-                      (args['lastOrderItems'] as List<Map<String, dynamic>>?),
+                  // REMOVED: `lastOrderItems` is no longer used.
+                  // NEW: Added the new parameters.
+                  refillCylinderSize: args['refillCylinderSize'] as String?,
+                  prefilledPromoCode: args['prefilledPromoCode'] as String?,
                   initialAddress: args['initialAddress'] as AddressModel?,
                   customerId: args['customerId'] as String,
                   preselectedCylinderIdFromDeal:
@@ -202,13 +206,16 @@ class MyApp extends StatelessWidget {
             if (args != null &&
                 args.containsKey('orderId') &&
                 args.containsKey('amount') &&
-                args.containsKey('customer')) {
+                args.containsKey('customer') &&
+                args.containsKey('order')) {
+              // Check for the new parameter
               return MaterialPageRoute(
                 builder: (_) => PaymentScreen(
                   orderId: args['orderId'] as String,
                   amount: (args['amount'] as num).toDouble(),
-                  itemDescription: args['itemDescription'] as String?,
                   customer: args['customer'] as app_user.User,
+                  // Pass the new parameter
+                  order: args['order'] as app_order.Order,
                 ),
                 settings: settings,
               );

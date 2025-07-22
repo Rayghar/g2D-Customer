@@ -1,4 +1,5 @@
 // File: lib/screens/customer/feedback_screen.dart
+// ADVISORY: This file has been updated to align with the new theme strategy.
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -9,7 +10,7 @@ import 'dart:async';
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/input.dart';
-import '../../widgets/card.dart'; // For overall structure if needed
+import '../../widgets/card.dart';
 
 // Mock Feedback Service
 class MockFeedbackService {
@@ -18,8 +19,6 @@ class MockFeedbackService {
       required int rating,
       String? comment,
       required String customerId}) async {
-    print(
-        "MockFeedbackService: Submitting feedback for Order $orderId by $customerId - Rating: $rating, Comment: $comment");
     await Future.delayed(const Duration(seconds: 1));
     return true; // Simulate success
   }
@@ -28,12 +27,10 @@ class MockFeedbackService {
 class FeedbackScreen extends StatefulWidget {
   static const String routeName = '/feedback';
   final String orderId;
-  // final String customerId; // Should be fetched from AuthProvider or passed if necessary
 
   const FeedbackScreen({
     super.key,
     required this.orderId,
-    // required this.customerId,
   });
 
   @override
@@ -42,8 +39,7 @@ class FeedbackScreen extends StatefulWidget {
 
 class _FeedbackScreenState extends State<FeedbackScreen>
     with TickerProviderStateMixin {
-  final _formKey =
-      GlobalKey<FormState>(); // Can be used if more fields are added
+  final _formKey = GlobalKey<FormState>();
   final TextEditingController _commentController = TextEditingController();
   double _selectedRating = 0;
   bool _isLoading = false;
@@ -53,7 +49,7 @@ class _FeedbackScreenState extends State<FeedbackScreen>
   late List<Animation<Offset>> _slideAnimations;
 
   final MockFeedbackService _feedbackService = MockFeedbackService();
-  final String _mockCustomerId = "cust_abc_123"; // Placeholder
+  final String _mockCustomerId = "cust_abc_123";
 
   @override
   void initState() {
@@ -98,8 +94,7 @@ class _FeedbackScreenState extends State<FeedbackScreen>
       if (mounted) {
         if (success) {
           _showFeedbackSnackbar('Thank you for your valuable feedback!');
-          Navigator.pop(
-              context, true); // Pop with true if feedback was submitted
+          Navigator.pop(context, true);
         } else {
           _showFeedbackSnackbar('Failed to submit feedback. Please try again.',
               isError: true);
@@ -115,7 +110,18 @@ class _FeedbackScreenState extends State<FeedbackScreen>
   }
 
   void _showFeedbackSnackbar(String message, {bool isError = false}) {
-    /* ... same as before ... */
+    if (!mounted) return;
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
+        backgroundColor:
+            isError ? themeProvider.errorColor : themeProvider.successColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(12),
+      ),
+    );
   }
 
   Widget _buildStarRating(ThemeProvider themeProvider) {
@@ -125,15 +131,14 @@ class _FeedbackScreenState extends State<FeedbackScreen>
         final ratingValue = index + 1;
         final bool isSelected = ratingValue <= _selectedRating;
         return Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 6.0), // Adjusted spacing
+          padding: const EdgeInsets.symmetric(horizontal: 6.0),
           child: IconButton(
             icon: Icon(
               isSelected ? Icons.star_rounded : Icons.star_border_rounded,
               color: isSelected
                   ? themeProvider.warningColor
                   : themeProvider.tertiaryText.withOpacity(0.7),
-              size: 44, // Larger stars
+              size: 44,
             ),
             onPressed: _isLoading
                 ? null
@@ -177,98 +182,95 @@ class _FeedbackScreenState extends State<FeedbackScreen>
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20.0),
           child: Form(
-            // Form can be useful if more validated fields are added
             key: _formKey,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center, // Center content
+              crossAxisAlignment: CrossAxisAlignment.stretch, // Stretch button
               children: [
                 SlideTransition(
-                    position: _slideAnimations[0],
-                    child: Column(children: [
-                      Text('How was your experience?',
-                          style: GoogleFonts.inter(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: themeProvider
-                                  .primaryText)), // More engaging title
-                      const SizedBox(height: 10),
-                      Text(
-                          'Your feedback helps us improve our service for everyone.',
-                          style: GoogleFonts.inter(
-                              fontSize: 15,
-                              color: themeProvider.secondaryText,
-                              height: 1.4),
-                          textAlign: TextAlign.center),
-                    ])),
-                const SizedBox(height: 32),
+                  position: _slideAnimations[0],
+                  child: CustomCard(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        children: [
+                          Text('How was your experience?',
+                              style: GoogleFonts.inter(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: themeProvider.primaryText)),
+                          const SizedBox(height: 10),
+                          Text(
+                              'Your feedback helps us improve our service for everyone.',
+                              style: GoogleFonts.inter(
+                                  fontSize: 15,
+                                  color: themeProvider.secondaryText,
+                                  height: 1.4),
+                              textAlign: TextAlign.center),
+                          const SizedBox(height: 24),
+                          _buildStarRating(themeProvider),
+                          if (_selectedRating > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 10.0),
+                              child: Text(
+                                  "${_selectedRating.toInt()} out of 5 Stars",
+                                  style: GoogleFonts.inter(
+                                      color: themeProvider.warningColor,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15)),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
                 SlideTransition(
                     position: _slideAnimations[1],
-                    child: Column(children: [
-                      Text('Select Your Rating',
-                          style: GoogleFonts.inter(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w500,
-                              color: themeProvider.primaryText)),
-                      const SizedBox(height: 16),
-                      _buildStarRating(themeProvider),
-                      if (_selectedRating > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 10.0),
-                          child: Text(
-                              "${_selectedRating.toInt()} out of 5 Stars",
-                              style: GoogleFonts.inter(
-                                  color: themeProvider.warningColor,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 15)),
-                        ),
-                    ])),
-                const SizedBox(height: 32),
-                SlideTransition(
-                    position: _slideAnimations[2],
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Additional Comments (Optional)',
-                            style: GoogleFonts.inter(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                color: themeProvider.primaryText)),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4.0),
+                          child: Text('Additional Comments (Optional)',
+                              style: GoogleFonts.inter(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                  color: themeProvider.primaryText)),
+                        ),
                         const SizedBox(height: 10),
                         CustomInput(
                           controller: _commentController,
-                          hintText:
-                              'Share more details about what you liked or what could be improved...',
-                          keyboardType: TextInputType.multiline, maxLines: 5,
+                          hintText: 'Share more details about your delivery...',
+                          keyboardType: TextInputType.multiline,
+                          maxLines: 5,
                           minLines: 3,
                           textInputAction: TextInputAction.newline,
-                          fillColor: themeProvider
-                              .cardBackground, // Make input background match cards
+                          fillColor: themeProvider.cardBackground,
                         ),
                       ],
                     )),
                 const SizedBox(height: 32),
-                CustomButton(
-                  text: _isLoading ? 'Submitting...' : 'Submit Feedback',
-                  onPressed: _isLoading ? null : _handleSubmitFeedback,
-                  color: themeProvider.gas2doorPrimaryBlue,
-                  height: 52,
-                  borderRadius: themeProvider.cardBorderRadiusValue,
-                  icon: _isLoading
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                  themeProvider.infoColorOnDarkBgs)))
-                      : Icon(Icons.send_rounded,
-                          color: themeProvider.infoColorOnDarkBgs, size: 20),
-                  textStyle: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: themeProvider.infoColorOnDarkBgs),
+                SlideTransition(
+                  position: _slideAnimations[2],
+                  child: CustomButton(
+                    text: _isLoading ? 'Submitting...' : 'Submit Feedback',
+                    onPressed: _isLoading ? null : _handleSubmitFeedback,
+                    // MODIFIED: Use primary brand blue for consistent CTA
+                    color: themeProvider.gas2doorPrimaryBlue,
+                    height: 52,
+                    borderRadius: themeProvider.cardBorderRadiusValue,
+                    icon: _isLoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white)))
+                        : const Icon(Icons.send_rounded,
+                            color: Colors.white, size: 20),
+                  ),
                 ),
-                const SizedBox(height: 20),
               ],
             ),
           ),

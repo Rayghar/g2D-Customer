@@ -1,4 +1,5 @@
 // File: lib/screens/customer/notification_screen.dart
+// ADVISORY: This version fixes the build error by correctly processing the API response.
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,13 +22,32 @@ class IntegratedNotificationService {
   final ApiService _apiService = ApiService();
   final AuthService _authService = AuthService();
 
+  // CORRECTED: This method now correctly handles the Map response from the API
+  // This method correctly handles the Map response from the API
   Future<List<app_notification_model.NotificationModel>>
       getNotifications() async {
     String? userId = await _authService.getUserId();
     if (userId == null) {
       throw Exception("User not authenticated. Cannot fetch notifications.");
     }
-    return await _apiService.getNotifications();
+
+    // The API call returns a Map<String, dynamic>, not a List directly.
+    final dynamic response = await _apiService.getNotifications();
+
+    if (response is Map<String, dynamic> &&
+        response.containsKey('notifications')) {
+      // We need to extract the list from the 'notifications' key.
+      final List<dynamic> notificationData =
+          response['notifications'] as List<dynamic>? ?? [];
+      // Now we can map this list to our NotificationModel.
+      return notificationData
+          .map(
+              (data) => app_notification_model.NotificationModel.fromJson(data))
+          .toList();
+    } else {
+      // Handle cases where the response is not in the expected format
+      throw Exception("Unexpected API response format for notifications.");
+    }
   }
 
   Future<void> markAsRead(String notificationId) async {
@@ -132,7 +152,7 @@ class _NotificationScreenState extends State<NotificationScreen>
         setState(() {
           _isLoading = false;
           _errorMessage =
-              "Failed to load notifications: ${e.toString().replaceFirst("Exception:", "")}";
+              "Failed to load notifications: ${e.toString().replaceFirst("Exception: ", "")}";
         });
       }
     }
@@ -200,8 +220,6 @@ class _NotificationScreenState extends State<NotificationScreen>
           'customerId': _currentUserId!,
         });
       } catch (e) {
-        print(
-            "Error creating DealModel from notification data or navigating: $e");
         _showFeedbackSnackbar(
             'Could not open promotion details. Data may be incomplete.',
             isError: true);
@@ -283,9 +301,7 @@ class _NotificationScreenState extends State<NotificationScreen>
 
   IconData _getIconForNotificationType(
       String? type, ThemeProvider themeProvider) {
-    // Made type nullable
     switch (type?.toLowerCase()) {
-      // Used null-safe operator
       case 'order_update':
         return Icons.local_shipping_outlined;
       case 'payment_success':
@@ -375,12 +391,10 @@ class _NotificationScreenState extends State<NotificationScreen>
                         curve: Curves.easeOutCubic)));
 
         return FadeTransition(
-          opacity:
-              _listAnimationController, // Assuming _listAnimationController is an Animation<double> or similar
+          opacity: _listAnimationController,
           child: SlideTransition(
             position: itemAnimation,
             child: _NotificationCardWidget(
-              // Renamed from _NotificationItemWidget
               notification: notification,
               themeProvider: themeProvider,
               onTap: () => _handleNotificationTap(notification),
@@ -395,7 +409,7 @@ class _NotificationScreenState extends State<NotificationScreen>
   }
 
   Widget _buildLoadingShimmer(ThemeProvider themeProvider) {
-    /* ... as provided in your file ... */ return ListView.builder(
+    return ListView.builder(
         padding: const EdgeInsets.all(12.0),
         itemCount: 5,
         itemBuilder: (context, index) => CustomCard(
@@ -438,7 +452,7 @@ class _NotificationScreenState extends State<NotificationScreen>
       required double height,
       required ThemeProvider themeProvider,
       double borderRadius = 4}) {
-    /* ... */ return Container(
+    return Container(
         width: width,
         height: height,
         decoration: BoxDecoration(
@@ -449,7 +463,7 @@ class _NotificationScreenState extends State<NotificationScreen>
   }
 
   Widget _buildErrorState(ThemeProvider themeProvider) {
-    /* ... as provided in your file ... */ return Center(
+    return Center(
       child: Padding(
         padding: const EdgeInsets.all(30.0),
         child: Column(
@@ -482,7 +496,7 @@ class _NotificationScreenState extends State<NotificationScreen>
   }
 
   Widget _buildEmptyState(ThemeProvider themeProvider) {
-    /* ... as provided in your file ... */ return Center(
+    return Center(
       child: Padding(
         padding: const EdgeInsets.all(30.0),
         child: Column(
@@ -511,7 +525,6 @@ class _NotificationScreenState extends State<NotificationScreen>
   }
 }
 
-// Renamed from _NotificationItemWidget to avoid potential conflicts
 class _NotificationCardWidget extends StatelessWidget {
   final app_notification_model.NotificationModel notification;
   final ThemeProvider themeProvider;
@@ -519,7 +532,6 @@ class _NotificationCardWidget extends StatelessWidget {
   final IconData iconData;
 
   const _NotificationCardWidget({
-    // Removed Key? key to avoid conflict if super.key isn't used
     required this.notification,
     required this.themeProvider,
     required this.onTap,
@@ -593,9 +605,8 @@ class _NotificationCardWidget extends StatelessWidget {
                       overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 10),
                   Text(
-                      DateFormat('MMM dd, yyyy hh:mm a').format(notification
-                          .timestamp
-                          .toLocal()), // Standardized date format
+                      DateFormat('MMM dd, yyyy hh:mm a')
+                          .format(notification.timestamp.toLocal()),
                       style: GoogleFonts.inter(
                           fontSize: 11.5,
                           color: themeProvider.tertiaryText

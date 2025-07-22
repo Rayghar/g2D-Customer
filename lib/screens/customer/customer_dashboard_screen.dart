@@ -1,4 +1,5 @@
 // File: lib/screens/customer/customer_dashboard_screen.dart
+// ADVISORY: This is the complete, final version aligned with the new theme.
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -81,8 +82,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
       String? customerId = await _authService.getUserId();
       app_user.User? userProfile;
       AddressModel? defaultAddress;
-      bool hasNotifications =
-          false; // TODO: Implement actual notification check
+      bool hasNotifications = false;
 
       if (customerId != null && customerId.isNotEmpty) {
         userProfile = await _authService.getCurrentUserProfile();
@@ -97,8 +97,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                   (addr) => addr.id == userProfile!.defaultAddressId,
                 );
               } catch (e) {
-                print(
-                    "Default address ID ${userProfile.defaultAddressId} not found. Using first available.");
                 defaultAddress = allAddresses.first;
               }
             }
@@ -106,13 +104,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
             final allAddresses = await _apiService.getMyAddresses();
             if (allAddresses.isNotEmpty) {
               defaultAddress = allAddresses.first;
-              print(
-                  "No default address ID. Using first available address as current.");
             }
           }
         }
-      } else {
-        print("Customer ID is null or empty for dashboard shell.");
       }
 
       if (mounted) {
@@ -136,7 +130,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
       }
     } catch (e) {
       if (mounted) {
-        print("Error fetching shell data for CustomerDashboardScreen: $e");
         setState(() {
           _shellErrorMessage =
               "Failed to load dashboard data: ${e.toString().replaceFirst("Exception: ", "")}";
@@ -202,14 +195,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
       );
 
       if (!wasAlreadyDefault) {
-        _apiService
-            .setDefaultAddress(newAddress.id)
-            .then((updatedDefaultAddress) {
-          print(
-              "Address ${updatedDefaultAddress.label} set as default via dashboard's selection flow.");
+        _apiService.setDefaultAddress(newAddress.id).then((_) {
           _fetchShellData(isRefresh: true);
         }).catchError((error) {
-          print("Error setting default address from dashboard: $error");
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(

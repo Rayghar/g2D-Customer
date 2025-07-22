@@ -147,8 +147,8 @@ class _AdminRegisterScreenState extends State<AdminRegisterScreen>
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final String appLogoPath = themeProvider.isDarkMode
-        ? 'assets/images/gas2door_logo_dark.png'
-        : 'assets/images/gas2door_logo_light.png';
+        ? 'assets/images/gas2door_logo.png'
+        : 'assets/images/gas2door_logo.png';
     final Color adminAccentColor = themeProvider.gas2doorPurple;
 
     return Scaffold(

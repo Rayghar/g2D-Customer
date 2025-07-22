@@ -2687,13 +2687,20 @@ class ApiService {
           '[ApiService] getNotifications Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        print('[ApiService] Notifications fetched successfully.');
-        final List<dynamic> notificationsJson =
-            responseBody as List<dynamic>? ?? [];
-        return notificationsJson
-            .map((json) =>
-                NotificationModel.fromJson(json as Map<String, dynamic>))
-            .toList();
+        // FIX: The response body is a MAP, not a List. We must check for the 'notifications' key.
+        if (responseBody is Map<String, dynamic> &&
+            responseBody.containsKey('notifications')) {
+          print('[ApiService] Notifications fetched successfully.');
+          final List<dynamic> notificationsJson =
+              responseBody['notifications'] as List<dynamic>? ?? [];
+          return notificationsJson
+              .map((json) =>
+                  NotificationModel.fromJson(json as Map<String, dynamic>))
+              .toList();
+        } else {
+          // This handles cases where the response is 200 OK but the format is wrong.
+          throw Exception('Unexpected API response format for notifications.');
+        }
       } else {
         final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
             'Failed to load notifications';

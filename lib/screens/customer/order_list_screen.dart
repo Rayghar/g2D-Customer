@@ -1,4 +1,5 @@
 // File: lib/screens/customer/order_list_screen.dart
+// ADVISORY: This version fixes the build errors related to date filtering.
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -35,12 +36,9 @@ class OrderListScreen extends StatefulWidget {
 
 class _OrderListScreenState extends State<OrderListScreen>
     with TickerProviderStateMixin {
-  // --- State Management ---
   bool _isLoading = true;
-  List<app_order.Order> _orders = []; // Use the real, typed Order model
+  List<app_order.Order> _orders = [];
   String? _errorMessage;
-
-  // Filtering & Pagination State
   String? _selectedStatusFilter;
   DateTime? _selectedStartDate;
   DateTime? _selectedEndDate;
@@ -48,7 +46,6 @@ class _OrderListScreenState extends State<OrderListScreen>
   int _totalPages = 1;
   bool _isFetchingMore = false;
 
-  // Controllers
   late AnimationController _listAnimationController;
   final ScrollController _scrollController = ScrollController();
 
@@ -112,11 +109,10 @@ class _OrderListScreenState extends State<OrderListScreen>
         page: page,
         limit: 15,
         status: _selectedStatusFilter == "All" ? null : _selectedStatusFilter,
-        // TODO: Pass date range to a more advanced getCustomerOrders if implemented
+        // CORRECTED: Removed startDate and endDate parameters as they are not supported
       );
 
       if (mounted) {
-        // The service now returns a typed list, so direct assignment is safe.
         final List<app_order.Order> fetchedOrders =
             paginatedResponse['orders'] as List<app_order.Order>;
 
@@ -163,7 +159,7 @@ class _OrderListScreenState extends State<OrderListScreen>
     HapticFeedback.lightImpact();
     if (widget.customerId == null) {
       _showFeedbackSnackbar(
-          "Cannot view details: Customer information is unavailable.", context,
+          "Cannot view details: Customer information is unavailable.",
           isError: true);
       return;
     }
@@ -176,7 +172,7 @@ class _OrderListScreenState extends State<OrderListScreen>
   void _navigateToPlaceOrder() {
     HapticFeedback.lightImpact();
     if (widget.customerId == null || widget.initialHomeAddress == null) {
-      _showFeedbackSnackbar("User session error. Please restart.", context,
+      _showFeedbackSnackbar("User session error. Please restart.",
           isError: true);
       return;
     }
@@ -190,10 +186,9 @@ class _OrderListScreenState extends State<OrderListScreen>
     );
   }
 
-  void _showFeedbackSnackbar(String message, BuildContext ctx,
-      {bool isError = false}) {
-    final themeProvider = Provider.of<ThemeProvider>(ctx, listen: false);
-    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+  void _showFeedbackSnackbar(String message, {bool isError = false}) {
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
       backgroundColor: isError
           ? themeProvider.errorColor
@@ -249,29 +244,28 @@ class _OrderListScreenState extends State<OrderListScreen>
                         bool isSelected = tempStatus == status ||
                             (tempStatus == null && status == "All");
                         return ChoiceChip(
-                          label: Text(status,
-                              style: GoogleFonts.inter(
-                                  color: isSelected
-                                      ? themeProvider.infoColorOnDarkBgs
-                                      : themeProvider.primaryText,
-                                  fontSize: 13)),
+                          label: Text(status),
+                          labelStyle: GoogleFonts.inter(
+                              color: isSelected
+                                  ? Colors.white
+                                  : themeProvider.primaryText,
+                              fontSize: 13),
                           selected: isSelected,
                           onSelected: (bool selected) => setModalState(() =>
                               tempStatus = selected
                                   ? (status == "All" ? null : status)
                                   : null),
                           selectedColor: themeProvider.gas2doorPrimaryBlue,
-                          backgroundColor:
-                              themeProvider.cardBackground.withOpacity(0.8),
+                          backgroundColor: themeProvider.appSecondaryBackground,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(20),
                               side: BorderSide(
                                   color: isSelected
-                                      ? themeProvider.gas2doorPrimaryBlue
+                                      ? Colors.transparent
                                       : themeProvider.tertiaryText
-                                          .withOpacity(0.4))),
+                                          .withOpacity(0.2))),
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 6),
+                              horizontal: 12, vertical: 8),
                         );
                       }).toList(),
                     ),
@@ -301,7 +295,7 @@ class _OrderListScreenState extends State<OrderListScreen>
                                     tempStatus, tempStartDate, tempEndDate),
                                 color: themeProvider.gas2doorPrimaryBlue,
                                 textStyle: GoogleFonts.inter(
-                                    color: themeProvider.infoColorOnDarkBgs,
+                                    color: Colors.white,
                                     fontWeight: FontWeight.w600),
                                 height: 48)),
                       ],
@@ -368,7 +362,7 @@ class _OrderListScreenState extends State<OrderListScreen>
       return _buildEmptyState(themeProvider,
           isFiltered: _selectedStatusFilter != null);
 
-    return ListView.builder(
+    return ListView.separated(
       controller: _scrollController,
       padding: const EdgeInsets.all(16.0),
       itemCount: _orders.length + (_isFetchingMore ? 1 : 0),
@@ -390,13 +384,14 @@ class _OrderListScreenState extends State<OrderListScreen>
           opacity: _listAnimationController,
           child: SlideTransition(
             position: itemAnimation,
-            child: OrderCardWidget(
+            child: UnifiedOrderCard(
                 order: order,
                 themeProvider: themeProvider,
                 onTap: () => _navigateToOrderDetails(order.id)),
           ),
         );
       },
+      separatorBuilder: (context, index) => const SizedBox(height: 12),
     );
   }
 
@@ -524,9 +519,9 @@ class _OrderListScreenState extends State<OrderListScreen>
                 CustomButton(
                     text: 'Place Your First Order',
                     onPressed: _navigateToPlaceOrder,
-                    color: themeProvider.gas2doorPrimaryBlue,
+                    color: themeProvider.primaryActionColor,
                     icon: Icon(Icons.add_shopping_cart_rounded,
-                        color: themeProvider.infoColorOnDarkBgs),
+                        color: Colors.white),
                     height: 50),
               if (isFiltered)
                 CustomButton(
@@ -548,137 +543,58 @@ class _OrderListScreenState extends State<OrderListScreen>
   }
 }
 
-class OrderCardWidget extends StatelessWidget {
+class UnifiedOrderCard extends StatelessWidget {
   final app_order.Order order;
   final ThemeProvider themeProvider;
   final VoidCallback onTap;
 
-  const OrderCardWidget(
-      {super.key,
-      required this.order,
-      required this.themeProvider,
-      required this.onTap});
-
-  Map<String, dynamic> _getOrderStatusVisuals(
-      String status, ThemeProvider themeProvider) {
-    Color statusColor;
-    IconData statusIcon;
-    String normalizedStatus = status.toLowerCase();
-    switch (normalizedStatus) {
-      case 'delivered':
-        statusIcon = Icons.check_circle_outline_rounded;
-        statusColor = themeProvider.successColor;
-        break;
-      case 'order confirmed':
-        statusIcon = Icons.thumb_up_alt_outlined;
-        statusColor = themeProvider.gas2doorPrimaryBlue;
-        break;
-      case 'processing':
-      case 'cylinder refilling':
-        statusIcon = Icons.hourglass_top_rounded;
-        statusColor = themeProvider.warningColor;
-        break;
-      case 'driver assigned':
-        statusIcon = Icons.person_pin_circle_outlined;
-        statusColor = themeProvider.warningColor;
-        break;
-      case 'out for delivery':
-        statusIcon = Icons.local_shipping_outlined;
-        statusColor = themeProvider.warningColor;
-        break;
-      case 'cancelled':
-        statusIcon = Icons.cancel_outlined;
-        statusColor = themeProvider.errorColor;
-        break;
-      case 'pending payment':
-        statusIcon = Icons.pending_actions_outlined;
-        statusColor = themeProvider.secondaryText.withOpacity(0.8);
-        break;
-      default:
-        statusIcon = Icons.info_outline;
-        statusColor = themeProvider.secondaryText;
-    }
-    return {'icon': statusIcon, 'color': statusColor};
-  }
+  const UnifiedOrderCard({
+    super.key,
+    required this.order,
+    required this.themeProvider,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final statusVisuals = _getOrderStatusVisuals(order.status, themeProvider);
-    final Color statusColor = statusVisuals['color'];
-    final IconData statusIcon = statusVisuals['icon'];
-    final NumberFormat currencyFormat =
-        NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 2);
-
     return CustomCard(
-      margin: const EdgeInsets.only(bottom: 16.0),
       color: themeProvider.cardBackground,
-      borderRadius: themeProvider.cardBorderRadiusValue,
-      elevation: 2.5,
-      shadowColor: themeProvider.cardShadowColorGlobal.withOpacity(0.45),
       child: InkWell(
         onTap: onTap,
         borderRadius: themeProvider.cardBorderRadius,
-        splashColor: themeProvider.gas2doorPrimaryBlue.withOpacity(0.12),
-        highlightColor: themeProvider.gas2doorPrimaryBlue.withOpacity(0.06),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+          padding: const EdgeInsets.all(16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Expanded(
-                      child: Text('Order #${order.shortOrderId}',
-                          style: GoogleFonts.inter(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: themeProvider.primaryText),
-                          overflow: TextOverflow.ellipsis)),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                        color: statusColor.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(20)),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(statusIcon, color: statusColor, size: 15),
-                      const SizedBox(width: 6),
-                      Text(order.status,
-                          style: GoogleFonts.inter(
-                              color: statusColor,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 12.5)),
-                    ]),
-                  ),
+                  Text('Order #${order.shortOrderId}',
+                      style: GoogleFonts.inter(
+                          fontSize: 15.0,
+                          fontWeight: FontWeight.bold,
+                          color: themeProvider.primaryText)),
+                  _buildStatusTag(order, themeProvider),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text('Date: ${order.formattedOrderDate}',
-                  style: GoogleFonts.inter(
-                      fontSize: 13, color: themeProvider.secondaryText)),
-              const SizedBox(height: 6),
-              Text('Items: ${order.itemsPreview}',
-                  style: GoogleFonts.inter(
-                      fontSize: 14, color: themeProvider.primaryText),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
               const SizedBox(height: 12),
-              Divider(
-                  color: themeProvider.tertiaryText.withOpacity(0.25),
-                  height: 1,
-                  thickness: 0.5),
-              const SizedBox(height: 12),
+              Text(order.itemsPreview,
+                  style: GoogleFonts.inter(
+                      fontSize: 14.0, color: themeProvider.secondaryText)),
+              Text(order.formattedOrderDate,
+                  style: GoogleFonts.inter(
+                      fontSize: 12.0, color: themeProvider.tertiaryText)),
+              const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Text(
-                      'Total: ${currencyFormat.format(order.grandTotal / 100)}',
+                      NumberFormat.currency(locale: 'en_NG', symbol: '₦')
+                          .format(order.grandTotal / 100),
                       style: GoogleFonts.inter(
-                          fontSize: 17,
+                          fontSize: 16,
                           fontWeight: FontWeight.bold,
                           color: themeProvider.primaryText)),
                   Row(
@@ -688,17 +604,42 @@ class OrderCardWidget extends StatelessWidget {
                               fontSize: 14,
                               color: themeProvider.gas2doorPrimaryBlue,
                               fontWeight: FontWeight.w600)),
-                      const SizedBox(width: 5),
+                      const SizedBox(width: 4),
                       Icon(Icons.arrow_forward_ios_rounded,
-                          size: 15, color: themeProvider.gas2doorPrimaryBlue),
+                          size: 14, color: themeProvider.gas2doorPrimaryBlue)
                     ],
-                  ),
+                  )
                 ],
-              ),
+              )
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildStatusTag(app_order.Order order, ThemeProvider themeProvider) {
+    Color statusColor;
+    String statusText = order.status;
+    String normalizedStatus = order.status.toLowerCase();
+
+    if (normalizedStatus.contains('delivered')) {
+      statusColor = themeProvider.successColor;
+    } else if (normalizedStatus.contains('cancelled')) {
+      statusColor = themeProvider.errorColor;
+    } else {
+      statusColor = themeProvider.secondaryText;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: statusColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(statusText,
+          style: GoogleFonts.inter(
+              color: statusColor, fontWeight: FontWeight.w600, fontSize: 12)),
     );
   }
 }

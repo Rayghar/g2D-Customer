@@ -1,4 +1,5 @@
 // File: lib/screens/customer/deals_screen.dart
+// ADVISORY: This file has been updated to align with the new theme strategy.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -13,8 +14,6 @@ import '../../widgets/card.dart';
 import '../../models/deal_model.dart';
 import '../../models/address_model.dart';
 import './promotion_details_screen.dart';
-import './order_placement_screen.dart';
-import '../more/refer_friend_screen.dart';
 import '../../services/api_service.dart';
 
 class DealsScreen extends StatefulWidget {
@@ -61,14 +60,10 @@ class _DealsScreenState extends State<DealsScreen>
 
   Future<void> _fetchDeals({bool isRefresh = false}) async {
     if (!mounted) return;
-    if (!isRefresh) {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
-    } else {
-      setState(() => _isLoading = true);
-    }
+    setState(() {
+      _isLoading = true;
+      if (isRefresh) _errorMessage = null;
+    });
 
     try {
       final fetchedDeals = await _apiService.getActivePromotions();
@@ -90,7 +85,6 @@ class _DealsScreenState extends State<DealsScreen>
         _isLoading = false;
         _deals = [];
       });
-      _showFeedbackSnackbar(_errorMessage!, isError: true);
     }
   }
 
@@ -178,8 +172,9 @@ class _DealsScreenState extends State<DealsScreen>
             ),
           ),
         );
-        if (!_isLoading && _deals.isNotEmpty)
+        if (!_isLoading && _deals.isNotEmpty) {
           _listAnimationController.forward();
+        }
 
         return FadeTransition(
           opacity: _listAnimationController,
@@ -425,14 +420,10 @@ class _DealCardWidget extends StatelessWidget {
                     CustomButton(
                       text: deal.ctaText,
                       onPressed: onTap,
-                      color: (isDarkCard
-                              ? themeProvider.gas2doorPrimaryBlueLightVer
-                              : themeProvider.gas2doorPrimaryBlue)
-                          .withOpacity(0.9),
+                      // MODIFIED: Button color now uses our primary action green for consistency
+                      color: themeProvider.primaryActionColor,
                       textStyle: GoogleFonts.inter(
-                          color: isDarkCard
-                              ? themeProvider.primaryText
-                              : themeProvider.infoColorOnDarkBgs,
+                          color: Colors.white,
                           fontWeight: FontWeight.w600,
                           fontSize: 13),
                       height: 38,

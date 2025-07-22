@@ -1,34 +1,34 @@
 // File: lib/screens/customer/payment_screen.dart
+// ADVISORY: This is the complete, reimagined version with the "Floating Purple Receipt" design.
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:monnify_payment_sdk/src/models/transaction_status.dart';
-import 'package:monnify_payment_sdk/src/models/transaction_response.dart';
 import 'package:monnify_payment_sdk/monnify_payment_sdk.dart';
+import 'package:monnify_payment_sdk/src/models/transaction_response.dart';
 
-import '../../services/api_service.dart';
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/card.dart';
 import './order_summary_screen.dart';
-import '../customer/customer_dashboard_screen.dart';
 import '../../models/user.dart' as app_user;
+import '../../models/order.dart' as app_order;
+import '../../services/api_service.dart';
 
 class PaymentScreen extends StatefulWidget {
   static const String routeName = '/payment';
   final String orderId;
   final double amount; // Amount in SMALLEST currency unit (e.g., Kobo)
-  final String? itemDescription;
   final app_user.User customer;
+  final app_order.Order order;
 
   const PaymentScreen({
     super.key,
     required this.orderId,
     required this.amount,
-    this.itemDescription,
     required this.customer,
+    required this.order,
   });
 
   @override
@@ -45,25 +45,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   void initState() {
     super.initState();
-    print(
-        '[PaymentScreen] initState: Screen initialized for Order ID: ${widget.orderId}');
     _initializeMonnify();
   }
 
   Future<void> _initializeMonnify() async {
-    print(
-        '[PaymentScreen] _initializeMonnify: Attempting to initialize Monnify SDK.');
     try {
-      // Hardcoded keys for analysis purposes ONLY. Not recommended for production.
-      final apiKey = "MK_TEST_L969MNXY0V";
-      final contractCode = "8609686503";
-
-      print(
-          '[PaymentScreen] _initializeMonnify: Using API Key (first 5 chars): ${apiKey.substring(0, 5)}..., Contract Code: $contractCode');
+      const apiKey = "MK_TEST_L969MNXY0V"; // Should be from a secure source
+      const contractCode = "8609686503"; // Should be from a secure source
 
       if (apiKey.isEmpty || contractCode.isEmpty) {
-        print(
-            '[PaymentScreen] _initializeMonnify: Monnify credentials are empty. Throwing exception.');
         throw Exception("Monnify credentials are not configured.");
       }
 
@@ -78,8 +68,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
           _monnify = monnifyInstance;
           _statusMessage = 'Pay Now';
         });
-        print(
-            '[PaymentScreen] _initializeMonnify: Monnify SDK initialized successfully. Status message: "Pay Now".');
       }
     } catch (e) {
       if (mounted) {
@@ -87,18 +75,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _showFeedbackSnackbar(
             'Could not initialize payment SDK: ${e.toString().replaceFirst("Exception: ", "")}',
             isError: true);
-        print(
-            '[PaymentScreen] _initializeMonnify: Monnify SDK initialization failed: $e. Status message: "Initialization Failed".');
       }
     }
   }
 
   void _showFeedbackSnackbar(String message,
       {bool isError = false, bool isSuccess = false}) {
-    if (!mounted) {
-      print('[PaymentScreen] Snackbar not shown, widget not mounted.');
-      return;
-    }
+    if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -109,176 +92,61 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 ? themeProvider.successColor
                 : themeProvider.gas2doorPrimaryBlue),
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(12),
       ),
     );
-    print(
-        '[PaymentScreen] Showing Snackbar: "$message" (isError: $isError, isSuccess: $isSuccess)');
   }
 
   Future<void> _handlePayment() async {
-    print('[PaymentScreen] _handlePayment: User initiated payment process.');
     if (_monnify == null) {
       _showFeedbackSnackbar('Payment SDK not initialized. Please wait.',
           isError: true);
-      print('[PaymentScreen] _handlePayment: Monnify SDK is not initialized.');
       return;
     }
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = 'Redirecting to Monnify...';
+      _statusMessage = 'Redirecting...';
     });
-    print(
-        '[PaymentScreen] _handlePayment: Setting _isProcessing to true, status message to "Redirecting to Monnify...".');
 
     final transactionDetails = TransactionDetails(
-      amount: widget.amount / 100.0, // Convert from Kobo to Naira
+      amount: widget.amount / 100.0,
       currencyCode: "NGN",
       customerName: widget.customer.name,
       customerEmail: widget.customer.email,
       paymentReference: widget.orderId,
-      paymentDescription: widget.itemDescription ?? 'Payment for Order',
+      paymentDescription: widget.order.itemsPreview,
       paymentMethods: [PaymentMethod.CARD, PaymentMethod.ACCOUNT_TRANSFER],
     );
-
-    print(
-        '[PaymentScreen] _handlePayment: Preparing TransactionDetails for Monnify. Amount: ${transactionDetails.amount}, Ref: ${transactionDetails.paymentReference}');
-    // FIX: Log individual properties instead of calling .toJson() on TransactionDetails
-    print('[PaymentScreen] _handlePayment: Transaction Details properties: '
-        'Amount: ${transactionDetails.amount}, '
-        'Currency: ${transactionDetails.currencyCode}, '
-        'Customer Name: ${transactionDetails.customerName}, '
-        'Customer Email: ${transactionDetails.customerEmail}, '
-        'Payment Reference: ${transactionDetails.paymentReference}, '
-        'Payment Description: ${transactionDetails.paymentDescription}, '
-        'Payment Methods: ${transactionDetails.paymentMethods.map((m) => m.toString().split('.').last).join(', ')}.');
 
     try {
       final TransactionResponse? response =
           await _monnify!.initializePayment(transaction: transactionDetails);
+      if (!mounted) return;
 
-      if (mounted) {
-        // FIX: Log individual properties of TransactionResponse. Use `responseMessage` instead of `errorMessage`.
-        print(
-            '[PaymentScreen] _handlePayment: Monnify SDK callback received. Response properties: '
-            'Transaction Status: ${response?.transactionStatus}, '
-            'Transaction Reference: ${response?.transactionReference}, '
-            'Payment Reference: ${response?.paymentReference}, '
-            'Amount Paid: ${response?.amountPaid}, '
-            'Currency: ${response?.currencyCode}, '
-            'Payment Method: ${response?.paymentMethod}, ');
+      final bool isPaid = response?.transactionStatus ==
+          TransactionStatus.PAID.toString().split('.').last;
 
-        final String? monnifyTransactionStatus = response?.transactionStatus;
-
-        if (monnifyTransactionStatus ==
-            TransactionStatus.PAID.toString().split('.').last) {
-          _showFeedbackSnackbar(
-              'Payment initiated. Verifying status with server...',
-              isSuccess: true);
-          print(
-              '[PaymentScreen] _handlePayment: Monnify reported "PAID". Now calling backend to verify payment status.');
-          try {
-            print(
-                '[PaymentScreen] _handlePayment: Calling _apiService.getOrderPaymentStatus for Order ID: ${widget.orderId}');
-            final String confirmedStatus =
-                await _apiService.getOrderPaymentStatus(widget.orderId);
-            print(
-                '[PaymentScreen] _handlePayment: Backend confirmed payment status as: "$confirmedStatus" for Order ID: ${widget.orderId}');
-
-            if (mounted) {
-              if (confirmedStatus == 'Completed') {
-                _showFeedbackSnackbar(
-                    'Payment successfully confirmed by server!',
-                    isSuccess: true);
-                print(
-                    '[PaymentScreen] _handlePayment: Backend confirmed "Completed". Navigating to OrderSummaryScreen (showConfirmation: true, isVerifyingPayment: false).');
-                Navigator.of(context).pushReplacementNamed(
-                  OrderSummaryScreen.routeName,
-                  arguments: {
-                    'orderId': widget.orderId,
-                    'customerId': widget.customer.id,
-                    'showConfirmation': true,
-                    'transactionRef': response!.transactionReference,
-                    'isVerifyingPayment': false,
-                  },
-                );
-              } else {
-                _showFeedbackSnackbar(
-                    'Payment processing—refresh or wait a moment for confirmation.',
-                    isError: false);
-                print(
-                    '[PaymentScreen] _handlePayment: Backend did NOT confirm "Completed". Status: "$confirmedStatus". Navigating to OrderSummaryScreen (isVerifyingPayment: true).');
-                Navigator.of(context).pushReplacementNamed(
-                  OrderSummaryScreen.routeName,
-                  arguments: {
-                    'orderId': widget.orderId,
-                    'customerId': widget.customer.id,
-                    'showConfirmation': false,
-                    'transactionRef': response!.transactionReference,
-                    'isVerifyingPayment': true,
-                  },
-                );
-              }
-            }
-          } catch (e) {
-            if (mounted) {
-              _showFeedbackSnackbar(
-                  'Error communicating with server for payment confirmation: ${e.toString().replaceFirst("Exception: ", "")}',
-                  isError: true);
-              print(
-                  '[PaymentScreen] _handlePayment: Error during backend payment confirmation check: $e. Navigating to OrderSummaryScreen (isVerifyingPayment: true).');
-              Navigator.of(context).pushReplacementNamed(
-                OrderSummaryScreen.routeName,
-                arguments: {
-                  'orderId': widget.orderId,
-                  'customerId': widget.customer.id,
-                  'showConfirmation': false,
-                  'transactionRef': response!.transactionReference,
-                  'isVerifyingPayment': true,
-                },
-              );
-            }
-          }
-        } else if (monnifyTransactionStatus ==
-            TransactionStatus.CANCELLED.toString().split('.').last) {
-          _showFeedbackSnackbar('Payment cancelled by user.', isError: true);
-          print(
-              '[PaymentScreen] _handlePayment: Monnify reported "CANCELLED" by user.');
-          if (mounted) {
-            setState(() {
-              _isProcessing = false;
-              _statusMessage = 'Pay Now';
-            });
-          }
-        } else {
-          _showFeedbackSnackbar('Payment failed: Unknown error from Monnify.',
-              isError: true);
-          print(
-              '[PaymentScreen] _handlePayment: Monnify reported unknown or failed status: "$monnifyTransactionStatus".');
-          if (mounted) {
-            setState(() {
-              _isProcessing = false;
-              _statusMessage = 'Pay Now';
-            });
-          }
-        }
+      if (isPaid) {
+        _showFeedbackSnackbar('Payment initiated. Verifying with server...',
+            isSuccess: true);
+        Navigator.of(context).pushReplacementNamed(
+          OrderSummaryScreen.routeName,
+          arguments: {
+            'orderId': widget.orderId,
+            'customerId': widget.customer.id,
+            'isVerifyingPayment': true,
+            'orderPayload': widget.order,
+          },
+        );
       } else {
-        _showFeedbackSnackbar(
-            'Payment process ended unexpectedly. Please check your order status.',
-            isError: true);
-        print(
-            '[PaymentScreen] _handlePayment: Widget unmounted during payment process, or unexpected null response from Monnify. Navigating to OrderSummaryScreen (isVerifyingPayment: true).');
+        _showFeedbackSnackbar('Payment was not completed.', isError: true);
         if (mounted) {
-          Navigator.of(context).pushReplacementNamed(
-            OrderSummaryScreen.routeName,
-            arguments: {
-              'orderId': widget.orderId,
-              'customerId': widget.customer.id,
-              'showConfirmation': false,
-              'transactionRef': null,
-              'isVerifyingPayment': true,
-            },
-          );
+          setState(() {
+            _isProcessing = false;
+            _statusMessage = 'Pay Now';
+          });
         }
       }
     } catch (e) {
@@ -288,10 +156,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
           _statusMessage = 'Pay Now';
         });
         _showFeedbackSnackbar(
-            "Payment initiation failed: ${e.toString().replaceFirst("Exception: ", "")}",
+            "Payment failed: ${e.toString().replaceFirst("Exception: ", "")}",
             isError: true);
-        print(
-            '[PaymentScreen] _handlePayment: Critical error initiating Monnify SDK payment: $e');
       }
     }
   }
@@ -299,179 +165,213 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    final displayAmount = widget.amount / 100;
-    final currencyFormat =
-        NumberFormat.currency(locale: 'en_NG', symbol: '₦', decimalDigits: 2);
-
-    // print('[PaymentScreen] build: Rebuilding PaymentScreen. Display Amount: $displayAmount'); // Too frequent for debug
+    final displayAmount = widget.amount / 100.0;
+    final currencyFormat = NumberFormat.currency(locale: 'en_NG', symbol: '₦');
 
     return Scaffold(
       backgroundColor: themeProvider.appSecondaryBackground,
       appBar: AppBar(
-        title: Text('Complete Payment',
+        title: Text('Confirm & Pay',
             style: GoogleFonts.inter(
-                color: themeProvider.primaryText, fontWeight: FontWeight.w600)),
+                fontWeight: FontWeight.w600, color: themeProvider.primaryText)),
         backgroundColor: themeProvider.cardBackground,
         elevation: 1.0,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new_rounded,
               color: themeProvider.primaryText),
-          onPressed: () {
-            print('[PaymentScreen] AppBar back button pressed.');
-            Navigator.of(context).pop(false);
-          },
+          onPressed: () => Navigator.of(context).pop(false),
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // NEW: The Floating Purple Receipt Card
             CustomCard(
-              color: themeProvider.cardBackground,
+              color: themeProvider.gas2doorPurple,
+              elevation: 8,
+              shadowColor: themeProvider.gas2doorPurple.withOpacity(0.4),
               child: Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Order Details',
+                    Text('Order #${widget.order.shortOrderId}',
                         style: GoogleFonts.inter(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: themeProvider.primaryText)),
-                    const SizedBox(height: 12),
-                    _buildDetailRow(
-                      context,
-                      Icons.receipt_long_outlined,
-                      'Order ID:',
-                      widget.orderId,
-                      themeProvider,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildDetailRow(
-                      context,
-                      Icons.description_outlined,
-                      'Description:',
-                      widget.itemDescription ?? 'Gas Cylinder Order',
-                      themeProvider,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildDetailRow(
-                      context,
-                      Icons.person_outline,
-                      'Customer:',
-                      widget.customer.name,
-                      themeProvider,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildDetailRow(
-                      context,
-                      Icons.email_outlined,
-                      'Email:',
-                      widget.customer.email,
-                      themeProvider,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildDetailRow(
-                      context,
-                      Icons.phone_outlined,
-                      'Phone:',
-                      widget.customer.phone ?? 'N/A',
-                      themeProvider,
-                    ),
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 16)),
+                    const SizedBox(height: 4),
+                    Text('Final Confirmation',
+                        style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 20),
+                    _buildSectionHeader(
+                        Icons.shopping_bag_outlined, 'Items Ordered'),
+                    _buildItemsList(widget.order, currencyFormat),
+                    const SizedBox(height: 20),
+                    _buildSectionHeader(
+                        Icons.location_on_outlined, 'Delivering To'),
+                    Text(widget.order.deliveryAddressSnapshot.fullAddress,
+                        style: GoogleFonts.inter(
+                            color: Colors.white.withOpacity(0.9), height: 1.4)),
+                    const SizedBox(height: 20),
+                    _buildPricingSummary(
+                        widget.order, themeProvider, currencyFormat),
                   ],
                 ),
               ),
-            ),
-            const SizedBox(height: 20),
-            CustomCard(
-              color: themeProvider.cardBackground,
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  children: [
-                    Icon(Icons.lock_outline_rounded,
-                        size: 50, color: themeProvider.gas2doorPrimaryBlue),
-                    const SizedBox(height: 16),
-                    Text('Total Amount Due',
-                        style: GoogleFonts.inter(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: themeProvider.primaryText)),
-                    const SizedBox(height: 10),
-                    Text(
-                      currencyFormat.format(displayAmount),
-                      style: GoogleFonts.inter(
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                          color: themeProvider.primaryText),
-                    ),
-                    const SizedBox(height: 8),
-                    Text('(Amount in NGN)',
-                        style: GoogleFonts.inter(
-                            fontSize: 13, color: themeProvider.tertiaryText)),
-                    const SizedBox(height: 16),
-                    Text('Your payment will be securely processed by Monnify.',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.inter(
-                            fontSize: 13, color: themeProvider.secondaryText)),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 30),
-            CustomButton(
-              text: _statusMessage,
-              onPressed:
-                  _monnify != null && !_isProcessing ? _handlePayment : null,
-              color: themeProvider.gas2doorPrimaryBlue,
-              height: 52,
-              icon: _isProcessing || _monnify == null
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white)))
-                  : const Icon(Icons.payment_rounded, color: Colors.white),
-              textStyle: GoogleFonts.inter(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white),
-            ),
-            const SizedBox(height: 20),
-            Center(
-                child: Text("Powered by Monnify",
-                    style: GoogleFonts.inter(
-                        fontSize: 12, color: themeProvider.tertiaryText))),
+            )
           ],
+        ),
+      ),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        decoration: BoxDecoration(
+            color: themeProvider.cardBackground,
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -5))
+            ],
+            borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(20), topRight: Radius.circular(20))),
+        child: CustomButton(
+          text: _isProcessing
+              ? _statusMessage
+              : 'Pay ${currencyFormat.format(displayAmount)} Securely',
+          onPressed: _monnify != null && !_isProcessing ? _handlePayment : null,
+          color: themeProvider.gas2doorPrimaryBlue,
+          height: 52,
+          icon: _isProcessing || _monnify == null
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
+              : const Icon(Icons.lock_outline_rounded, color: Colors.white),
         ),
       ),
     );
   }
 
-  /// Helper method to build a row for displaying order details.
-  Widget _buildDetailRow(BuildContext context, IconData icon, String label,
-      String value, ThemeProvider themeProvider) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 20, color: themeProvider.gas2doorTeal),
-        const SizedBox(width: 12),
-        Text('$label ',
-            style: GoogleFonts.inter(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: themeProvider.secondaryText)),
-        Expanded(
-          child: Text(value,
+  Widget _buildSectionHeader(IconData icon, String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.white.withOpacity(0.7), size: 18),
+          const SizedBox(width: 8),
+          Text(title,
               style: GoogleFonts.inter(
+                  color: Colors.white.withOpacity(0.7),
                   fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: themeProvider.primaryText)),
-        ),
+                  fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildItemsList(app_order.Order order, NumberFormat currencyFormat) {
+    return ListView.separated(
+      itemCount: order.items.length,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemBuilder: (context, index) {
+        final item = order.items[index];
+        return Row(
+          children: [
+            Expanded(
+                child: Text('${item.quantity}x ${item.productName}',
+                    style:
+                        GoogleFonts.inter(color: Colors.white, fontSize: 15))),
+            Text(currencyFormat.format((item.unitPrice * item.quantity) / 100),
+                style: GoogleFonts.inter(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15)),
+          ],
+        );
+      },
+      separatorBuilder: (context, index) => const SizedBox(height: 8),
+    );
+  }
+
+  Widget _buildPricingSummary(app_order.Order order,
+      ThemeProvider themeProvider, NumberFormat currencyFormat) {
+    return Column(
+      children: [
+        Divider(color: Colors.white.withOpacity(0.2)),
+        const SizedBox(height: 8),
+        _buildPriceDetailRow('Subtotal:',
+            currencyFormat.format(order.itemsSubtotal / 100), themeProvider),
+        _buildPriceDetailRow('Delivery Fee:',
+            currencyFormat.format(order.deliveryFee), themeProvider),
+        if (order.serviceFeeAmount > 0)
+          _buildPriceDetailRow(
+              'Service Fee:',
+              currencyFormat.format(order.serviceFeeAmount / 100),
+              themeProvider),
+        if (order.vatAmount > 0)
+          _buildPriceDetailRow('VAT:',
+              currencyFormat.format(order.vatAmount / 100), themeProvider),
+        if (order.discountAmount > 0)
+          _buildPriceDetailRow(
+              'Discount:',
+              '- ${currencyFormat.format(order.discountAmount / 100)}',
+              themeProvider,
+              isDiscount: true),
+        if (order.walletAmountUsed > 0)
+          _buildPriceDetailRow(
+              'From Wallet:',
+              '- ${currencyFormat.format(order.walletAmountUsed / 100)}',
+              themeProvider,
+              isDiscount: true),
+        const SizedBox(height: 8),
+        Divider(color: Colors.white.withOpacity(0.2)),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Total Payable',
+                style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white)),
+            Text(currencyFormat.format(order.finalAmountPaid / 100),
+                style: GoogleFonts.inter(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white)),
+          ],
+        )
       ],
+    );
+  }
+
+  Widget _buildPriceDetailRow(
+      String label, String value, ThemeProvider themeProvider,
+      {bool isDiscount = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: GoogleFonts.inter(
+                  color: isDiscount
+                      ? themeProvider.successColor.withOpacity(0.8)
+                      : Colors.white.withOpacity(0.8))),
+          Text(value,
+              style: GoogleFonts.inter(
+                  color: isDiscount ? themeProvider.successColor : Colors.white,
+                  fontWeight: FontWeight.w600)),
+        ],
+      ),
     );
   }
 }
