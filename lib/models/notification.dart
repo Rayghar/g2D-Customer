@@ -28,7 +28,7 @@ class NotificationModel {
         body: json['body'] as String? ?? '',
         timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
             DateTime.now(),
-        type: json['type'] as String?,
+        type: json['type'] as String? ?? 'SYSTEM_ALERT',
         data: json['data'] != null
             ? Map<String, dynamic>.from(json['data'] as Map)
             : null,

@@ -1,10 +1,11 @@
 // File: lib/main.dart
+// ADVISORY: Sentry initialization is now handled directly in the main function.
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
-import 'services/fcm_service.dart'; // FCM Service import
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 // Screen imports
 import 'screens/auth/complete_profile_screen.dart';
@@ -26,7 +27,7 @@ import 'screens/customer/feedback_screen.dart';
 import 'screens/customer/chat_screen.dart';
 import 'screens/customer/notification_screen.dart';
 import 'screens/customer/location_history_screen.dart';
-import 'screens/customer/payment_screen.dart'; // The Payment Screen
+import 'screens/customer/payment_screen.dart';
 import 'screens/customer/address_list_screen.dart';
 import 'screens/customer/add_edit_address_screen.dart';
 import 'screens/customer/promotion_details_screen.dart';
@@ -59,7 +60,7 @@ import 'screens/admin/admin_driver_details_screen.dart';
 import 'screens/admin/admin_add_edit_faq_screen.dart';
 import 'screens/admin/admin_add_edit_promotion_screen.dart';
 import 'screens/admin/admin_active_run_details_screen.dart';
-import 'screens/auth/otp_verification_screen.dart'; // Corrected import
+import 'screens/auth/otp_verification_screen.dart';
 
 // Provider and model imports
 import 'providers/theme_provider.dart';
@@ -67,23 +68,33 @@ import 'models/address_model.dart';
 import 'models/deal_model.dart';
 import 'models/admin/admin_promotion_model.dart';
 import 'models/admin/faq_item_model.dart';
-import 'models/order.dart' as app_order; // Import the order model
-
-import 'models/user.dart'
-    as app_user; // Added app_user import for PaymentScreen arguments
+import 'models/order.dart' as app_order;
+import 'models/user.dart' as app_user;
 
 Future<void> main() async {
+  // Ensure Flutter bindings are initialized.
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
   await Firebase.initializeApp();
-  // REMOVED: All other payment SDK initializations (Stripe, etc.) are gone.
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),
-      ],
-      child: const MyApp(),
-    ),
+
+  // Initialize Sentry directly, wrapping the app launch.
+  await SentryFlutter.init(
+    (options) {
+      options.dsn = dotenv.env['SENTRY_DSN'];
+      // Adjust this value in production to sample a subset of transactions.
+      options.tracesSampleRate = 1.0;
+    },
+    // The appRunner parameter ensures Sentry can capture errors during the app's lifecycle.
+    appRunner: () {
+      runApp(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider(create: (_) => ThemeProvider()),
+          ],
+          child: const MyApp(),
+        ),
+      );
+    },
   );
 }
 
@@ -100,9 +111,9 @@ class MyApp extends StatelessWidget {
       theme: themeProvider.lightTheme,
       darkTheme: themeProvider.darkTheme,
       themeMode: themeProvider.currentThemeMode,
-      initialRoute: '/', // Set root route explicitly
+      initialRoute: '/',
       routes: {
-        '/': (_) => const SplashScreen(), // Map root route to SplashScreen
+        '/': (_) => const SplashScreen(),
         SplashScreen.routeName: (_) => const SplashScreen(),
         CustomerLoginScreen.routeName: (_) => const CustomerLoginScreen(),
         CustomerRegisterScreen.routeName: (_) => const CustomerRegisterScreen(),
@@ -138,11 +149,13 @@ class MyApp extends StatelessWidget {
       },
       onGenerateRoute: (settings) {
         final args = settings.arguments as Map<String, dynamic>?;
-        debugPrint('=== onGenerateRoute ===');
-        debugPrint('Route Name: ${settings.name}');
-        debugPrint('Arguments: $args');
 
-        // Handle root route explicitly in onGenerateRoute
+        Sentry.addBreadcrumb(Breadcrumb(
+          message: 'Navigating to route: ${settings.name}',
+          level: SentryLevel.info,
+          data: {'arguments': args.toString()},
+        ));
+
         if (settings.name == '/') {
           return MaterialPageRoute(
             builder: (_) => const SplashScreen(),
@@ -156,8 +169,6 @@ class MyApp extends StatelessWidget {
               return MaterialPageRoute(
                 builder: (_) => OrderPlacementScreen(
                   isRefill: (args['isRefill'] as bool?) ?? false,
-                  // REMOVED: `lastOrderItems` is no longer used.
-                  // NEW: Added the new parameters.
                   refillCylinderSize: args['refillCylinderSize'] as String?,
                   prefilledPromoCode: args['prefilledPromoCode'] as String?,
                   initialAddress: args['initialAddress'] as AddressModel?,
@@ -170,13 +181,6 @@ class MyApp extends StatelessWidget {
             }
             return _buildErrorRoute(
                 settings, "Missing customerId for OrderPlacementScreen");
-
-          case CustomerLoginScreen.routeName:
-            return MaterialPageRoute(
-                builder: (_) => const CustomerLoginScreen());
-          case CustomerRegisterScreen.routeName:
-            return MaterialPageRoute(
-                builder: (_) => const CustomerRegisterScreen());
 
           case OtpVerificationScreen.routeName:
             if (args != null && args.containsKey('email')) {
@@ -201,20 +205,17 @@ class MyApp extends StatelessWidget {
             return _buildErrorRoute(
                 settings, "Missing user name for Complete Profile Screen");
 
-          // UPDATED: This route now correctly handles arguments for the PaymentScreen
           case PaymentScreen.routeName:
             if (args != null &&
                 args.containsKey('orderId') &&
                 args.containsKey('amount') &&
                 args.containsKey('customer') &&
                 args.containsKey('order')) {
-              // Check for the new parameter
               return MaterialPageRoute(
                 builder: (_) => PaymentScreen(
                   orderId: args['orderId'] as String,
                   amount: (args['amount'] as num).toDouble(),
                   customer: args['customer'] as app_user.User,
-                  // Pass the new parameter
                   order: args['order'] as app_order.Order,
                 ),
                 settings: settings,
@@ -482,17 +483,10 @@ class MyApp extends StatelessWidget {
                 settings: settings,
               );
             }
-            debugPrint(
-                '--- ERROR: Missing required arguments for DriverOrderDetailsScreen ---');
-            debugPrint('Route Name: ${settings.name}');
-            debugPrint('Provided Arguments: $args');
-            debugPrint(
-                'Expected: orderId, customerName, fullAddress, driverId, cylinderDetails, initialStopStatus');
             return _buildErrorRoute(settings,
                 "Missing required arguments for DriverOrderDetailsScreen");
 
           default:
-            debugPrint('Unhandled route in onGenerateRoute: ${settings.name}');
             return _buildErrorRoute(
                 settings, "Route not found: ${settings.name}");
         }
