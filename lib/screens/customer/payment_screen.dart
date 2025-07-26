@@ -1,5 +1,7 @@
 // File: lib/screens/customer/payment_screen.dart
 // ADVISORY: This is the complete, reimagined version with the "Floating Purple Receipt" design.
+// UPDATE: Fixed total payable showing as 0 by computing it dynamically in _buildPricingSummary.
+// UPDATE: Standardized to kobo; deliveryFee /100 for display/calc.
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +9,9 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:monnify_payment_sdk/monnify_payment_sdk.dart';
 import 'package:monnify_payment_sdk/src/models/transaction_response.dart';
+import 'package:logging/logging.dart'; // Added for internal logging
+import 'package:sentry_flutter/sentry_flutter.dart'; // Added for Sentry integration
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Added for .env file access
 
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
@@ -15,6 +20,9 @@ import './order_summary_screen.dart';
 import '../../models/user.dart' as app_user;
 import '../../models/order.dart' as app_order;
 import '../../services/api_service.dart';
+
+// Initialize a logger for this file
+final _logger = Logger('PaymentScreen');
 
 class PaymentScreen extends StatefulWidget {
   static const String routeName = '/payment';
@@ -45,22 +53,69 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   void initState() {
     super.initState();
+    _logger.info(
+        'PaymentScreen initialized for Order ID: ${widget.orderId}'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'lifecycle',
+        message: 'PaymentScreen initialized',
+        data: {
+          'order_id': widget.orderId,
+          'amount_kobo': widget.amount,
+          'customer_id': widget.customer.id
+        },
+        level: SentryLevel.info)); // Sentry breadcrumb
+
+    // Set Sentry context specific to this payment
+    Sentry.configureScope((scope) {
+      scope.setTag('order_id', widget.orderId);
+      scope.setTag('customer_id', widget.customer.id);
+      scope.setExtra('payment_amount_kobo', widget.amount);
+      scope.setUser(SentryUser(
+          id: widget.customer.id,
+          email: widget.customer.email,
+          username: widget.customer.name));
+    });
+
     _initializeMonnify();
   }
 
   Future<void> _initializeMonnify() async {
-    try {
-      const apiKey = "MK_TEST_L969MNXY0V"; // Should be from a secure source
-      const contractCode = "8609686503"; // Should be from a secure source
+    _logger.info('Initializing Monnify SDK...'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'payment_sdk',
+        message: 'Attempting to initialize Monnify SDK',
+        level: SentryLevel.info)); // Sentry breadcrumb
 
-      if (apiKey.isEmpty || contractCode.isEmpty) {
-        throw Exception("Monnify credentials are not configured.");
+    try {
+      // Correctly access environment variables using flutter_dotenv
+      final String? apiKey = dotenv.env['MONNIFY_API_KEY'];
+      final String? contractCode = dotenv.env['MONNIFY_CONTRACT_CODE'];
+
+      // Correctly check for null and empty strings
+      if (apiKey == null ||
+          apiKey.isEmpty ||
+          contractCode == null ||
+          contractCode.isEmpty) {
+        final errorMessage =
+            "Monnify credentials (API Key or Contract Code) are not configured. Please check your .env file or build configuration.";
+        _logger.severe(errorMessage); // Log severe error
+        Sentry.captureMessage(errorMessage,
+            level: SentryLevel.fatal,
+            hint: Hint.withMap({
+              // Sentry fatal message
+              'reason': 'Missing Monnify API credentials',
+              'action_needed':
+                  'Ensure MONNIFY_API_KEY and MONNIFY_CONTRACT_CODE are in .env and loaded.'
+            }));
+        throw Exception(
+            errorMessage); // Throw the exception to stop initialization
       }
 
       final monnifyInstance = await Monnify.initialize(
         apiKey: apiKey,
         contractCode: contractCode,
-        applicationMode: ApplicationMode.TEST,
+        applicationMode:
+            ApplicationMode.TEST, // Use ApplicationMode.LIVE for production
       );
 
       if (mounted) {
@@ -68,8 +123,23 @@ class _PaymentScreenState extends State<PaymentScreen> {
           _monnify = monnifyInstance;
           _statusMessage = 'Pay Now';
         });
+        _logger.info('Monnify SDK initialized successfully.'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'payment_sdk',
+            message: 'Monnify SDK initialized successfully',
+            level: SentryLevel.info)); // Sentry breadcrumb
       }
-    } catch (e) {
+    } catch (e, st) {
+      // Capture stack trace for Sentry
+      _logger.severe(
+          'Failed to initialize Monnify SDK: $e', e, st); // Log severe error
+      Sentry.captureException(e,
+          stackTrace: st,
+          hint: Hint.withMap({
+            // Send error to Sentry
+            'action': 'initialize_monnify_sdk',
+            'order_id': widget.orderId,
+          }));
       if (mounted) {
         setState(() => _statusMessage = 'Initialization Failed');
         _showFeedbackSnackbar(
@@ -83,14 +153,23 @@ class _PaymentScreenState extends State<PaymentScreen> {
       {bool isError = false, bool isSuccess = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    Color backgroundColor;
+    if (isError) {
+      backgroundColor = themeProvider.errorColor;
+      _logger.warning(
+          'Snackbar Error: $message'); // Log warnings for user-facing errors
+    } else if (isSuccess) {
+      backgroundColor = themeProvider.successColor;
+      _logger.info(
+          'Snackbar Success: $message'); // Log info for user-facing successes
+    } else {
+      backgroundColor = themeProvider.gas2doorPrimaryBlue;
+      _logger.info('Snackbar Info: $message'); // Log info for other messages
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
-        backgroundColor: isError
-            ? themeProvider.errorColor
-            : (isSuccess
-                ? themeProvider.successColor
-                : themeProvider.gas2doorPrimaryBlue),
+        backgroundColor: backgroundColor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(12),
@@ -99,9 +178,23 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   Future<void> _handlePayment() async {
+    _logger.info(
+        'Attempting to handle payment for order ID: ${widget.orderId}'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'payment_flow',
+        message: 'User initiated payment process',
+        data: {'order_id': widget.orderId, 'amount': widget.amount / 100.0},
+        level: SentryLevel.info)); // Sentry breadcrumb
+
     if (_monnify == null) {
       _showFeedbackSnackbar('Payment SDK not initialized. Please wait.',
           isError: true);
+      _logger.warning(
+          'Payment attempt failed: Monnify SDK not initialized.'); // Log warning
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'payment_flow',
+          message: 'Payment SDK not ready',
+          level: SentryLevel.warning)); // Sentry breadcrumb
       return;
     }
 
@@ -111,7 +204,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
     });
 
     final transactionDetails = TransactionDetails(
-      amount: widget.amount / 100.0,
+      amount: double.parse((widget.amount / 100.0).toStringAsFixed(
+          2)), // Convert kobo to Naira and round to 2 decimal places
       currencyCode: "NGN",
       customerName: widget.customer.name,
       customerEmail: widget.customer.email,
@@ -120,10 +214,36 @@ class _PaymentScreenState extends State<PaymentScreen> {
       paymentMethods: [PaymentMethod.CARD, PaymentMethod.ACCOUNT_TRANSFER],
     );
 
+    _logger.fine(
+        'Monnify transaction details prepared: ${transactionDetails.paymentReference}'); // Log fine
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'payment_sdk',
+        message: 'Monnify transaction details prepared',
+        data: {
+          'payment_reference': transactionDetails.paymentReference,
+          'amount': transactionDetails.amount
+        },
+        level: SentryLevel.debug)); // Sentry breadcrumb
+
     try {
       final TransactionResponse? response =
           await _monnify!.initializePayment(transaction: transactionDetails);
-      if (!mounted) return;
+      if (!mounted) {
+        _logger.warning(
+            'Payment response received, but screen unmounted.'); // Log warning
+        return;
+      }
+
+      _logger.info(
+          'Monnify payment response received. Status: ${response?.transactionStatus}'); // Log info
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'payment_sdk',
+          message: 'Monnify payment callback received',
+          data: {
+            'transaction_status': response?.transactionStatus,
+            'payment_reference': response?.paymentReference
+          },
+          level: SentryLevel.info)); // Sentry breadcrumb
 
       final bool isPaid = response?.transactionStatus ==
           TransactionStatus.PAID.toString().split('.').last;
@@ -131,6 +251,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (isPaid) {
         _showFeedbackSnackbar('Payment initiated. Verifying with server...',
             isSuccess: true);
+        _logger.info(
+            'Payment successful. Navigating to OrderSummaryScreen for verification.'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'navigation',
+            message:
+                'Payment successful, navigating to OrderSummaryScreen for verification',
+            data: {'order_id': widget.orderId},
+            level: SentryLevel.info)); // Sentry breadcrumb
+
         Navigator.of(context).pushReplacementNamed(
           OrderSummaryScreen.routeName,
           arguments: {
@@ -142,6 +271,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
         );
       } else {
         _showFeedbackSnackbar('Payment was not completed.', isError: true);
+        _logger.info(
+            'Payment not completed. Monnify status: ${response?.transactionStatus}'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'payment_flow',
+            message: 'Payment not completed by user',
+            data: {'transaction_status': response?.transactionStatus},
+            level: SentryLevel.info)); // Sentry breadcrumb
         if (mounted) {
           setState(() {
             _isProcessing = false;
@@ -149,7 +285,19 @@ class _PaymentScreenState extends State<PaymentScreen> {
           });
         }
       }
-    } catch (e) {
+    } catch (e, st) {
+      // Capture stack trace for Sentry
+      _logger.severe(
+          "Monnify payment initiation failed: $e", e, st); // Log severe error
+      Sentry.captureException(e,
+          stackTrace: st,
+          hint: Hint.withMap({
+            // Send error to Sentry
+            'action': 'initialize_monnify_payment',
+            'order_id': widget.orderId,
+            'customer_id': widget.customer.id,
+            'amount_kobo': widget.amount,
+          }));
       if (mounted) {
         setState(() {
           _isProcessing = false;
@@ -179,7 +327,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new_rounded,
               color: themeProvider.primaryText),
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: () {
+            _logger.info('Back button pressed on PaymentScreen.'); // Log info
+            Sentry.addBreadcrumb(Breadcrumb(
+                category: 'navigation',
+                message: 'Back button pressed from PaymentScreen',
+                data: {'order_id': widget.orderId},
+                level: SentryLevel.info)); // Sentry breadcrumb
+            Navigator.of(context).pop(false);
+          },
         ),
       ),
       body: SingleChildScrollView(
@@ -303,14 +459,26 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Widget _buildPricingSummary(app_order.Order order,
       ThemeProvider themeProvider, NumberFormat currencyFormat) {
+    // FIX: Dynamically calculate total payable instead of relying on finalAmountPaid (which may be 0 pre-payment).
+    double totalPayable =
+        (order.itemsSubtotal / 100) + (order.deliveryFee / 100);
+    if (order.serviceFeeAmount > 0)
+      totalPayable += (order.serviceFeeAmount / 100);
+    if (order.vatAmount > 0) totalPayable += (order.vatAmount / 100);
+    if (order.discountAmount > 0) totalPayable -= (order.discountAmount / 100);
+    if (order.walletAmountUsed > 0)
+      totalPayable -= (order.walletAmountUsed / 100);
+
     return Column(
       children: [
         Divider(color: Colors.white.withOpacity(0.2)),
         const SizedBox(height: 8),
         _buildPriceDetailRow('Subtotal:',
             currencyFormat.format(order.itemsSubtotal / 100), themeProvider),
-        _buildPriceDetailRow('Delivery Fee:',
-            currencyFormat.format(order.deliveryFee), themeProvider),
+        _buildPriceDetailRow(
+            'Delivery Fee:',
+            currencyFormat.format(order.deliveryFee / 100),
+            themeProvider), // FIX: /100
         if (order.serviceFeeAmount > 0)
           _buildPriceDetailRow(
               'Service Fee:',
@@ -342,7 +510,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: Colors.white)),
-            Text(currencyFormat.format(order.finalAmountPaid / 100),
+            Text(currencyFormat.format(totalPayable),
                 style: GoogleFonts.inter(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,

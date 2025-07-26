@@ -1,5 +1,7 @@
 // File: lib/screens/customer/order_summary_screen.dart
 // ADVISORY: This version includes a themed gradient for the action button container.
+// UPDATE: Fixed total amount showing as 0 during verification by computing it dynamically in _buildPricingSummaryCard.
+// UPDATE: Standardized to kobo; deliveryFee /100 for display/calc.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -337,6 +339,21 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
   Widget _buildPricingSummaryCard(
       app_order.Order order, ThemeProvider themeProvider) {
     final currencyFormat = NumberFormat.currency(locale: 'en_NG', symbol: '₦');
+    // FIX: Dynamically calculate total amount instead of relying on finalAmountPaid (which may be 0 during verification).
+    double totalAmount =
+        (order.itemsSubtotal / 100) + (order.deliveryFee / 100);
+    if (order.serviceFeeAmount > 0)
+      totalAmount += (order.serviceFeeAmount / 100);
+    if (order.vatAmount > 0) totalAmount += (order.vatAmount / 100);
+    if (order.discountAmount > 0) totalAmount -= (order.discountAmount / 100);
+    if (order.walletAmountUsed > 0)
+      totalAmount -= (order.walletAmountUsed / 100);
+
+    // If verification is complete and finalAmountPaid is set, use it; else use computed.
+    if (!_isStillVerifying && order.finalAmountPaid > 0) {
+      totalAmount = order.finalAmountPaid / 100;
+    }
+
     return CustomCard(
       color: themeProvider.cardBackground,
       child: Padding(
@@ -364,7 +381,7 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                 themeProvider),
             _buildDetailRow(
                 "Delivery Fee${order.isExpressDelivery ? ' (Express)' : ''}:",
-                '+ ${currencyFormat.format(order.deliveryFee / 100)}', // Corrected division
+                '+ ${currencyFormat.format(order.deliveryFee / 100)}', // FIX: /100 for kobo
                 themeProvider),
             if (order.discountAmount > 0)
               _buildDetailRow(
@@ -382,10 +399,8 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen>
                 height: 24,
                 color: themeProvider.tertiaryText.withOpacity(0.3),
                 thickness: 0.5),
-            _buildDetailRow(
-                "Grand Total Paid:",
-                currencyFormat.format(order.finalAmountPaid / 100),
-                themeProvider,
+            _buildDetailRow("Grand Total Paid:",
+                currencyFormat.format(totalAmount), themeProvider,
                 isTotal: true),
           ],
         ),

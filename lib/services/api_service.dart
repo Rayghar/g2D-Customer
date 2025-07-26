@@ -33,6 +33,7 @@ import '../models/referral_model.dart';
 import '../models/wallet_transaction.dart';
 import '../models/admin/admin_referral_summary_model.dart';
 import '../models/payment_method_model.dart';
+import '../models/customer_stats_model.dart'; // NEW: Import CustomerStatsModel
 
 class ApiService {
   final _storage = const FlutterSecureStorage();
@@ -169,7 +170,7 @@ class ApiService {
         throw Exception(errorMessage);
       }
     } catch (e) {
-      print('[ApiService] Error fetching addresses: $e');
+      print('[ApiService] Error fetching addresses: ${e.toString()}');
       throw Exception('Failed to fetch addresses: ${e.toString()}');
     }
   }
@@ -502,13 +503,16 @@ class ApiService {
     }
   }
 
-  Future<List<app_order.Order>> getCustomerConsumptionData() async {
+  // FIX: Updated return type to CustomerStatsModel
+  Future<CustomerStatsModel> getCustomerConsumptionData(
+      String customerId) async {
     final token = await _getToken();
     if (token == null) {
       print('[ApiService] getCustomerConsumptionData: Not authenticated.');
       throw Exception('Not authenticated.');
     }
-    final String apiUrl = '$baseUrl/orders/me/consumption-data';
+    final String apiUrl =
+        '$baseUrl/orders/me/consumption-data'; // Assuming this endpoint returns aggregated stats
     print('[ApiService] Getting consumption data from $apiUrl');
 
     try {
@@ -522,11 +526,8 @@ class ApiService {
           '[ApiService] getCustomerConsumptionData Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
         print('[ApiService] Consumption data fetched successfully.');
-        final List<dynamic> ordersJson = responseBody as List<dynamic>? ?? [];
-        return ordersJson
-            .map((json) =>
-                app_order.Order.fromJson(json as Map<String, dynamic>))
-            .toList();
+        // FIX: Parse into CustomerStatsModel
+        return CustomerStatsModel.fromJson(responseBody);
       } else {
         final errorMessage = (responseBody as Map<String, dynamic>)['error'] ??
             'Failed to get consumption data';
@@ -674,7 +675,7 @@ class ApiService {
         Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: jsonEncode(payload),
       );
@@ -835,7 +836,7 @@ class ApiService {
         Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: jsonEncode(payload),
       );
@@ -1262,7 +1263,8 @@ class ApiService {
 
     final uri =
         Uri.parse('$baseUrl/users/admin').replace(queryParameters: queryParams);
-    print('[ApiService] Getting admin customers from $uri');
+    print(
+        '[ApiService] Getting admin customers from $uri with query: $queryParams');
 
     try {
       final response =
@@ -2479,7 +2481,7 @@ class ApiService {
         Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: jsonEncode(config.toJson()),
       );
@@ -2687,7 +2689,6 @@ class ApiService {
           '[ApiService] getNotifications Response Status: ${response.statusCode}, Body: $responseBody');
 
       if (response.statusCode == 200) {
-        // FIX: The response body is a MAP, not a List. We must check for the 'notifications' key.
         if (responseBody is Map<String, dynamic> &&
             responseBody.containsKey('notifications')) {
           print('[ApiService] Notifications fetched successfully.');
@@ -2698,7 +2699,6 @@ class ApiService {
                   NotificationModel.fromJson(json as Map<String, dynamic>))
               .toList();
         } else {
-          // This handles cases where the response is 200 OK but the format is wrong.
           throw Exception('Unexpected API response format for notifications.');
         }
       } else {

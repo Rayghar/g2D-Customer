@@ -1,5 +1,6 @@
 // lib/screens/customer/order_details_screen.dart
 // ADVISORY: This is the final version with the new, more detailed 6-step timeline.
+// UPDATE: Standardized to kobo; deliveryFee /100 for display.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -8,15 +9,21 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:logging/logging.dart'; // Added for internal logging
+import 'package:sentry_flutter/sentry_flutter.dart'; // Added for Sentry integration
 
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/card.dart';
 import '../../widgets/feedback_dialog.dart';
 import './chat_screen.dart';
-import '../../models/driver_info_for_order.dart';
+import './track_driver_screen.dart'; // Import the TrackDriverScreen
+import '../../models/driver_info_for_order.dart'; //
 import '../../services/api_service.dart';
 import '../../models/order.dart' as app_order;
+
+// Initialize a logger for this file
+final _logger = Logger('OrderDetailsScreen');
 
 class OrderDetailsScreen extends StatefulWidget {
   static const String routeName = '/order_details';
@@ -47,6 +54,20 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   @override
   void initState() {
     super.initState();
+    _logger.info(
+        'OrderDetailsScreen initialized for order ID: ${widget.orderId}'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'lifecycle',
+        message: 'OrderDetailsScreen initialized',
+        data: {'order_id': widget.orderId, 'customer_id': widget.customerId},
+        level: SentryLevel.info)); // Sentry breadcrumb
+
+    // Set orderId as a tag for all events related to this screen
+    Sentry.configureScope((scope) {
+      scope.setTag('order_id', widget.orderId); // Set a tag for the order ID
+      scope.setUser(SentryUser(id: widget.customerId)); // Set user context
+    });
+
     _entryAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600));
     _fetchOrderDetails();
@@ -55,11 +76,26 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   @override
   void dispose() {
     _entryAnimController.dispose();
+    _logger.info(
+        'OrderDetailsScreen disposed for order ID: ${widget.orderId}'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'lifecycle',
+        message: 'OrderDetailsScreen disposed',
+        data: {'order_id': widget.orderId},
+        level: SentryLevel.info)); // Sentry breadcrumb
     super.dispose();
   }
 
   Future<void> _fetchOrderDetails({bool isRefresh = false}) async {
     if (!mounted) return;
+    _logger.info(
+        'Fetching order details for order ID: ${widget.orderId} (Refresh: $isRefresh)'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'data_fetching',
+        message: 'Fetching order details',
+        data: {'order_id': widget.orderId, 'is_refresh': isRefresh},
+        level: SentryLevel.info)); // Sentry breadcrumb
+
     if (!isRefresh) {
       setState(() => _isLoadingOrderDetails = true);
     }
@@ -72,9 +108,28 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
           _errorMessage = null;
         });
         _entryAnimController.forward(from: 0.0);
+        _logger.info(
+            'Order details fetched successfully for order ID: ${widget.orderId}, status: ${_orderData?.status}'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'data_fetching',
+            message: 'Order details fetched successfully',
+            data: {'order_id': widget.orderId, 'status': _orderData?.status},
+            level: SentryLevel.info)); // Sentry breadcrumb
+
         _promptForFeedbackIfNeeded(fetchedOrder);
       }
-    } catch (e) {
+    } catch (e, st) {
+      // Capture stack trace for Sentry
+      _logger.severe("Error fetching order details for ${widget.orderId}: $e",
+          e, st); // Log severe error
+      Sentry.captureException(e,
+          stackTrace: st,
+          hint: Hint.withMap({
+            // Send error to Sentry
+            'order_id': widget.orderId,
+            'customer_id': widget.customerId,
+            'api_call': 'getOrderDetails',
+          }));
       if (mounted) {
         setState(() {
           _isLoadingOrderDetails = false;
@@ -85,17 +140,61 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   }
 
   Future<void> _handleInitiateCall(String? phoneNumber) async {
+    _logger.info(
+        'Attempting to initiate call to phone number: $phoneNumber'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'communication',
+        message: 'Attempting to call driver',
+        data: {
+          'order_id': widget.orderId,
+          'phone_number_present': phoneNumber != null && phoneNumber.isNotEmpty
+        },
+        level: SentryLevel.info)); // Sentry breadcrumb
+
     if (phoneNumber == null || phoneNumber.isEmpty) {
       _showFeedbackSnackbar("Driver's phone number is not available.",
           isError: true);
+      _logger.warning(
+          "Driver's phone number is not available for call."); // Log warning
       return;
     }
     HapticFeedback.lightImpact();
     final Uri launchUri = Uri(scheme: 'tel', path: phoneNumber);
-    if (!await canLaunchUrl(launchUri)) {
-      _showFeedbackSnackbar('Could not launch phone dialer.', isError: true);
-    } else {
-      await launchUrl(launchUri);
+    try {
+      if (!await canLaunchUrl(launchUri)) {
+        _showFeedbackSnackbar('Could not launch phone dialer.', isError: true);
+        _logger.warning(
+            'Could not launch phone dialer for $phoneNumber.'); // Log warning
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'communication',
+            message: 'Failed to launch phone dialer',
+            data: {'phone_number': phoneNumber, 'order_id': widget.orderId},
+            level: SentryLevel.warning)); // Sentry breadcrumb
+      } else {
+        await launchUrl(launchUri);
+        _logger.info(
+            'Successfully launched phone dialer for $phoneNumber.'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'communication',
+            message: 'Phone dialer launched',
+            data: {'phone_number': phoneNumber, 'order_id': widget.orderId},
+            level: SentryLevel.info)); // Sentry breadcrumb
+      }
+    } catch (e, st) {
+      // Capture stack trace for Sentry
+      _showFeedbackSnackbar(
+          'Error launching phone dialer: ${e.toString().replaceFirst("Exception: ", "")}',
+          isError: true);
+      _logger.severe('Exception while launching phone dialer: $e', e,
+          st); // Log severe error
+      Sentry.captureException(e,
+          stackTrace: st,
+          hint: Hint.withMap({
+            // Send error to Sentry
+            'phone_number': phoneNumber,
+            'order_id': widget.orderId,
+            'action': 'launch_dialer',
+          }));
     }
   }
 
@@ -103,6 +202,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     if (order.status.toLowerCase() == 'delivered' &&
         order.feedback == null &&
         !_feedbackPromptShown) {
+      _logger.info(
+          'Prompting for feedback for delivered order: ${order.id}'); // Log info
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'feedback',
+          message: 'Prompting for feedback',
+          data: {'order_id': order.id},
+          level: SentryLevel.info)); // Sentry breadcrumb
+
       setState(() => _feedbackPromptShown = true);
       Future.delayed(const Duration(milliseconds: 800), () {
         if (mounted) {
@@ -113,7 +220,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
               return FeedbackDialog(
                 orderId: order.id,
                 customerId: widget.customerId,
-                onFeedbackSubmitted: () => _fetchOrderDetails(isRefresh: true),
+                onFeedbackSubmitted: () {
+                  _logger.info(
+                      'Feedback submitted, refreshing order details.'); // Log info
+                  Sentry.addBreadcrumb(Breadcrumb(
+                      category: 'feedback',
+                      message: 'Feedback submitted, refreshing order details',
+                      data: {'order_id': order.id},
+                      level: SentryLevel.info)); // Sentry breadcrumb
+                  _fetchOrderDetails(isRefresh: true);
+                },
               );
             },
           );
@@ -123,6 +239,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   }
 
   Future<void> _handleCancelOrder() async {
+    _logger.info(
+        'User initiated order cancellation for order ID: ${_orderData?.id}'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'order_action',
+        message: 'User initiated order cancellation dialog',
+        data: {'order_id': _orderData?.id},
+        level: SentryLevel.info)); // Sentry breadcrumb
+
     final shouldCancel = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
@@ -140,11 +264,28 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                 child: Text('No',
                     style:
                         GoogleFonts.inter(color: themeProvider.secondaryText)),
-                onPressed: () => Navigator.of(context).pop(false)),
+                onPressed: () {
+                  _logger.info(
+                      'Order cancellation dialog: No selected.'); // Log info
+                  Sentry.addBreadcrumb(Breadcrumb(
+                      category: 'order_action',
+                      message: 'Order cancellation dialog dismissed',
+                      level: SentryLevel.info)); // Sentry breadcrumb
+                  Navigator.of(context).pop(false);
+                }),
             TextButton(
                 child: Text('Yes, Cancel',
                     style: GoogleFonts.inter(color: themeProvider.errorColor)),
-                onPressed: () => Navigator.of(context).pop(true)),
+                onPressed: () {
+                  _logger.info(
+                      'Order cancellation dialog: Yes selected, proceeding to cancel.'); // Log info
+                  Sentry.addBreadcrumb(Breadcrumb(
+                      category: 'order_action',
+                      message: 'User confirmed order cancellation',
+                      data: {'order_id': _orderData?.id},
+                      level: SentryLevel.info)); // Sentry breadcrumb
+                  Navigator.of(context).pop(true);
+                }),
           ],
         );
       },
@@ -153,16 +294,45 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     if (shouldCancel == true) {
       setState(() => _isCancellingOrder = true);
       try {
+        if (_orderData == null) {
+          throw Exception("Order data is null, cannot cancel.");
+        }
         final result = await _apiService.cancelOrder(_orderData!.id);
         _showFeedbackSnackbar(
             result['message'] ?? 'Order cancelled successfully.',
             isSuccess: true);
+        _logger.info(
+            'Order ${_orderData!.id} cancelled successfully. Message: ${result['message']}'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'order_action',
+            message: 'Order successfully cancelled via API',
+            data: {
+              'order_id': _orderData?.id,
+              'api_response': result['message']
+            },
+            level: SentryLevel.info)); // Sentry breadcrumb
         await _fetchOrderDetails(isRefresh: true);
-      } catch (e) {
+      } catch (e, st) {
+        // Capture stack trace for Sentry
         _showFeedbackSnackbar(e.toString().replaceFirst("Exception: ", ""),
             isError: true);
+        _logger.severe('Error cancelling order ${_orderData?.id}: $e', e,
+            st); // Log severe error
+        Sentry.captureException(e,
+            stackTrace: st,
+            hint: Hint.withMap({
+              // Send error to Sentry
+              'order_id': _orderData?.id,
+              'customer_id': widget.customerId,
+              'action': 'cancel_order',
+            }));
       } finally {
         if (mounted) setState(() => _isCancellingOrder = false);
+        _logger.info('Order cancellation process finished.'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'order_action',
+            message: 'Order cancellation process finished',
+            level: SentryLevel.info)); // Sentry breadcrumb
       }
     }
   }
@@ -171,13 +341,23 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
       {bool isError = false, bool isSuccess = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    Color backgroundColor;
+    if (isError) {
+      backgroundColor = themeProvider.errorColor;
+      _logger.warning(
+          'Snackbar Error: $message'); // Log warnings for user-facing errors
+    } else if (isSuccess) {
+      backgroundColor = themeProvider.successColor;
+      _logger.info(
+          'Snackbar Success: $message'); // Log info for user-facing successes
+    } else {
+      backgroundColor = themeProvider.gas2doorPrimaryBlue;
+      _logger.info('Snackbar Info: $message'); // Log info for other messages
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
-      backgroundColor: isError
-          ? themeProvider.errorColor
-          : (isSuccess
-              ? themeProvider.successColor
-              : themeProvider.gas2doorPrimaryBlue),
+      backgroundColor: backgroundColor,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       margin: const EdgeInsets.all(12),
@@ -198,12 +378,29 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
         leading: IconButton(
             icon: Icon(Icons.arrow_back_ios_new_rounded,
                 color: themeProvider.primaryText),
-            onPressed: () => Navigator.of(context).pop()),
+            onPressed: () {
+              _logger.info(
+                  'Back button pressed on OrderDetailsScreen.'); // Log info
+              Sentry.addBreadcrumb(Breadcrumb(
+                  category: 'navigation',
+                  message: 'Back button pressed from OrderDetailsScreen',
+                  data: {'order_id': widget.orderId},
+                  level: SentryLevel.info)); // Sentry breadcrumb
+              Navigator.of(context).pop();
+            }),
         actions: [
           IconButton(
               icon:
                   Icon(Icons.refresh_rounded, color: themeProvider.primaryText),
-              onPressed: () => _fetchOrderDetails(isRefresh: true),
+              onPressed: () {
+                _logger.info('Refresh button pressed.'); // Log info
+                Sentry.addBreadcrumb(Breadcrumb(
+                    category: 'ui_action',
+                    message: 'Refresh button pressed',
+                    data: {'order_id': widget.orderId},
+                    level: SentryLevel.info)); // Sentry breadcrumb
+                _fetchOrderDetails(isRefresh: true);
+              },
               tooltip: "Refresh")
         ],
       ),
@@ -263,7 +460,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
             const SizedBox(height: 24),
             CustomButton(
                 text: "Retry",
-                onPressed: () => _fetchOrderDetails(isRefresh: true),
+                onPressed: () {
+                  _logger
+                      .info('Retry button pressed on error state.'); // Log info
+                  Sentry.addBreadcrumb(Breadcrumb(
+                      category: 'error_recovery',
+                      message: 'Retry button pressed on error state',
+                      data: {'order_id': widget.orderId},
+                      level: SentryLevel.info)); // Sentry breadcrumb
+                  _fetchOrderDetails(isRefresh: true);
+                },
                 color: themeProvider.gas2doorPrimaryBlue),
           ],
         ),
@@ -304,6 +510,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   // =======================================================================
   Widget _buildVisualTimeline(
       app_order.Order order, ThemeProvider themeProvider) {
+    // These are the *visual* steps of the timeline, defining what gets displayed.
+    // The 'key' here MUST match the exact 'Order.status' string values from the backend.
     final timelineSteps = [
       {
         'key': 'Order Placed',
@@ -316,58 +524,71 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
         'icon': Icons.hourglass_top_rounded
       },
       {
-        'key': 'Driver on the way',
-        'title': 'Driver on Way',
+        'key':
+            'Driver Assigned', // The high-level status for "driver is on the way"
+        'title': 'Driver Assigned',
         'icon': Icons.person_pin_circle_outlined
       },
       {
-        'key': 'Refilling',
-        'title': 'Refilling',
+        // This is a conceptual step. We map 'Processing' (when cylinder picked/refilling) here.
+        'key': 'Processing (In Transit)', // New key for the combined concept
+        'title': 'Refilling/In Transit',
         'icon': Icons.local_gas_station_outlined
       },
       {
-        'key': 'Out for Delivery',
+        'key': 'Out for delivery', // Exact match for backend enum value
         'title': 'Out for Delivery',
         'icon': Icons.local_shipping_outlined
       },
       {
-        'key': 'Delivered',
+        'key': 'Delivered', // Exact match for backend enum value
         'title': 'Delivered',
         'icon': Icons.check_circle_outline_rounded
       },
     ];
 
+    // This map defines how the *actual backend order status* (from `order.status`)
+    // maps to the `timelineSteps` index.
+    // The keys MUST exactly match the values from your `order.model.js` enum.
     final Map<String, int> statusMap = {
-      // Stage 0
-      'order placed': 0,
-      'pending payment': 0,
-      'order confirmed': 0,
-      // Stage 1
-      'processing': 1,
-      // Stage 2
-      'driver assigned': 2,
-      'driver enroute to pickup': 2,
-      // Stage 3
-      'driver enroute to gas station': 3,
-      'cylinder refilling': 3,
-      // Stage 4
-      'out for delivery': 4,
-      // Stage 5
-      'delivered': 5,
+      'Pending Payment': 0,
+      'Order Placed': 0,
+      'Processing': 1,
+      'Driver Assigned': 2,
+      'Out for delivery': 4, // This matches the simplified order.model.js enum
+      'Delivered': 5,
+      'Customer Unavailable': 5, // Maps to a "final" state on the timeline
+      'Issue Reported': 5, // Maps to a "final" state on the timeline
+      'Payment Failed': 5, // Maps to a "final" state on the timeline
+      'Canceled by Customer': 5, // Handled by separate 'cancelled' check
+      'Canceled by Admin': 5, // Handled by separate 'cancelled' check
     };
 
-    int currentStepIndex = statusMap[order.status.toLowerCase()] ?? -1;
+    String currentOrderStatus = order.status;
+    int currentStepIndex = statusMap[currentOrderStatus] ?? -1;
 
-    if (order.status.toLowerCase().contains('cancelled')) {
+    // Special handling for cancelled orders
+    if (currentOrderStatus.toLowerCase().contains('canceled') ||
+        currentOrderStatus == 'Customer Unavailable' ||
+        currentOrderStatus == 'Issue Reported' ||
+        currentOrderStatus == 'Payment Failed') {
+      _logger.info(
+          'Order is in a terminal status. Displaying custom timeline step.');
       return _buildTimelineStep(
-          icon: Icons.cancel,
-          title: "Order Cancelled",
-          subtitle: "This order was cancelled.",
+          icon: _getStatusVisuals(order.status, themeProvider)['icon'],
+          title: order.formattedStatus, // Use formatted status as title
+          subtitle: "Order has reached a final state.",
           themeProvider: themeProvider,
           isCurrent: true,
           isFirst: true,
           isLast: true,
           isCompleted: false);
+    }
+
+    if (currentStepIndex == -1) {
+      _logger.warning(
+          'Unknown order status "$currentOrderStatus" encountered in timeline, defaulting to initial step.');
+      currentStepIndex = 0; // Default to the first step for unknown statuses
     }
 
     return Column(
@@ -379,8 +600,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
           icon: step['icon'] as IconData,
           title: step['title'] as String,
           subtitle: isCurrent
-              ? order.status
-              : (isCompleted ? "Completed" : "Pending"),
+              ? order.formattedStatus
+              : (isCompleted ? "${step['title']} Completed" : "Pending"),
           isCompleted: isCompleted,
           isCurrent: isCurrent,
           isFirst: index == 0,
@@ -464,7 +685,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
 
   Widget _buildItemsOrderedCard(
       app_order.Order order, ThemeProvider themeProvider) {
-    final currencyFormat = NumberFormat.currency(locale: 'en_NG', symbol: '₦');
+    final currencyFormat =
+        NumberFormat.currency(locale: 'en_NG', symbol: '₦'); // Changed symbol
     return CustomCard(
       color: themeProvider.cardBackground,
       child: Padding(
@@ -556,7 +778,29 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
 
   Widget _buildPricingSummaryCard(
       app_order.Order order, ThemeProvider themeProvider) {
-    final currencyFormat = NumberFormat.currency(locale: 'en_NG', symbol: '₦');
+    final currencyFormat =
+        NumberFormat.currency(locale: 'en_NG', symbol: '₦'); // Changed symbol
+    double totalAmount =
+        (order.itemsSubtotal / 100) + (order.deliveryFee / 100);
+    if (order.serviceFeeAmount > 0) {
+      totalAmount += (order.serviceFeeAmount / 100);
+    }
+    if (order.vatAmount > 0) {
+      totalAmount += (order.vatAmount / 100);
+    }
+    if (order.discountAmount > 0) {
+      totalAmount -= (order.discountAmount / 100);
+    }
+    if (order.walletAmountUsed > 0) {
+      totalAmount -= (order.walletAmountUsed / 100);
+    }
+
+    // FIX: Removed condition for _isStillVerifying as it's not present here.
+    // The finalAmountPaid is the source of truth for total paid.
+    if (order.finalAmountPaid > 0) {
+      totalAmount = order.finalAmountPaid / 100;
+    }
+
     return CustomCard(
       color: themeProvider.cardBackground,
       child: Padding(
@@ -584,7 +828,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                 themeProvider),
             _buildDetailRow(
                 "Delivery Fee${order.isExpressDelivery ? ' (Express)' : ''}:",
-                '+ ${currencyFormat.format(order.deliveryFee)}',
+                '+ ${currencyFormat.format(order.deliveryFee / 100)}', // FIX: /100 for kobo
                 themeProvider),
             if (order.discountAmount > 0)
               _buildDetailRow(
@@ -600,12 +844,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                   isDiscount: true),
             Divider(
                 height: 24,
-                color: themeProvider.tertiaryText.withOpacity(0.3),
-                thickness: 0.5),
-            _buildDetailRow(
-                "Grand Total Paid:",
-                currencyFormat.format(order.finalAmountPaid / 100),
-                themeProvider,
+                thickness: 0.5,
+                color: themeProvider.tertiaryText.withOpacity(0.4)),
+            _buildDetailRow('Total Payable:',
+                currencyFormat.format(totalAmount), themeProvider,
                 isTotal: true),
           ],
         ),
@@ -691,10 +933,30 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                         color: themeProvider.gas2doorPrimaryBlue, size: 26),
                     onPressed: () {
                       HapticFeedback.lightImpact();
+                      _logger.info(
+                          'User initiated chat with driver for order: ${order.id}'); // Log info
+                      Sentry.addBreadcrumb(Breadcrumb(
+                          category: 'communication',
+                          message: 'Initiating chat with driver',
+                          data: {
+                            'order_id': order.id,
+                            'driver_id': driver.id,
+                            'driver_name': driver.name
+                          },
+                          level: SentryLevel.info)); // Sentry breadcrumb
+
                       if (order.customer?.id == null) {
                         _showFeedbackSnackbar(
                             "Cannot initiate chat: Customer ID missing.",
                             isError: true);
+                        _logger.warning(
+                            'Cannot initiate chat: Customer ID missing from order object.'); // Log warning
+                        Sentry.addBreadcrumb(Breadcrumb(
+                            category: 'communication',
+                            message:
+                                'Cannot initiate chat: Customer ID missing',
+                            data: {'order_id': order.id},
+                            level: SentryLevel.warning)); // Sentry breadcrumb
                         return;
                       }
                       Navigator.of(context, rootNavigator: true)
@@ -718,20 +980,59 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   Widget _buildActionButtons(
       app_order.Order order, ThemeProvider themeProvider) {
     List<Widget> buttons = [];
-    String normalizedStatus = order.status.toLowerCase();
+    String currentOrderStatus = order.status;
 
-    if (normalizedStatus == "delivered" && order.feedback == null) {
+    if (currentOrderStatus == "Delivered" && order.feedback == null) {
       buttons.add(CustomButton(
         text: 'Submit Feedback',
-        onPressed: () => _promptForFeedbackIfNeeded(order),
+        onPressed: () {
+          _logger.info(
+              'User pressed Submit Feedback button for order: ${order.id}'); // Log info
+          Sentry.addBreadcrumb(Breadcrumb(
+              category: 'ui_action',
+              message: 'Submit Feedback button pressed',
+              data: {'order_id': order.id},
+              level: SentryLevel.info)); // Sentry breadcrumb
+          _promptForFeedbackIfNeeded(order);
+        },
         color: themeProvider.primaryActionColor,
         icon: Icon(Icons.rate_review_outlined, color: Colors.white),
       ));
     }
 
-    if (normalizedStatus == 'pending payment' ||
-        normalizedStatus == 'order placed' ||
-        normalizedStatus == 'order confirmed') {
+    if (currentOrderStatus == 'Driver Assigned' ||
+        currentOrderStatus == 'Processing' ||
+        currentOrderStatus == 'Out for delivery') {
+      buttons.add(
+        CustomButton(
+          text: 'Track My Order',
+          onPressed: () {
+            HapticFeedback.lightImpact();
+            _logger.info(
+                'User pressed Track My Order button for order: ${order.id}'); // Log info
+            Sentry.addBreadcrumb(Breadcrumb(
+                category: 'ui_action',
+                message: 'Track My Order button pressed',
+                data: {'order_id': order.id},
+                level: SentryLevel.info)); // Sentry breadcrumb
+            Navigator.of(context).pushNamed(
+              TrackDriverScreen.routeName,
+              arguments: {
+                'orderId': order.id,
+                'customerId': widget.customerId,
+              },
+            );
+          },
+          color: themeProvider.gas2doorTeal,
+          icon: Icon(Icons.location_searching_rounded,
+              color: Colors.white), // Using white for better contrast
+        ),
+      );
+    }
+
+    if (currentOrderStatus == 'Pending Payment' ||
+        currentOrderStatus == 'Order Placed' ||
+        currentOrderStatus == 'Processing') {
       buttons.add(CustomButton(
           text: 'Cancel Order',
           onPressed: _isCancellingOrder ? null : _handleCancelOrder,
@@ -742,6 +1043,26 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
           elevation: 0));
     }
 
+    buttons.add(
+      Padding(
+        padding: EdgeInsets.only(top: buttons.isNotEmpty ? 12.0 : 0.0),
+        child: TextButton.icon(
+            icon: Icon(Icons.support_agent_outlined,
+                color: themeProvider.secondaryText),
+            label: Text('Get Help / Support',
+                style: GoogleFonts.inter(color: themeProvider.secondaryText)),
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              _showFeedbackSnackbar('Support channel not yet implemented.');
+              Sentry.addBreadcrumb(Breadcrumb(
+                  category: 'ui_action',
+                  message: 'Support button pressed',
+                  data: {'order_id': order.id},
+                  level: SentryLevel.info));
+            }),
+      ),
+    );
+
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: buttons
@@ -751,26 +1072,21 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   }
 
   Color _getStatusColor(String status, ThemeProvider themeProvider) {
-    String normalizedStatus = status.toLowerCase();
-    if (normalizedStatus.contains('delivered')) {
+    if (status == 'Delivered') {
       return themeProvider.successColor;
-    } else if (normalizedStatus.contains('cancelled')) {
+    } else if (status.contains('Canceled')) {
       return themeProvider.errorColor;
-    } else if (normalizedStatus.contains('confirmed')) {
-      return themeProvider.gas2doorPrimaryBlue;
-    } else if (normalizedStatus.contains('placed')) {
-      return themeProvider.gas2doorTeal;
-    } else if (normalizedStatus.contains('driver assigned')) {
+    } else if (status == 'Order Placed' ||
+        status == 'Processing' ||
+        status == 'Driver Assigned' ||
+        status == 'Out for delivery' ||
+        status == 'Customer Unavailable' ||
+        status == 'Issue Reported') {
       return themeProvider.warningColor;
-    } else if (normalizedStatus.contains('enroute') ||
-        (normalizedStatus.contains('delivery') &&
-            !normalizedStatus.contains('delivered'))) {
-      return themeProvider.warningColor;
-    } else if (normalizedStatus.contains('processing') ||
-        normalizedStatus.contains('refilling')) {
-      return themeProvider.warningColor;
-    } else if (normalizedStatus.contains('pending payment')) {
+    } else if (status == 'Pending Payment') {
       return themeProvider.secondaryText.withOpacity(0.8);
+    } else if (status.contains('Failed') || status.contains('Discrepancy')) {
+      return themeProvider.errorColor;
     }
     return themeProvider.secondaryText;
   }
@@ -779,21 +1095,26 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
       String status, ThemeProvider themeProvider) {
     Color statusColor;
     IconData statusIcon;
-    String normalizedStatus = status.toLowerCase();
-    if (normalizedStatus.contains('delivered')) {
+    if (status == 'Delivered') {
       statusIcon = Icons.check_circle;
       statusColor = themeProvider.successColor;
-    } else if (normalizedStatus.contains('cancelled')) {
+    } else if (status.contains('Canceled')) {
       statusIcon = Icons.cancel;
       statusColor = themeProvider.errorColor;
-    } else if (normalizedStatus.contains('enroute') ||
-        normalizedStatus.contains('out for delivery')) {
+    } else if (status == 'Out for delivery' ||
+        status == 'Driver Assigned' ||
+        status == 'Processing') {
       statusIcon = Icons.local_shipping;
       statusColor = themeProvider.warningColor;
-    } else if (normalizedStatus.contains('processing') ||
-        normalizedStatus.contains('assigned')) {
-      statusIcon = Icons.hourglass_top;
-      statusColor = themeProvider.warningColor;
+    } else if (status == 'Pending Payment') {
+      statusIcon = Icons.pending_actions_outlined;
+      statusColor = themeProvider.secondaryText.withOpacity(0.8);
+    } else if (status == 'Customer Unavailable' ||
+        status == 'Issue Reported' ||
+        status.contains('Failed') ||
+        status.contains('Discrepancy')) {
+      statusIcon = Icons.report_problem_outlined;
+      statusColor = themeProvider.errorColor;
     } else {
       statusIcon = Icons.info;
       statusColor = themeProvider.secondaryText;

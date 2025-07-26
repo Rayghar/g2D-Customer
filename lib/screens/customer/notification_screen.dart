@@ -1,5 +1,6 @@
 // File: lib/screens/customer/notification_screen.dart
 // ADVISORY: This version fixes the build error by correctly processing the API response.
+// UPDATE: Updated getNotifications to handle both List and Map responses for robustness.
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -22,8 +23,7 @@ class IntegratedNotificationService {
   final ApiService _apiService = ApiService();
   final AuthService _authService = AuthService();
 
-  // CORRECTED: This method now correctly handles the Map response from the API
-  // This method correctly handles the Map response from the API
+  // UPDATED: Handles both if API returns full Map or directly the List of notifications
   Future<List<app_notification_model.NotificationModel>>
       getNotifications() async {
     String? userId = await _authService.getUserId();
@@ -31,23 +31,22 @@ class IntegratedNotificationService {
       throw Exception("User not authenticated. Cannot fetch notifications.");
     }
 
-    // The API call returns a Map<String, dynamic>, not a List directly.
     final dynamic response = await _apiService.getNotifications();
 
-    if (response is Map<String, dynamic> &&
+    final List<dynamic> notificationData;
+    if (response is List) {
+      notificationData = response;
+    } else if (response is Map<String, dynamic> &&
         response.containsKey('notifications')) {
-      // We need to extract the list from the 'notifications' key.
-      final List<dynamic> notificationData =
-          response['notifications'] as List<dynamic>? ?? [];
-      // Now we can map this list to our NotificationModel.
-      return notificationData
-          .map(
-              (data) => app_notification_model.NotificationModel.fromJson(data))
-          .toList();
+      notificationData = response['notifications'] as List<dynamic>? ?? [];
     } else {
-      // Handle cases where the response is not in the expected format
       throw Exception("Unexpected API response format for notifications.");
     }
+
+    return notificationData
+        .map((data) => app_notification_model.NotificationModel.fromJson(
+            data as Map<String, dynamic>))
+        .toList();
   }
 
   Future<void> markAsRead(String notificationId) async {

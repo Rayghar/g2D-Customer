@@ -6,7 +6,7 @@ import 'package:uuid/uuid.dart';
 
 import 'user.dart' as app_user;
 import 'driver_info_for_order.dart';
-import 'feedback.dart';
+import 'feedback.dart'; // Ensure feedback model is imported
 
 var _uuid = const Uuid();
 
@@ -23,11 +23,10 @@ class OrderItemModel {
     required this.unitPrice,
   });
 
-  // NEW: Helper getter to extract cylinder size from the product name.
   String? get cylinderSizeKG {
     final RegExp regex = RegExp(r'(\d+(\.\d+)?)\s*kg', caseSensitive: false);
     final match = regex.firstMatch(productName);
-    return match?.group(0); // Returns the matched string e.g., "12.5kg" or null
+    return match?.group(0);
   }
 
   factory OrderItemModel.fromJson(Map<String, dynamic> json) {
@@ -108,6 +107,8 @@ class Order {
   final double finalAmountPaid;
   final bool isExpressDelivery;
   final Feedback? feedback;
+  final String recipientName;
+  final String? recipientPhone;
 
   Order({
     required this.id,
@@ -129,11 +130,16 @@ class Order {
     required this.finalAmountPaid,
     required this.isExpressDelivery,
     this.feedback,
+    required this.recipientName,
+    this.recipientPhone,
   });
 
   String get shortOrderId {
     if (id.contains('-')) {
       return id.substring(id.lastIndexOf('-') + 1).toUpperCase();
+    }
+    if (id.contains('_')) {
+      return id.substring(id.lastIndexOf('_') + 1).toUpperCase();
     }
     return id.length > 7
         ? "...${id.substring(id.length - 7).toUpperCase()}"
@@ -153,20 +159,58 @@ class Order {
     return preview;
   }
 
+  // FIX: Add the formattedStatus getter
+  String get formattedStatus {
+    switch (status) {
+      case 'Pending Payment':
+        return 'Pending Payment';
+      case 'Order Placed':
+        return 'Order Placed';
+      case 'Processing':
+        return 'Processing';
+      case 'Driver Assigned':
+        return 'Driver Assigned';
+      case 'Out for delivery': // Matches the backend enum string
+        return 'Out for Delivery'; // Display format
+      case 'Delivered':
+        return 'Delivered';
+      case 'Customer Unavailable':
+        return 'Customer Unavailable';
+      case 'Issue Reported':
+        return 'Issue Reported';
+      case 'Payment Failed':
+        return 'Payment Failed';
+      case 'Payment Discrepancy':
+        return 'Payment Discrepancy';
+      case 'Refunded':
+        return 'Refunded';
+      case 'Partially Refunded':
+        return 'Partially Refunded';
+      case 'Canceled by Customer':
+        return 'Canceled by Customer';
+      case 'Canceled by Admin':
+        return 'Canceled by Admin';
+      default:
+        // Fallback for any unexpected status
+        return status.replaceAll('_', ' ').toTitleCase();
+    }
+  }
+
   factory Order.fromJson(Map<String, dynamic> json) {
     return Order(
       id: json['id'] as String? ?? _uuid.v4(),
-      customer: json['customer'] != null
-          ? app_user.User.fromJson(json['customer'])
-          : null,
-      driver: json['driver'] != null
-          ? DriverInfoForOrder.fromJson(json['driver'])
+      customer:
+          json['customer'] != null && json['customer'] is Map<String, dynamic>
+              ? app_user.User.fromJson(json['customer'] as Map<String, dynamic>)
+              : null,
+      driver: json['driver'] != null && json['driver'] is Map<String, dynamic>
+          ? DriverInfoForOrder.fromJson(json['driver'] as Map<String, dynamic>)
           : null,
       items: (json['items'] as List<dynamic>? ?? [])
-          .map((item) => OrderItemModel.fromJson(item))
+          .map((item) => OrderItemModel.fromJson(item as Map<String, dynamic>))
           .toList(),
       deliveryAddressSnapshot: DeliveryAddressSnapshotModel.fromJson(
-          json['deliveryAddressSnapshot']),
+          json['deliveryAddressSnapshot'] as Map<String, dynamic>?),
       orderDate: DateTime.tryParse(json['orderDate'] as String? ?? '') ??
           DateTime.now(),
       status: json['status'] as String? ?? 'Unknown',
@@ -182,7 +226,21 @@ class Order {
       finalAmountPaid: (json['finalAmountPaid'] as num?)?.toDouble() ?? 0.0,
       isExpressDelivery: (json['isExpressDelivery'] as bool?) ?? false,
       feedback:
-          json['feedback'] != null ? Feedback.fromJson(json['feedback']) : null,
+          json['feedback'] != null && json['feedback'] is Map<String, dynamic>
+              ? Feedback.fromJson(json['feedback'] as Map<String, dynamic>)
+              : null,
+      recipientName: json['recipientName'] as String? ?? 'N/A',
+      recipientPhone: json['recipientPhone'] as String?,
     );
   }
+}
+
+// Helper extension for String toTitleCase
+extension StringCasingExtension on String {
+  String toTitleCase() => replaceAll(RegExp(' +'), ' ')
+      .split(' ')
+      .map((str) => str.isNotEmpty
+          ? '${str[0].toUpperCase()}${str.substring(1).toLowerCase()}'
+          : '')
+      .join(' ');
 }

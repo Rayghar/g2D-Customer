@@ -1,5 +1,6 @@
 // File: lib/screens/customer/home_screen.dart
 // ADVISORY: This version adds the Order ID to recent orders and the delivery address to the active order card.
+// UPDATE: Implemented periodic polling for active order status and dynamic customer stats.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -7,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:logging/logging.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
@@ -14,11 +17,14 @@ import '../../widgets/card.dart';
 import '../../models/address_model.dart';
 import '../../models/deal_model.dart';
 import '../../models/order.dart' as app_order;
+import '../../models/customer_stats_model.dart'; // NEW: Import CustomerStatsModel
 import '../../services/api_service.dart';
 import './order_placement_screen.dart';
 import './order_details_screen.dart';
 import './order_summary_screen.dart';
 import './promotion_details_screen.dart';
+
+final _logger = Logger('HomeScreen');
 
 class PromotionItem {
   final String title;
@@ -75,10 +81,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final PageController _promotionPageController = PageController();
   int _currentPromotionPage = 0;
   Timer? _promotionTimer;
+  Timer? _activeOrderPollingTimer; // NEW: Timer for active order polling
 
   app_order.Order? _activeOrder;
   List<app_order.Order> _recentOrders = [];
   List<PromotionItem> _promotionItems = [];
+  CustomerStatsModel? _customerStats; // NEW: Customer stats data
   String? _errorMessage;
   bool _isLoading = true;
 
@@ -87,6 +95,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _logger.info('HomeScreen initialized.');
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'lifecycle',
+        message: 'HomeScreen initialized',
+        level: SentryLevel.info));
+
+    if (widget.customerIdFromShell?.isNotEmpty ?? false) {
+      Sentry.configureScope((scope) {
+        scope.setUser(SentryUser(id: widget.customerIdFromShell));
+      });
+    }
+
     _entryAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 700));
     _sectionSlideAnimations = List.generate(
@@ -102,6 +122,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _loadAllHomeScreenData();
     } else {
       setState(() => _isLoading = false);
+      _logger.info('Customer ID not available, skipping initial data load.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'data_loading',
+          message: 'Customer ID missing, initial data load skipped',
+          level: SentryLevel.info));
     }
   }
 
@@ -110,6 +135,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.didUpdateWidget(oldWidget);
     if (widget.customerIdFromShell != oldWidget.customerIdFromShell &&
         (widget.customerIdFromShell?.isNotEmpty ?? false)) {
+      _logger.info('Customer ID changed, reloading home screen data.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'lifecycle',
+          message: 'Customer ID updated, reloading home data',
+          data: {'new_customer_id': widget.customerIdFromShell},
+          level: SentryLevel.info));
       _loadAllHomeScreenData(isRefresh: true);
     }
   }
@@ -119,11 +150,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _entryAnimController.dispose();
     _promotionPageController.dispose();
     _promotionTimer?.cancel();
+    _activeOrderPollingTimer
+        ?.cancel(); // NEW: Cancel active order polling timer
+    _logger.info('HomeScreen disposed.');
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'lifecycle',
+        message: 'HomeScreen disposed',
+        level: SentryLevel.info));
     super.dispose();
   }
 
   Future<void> _loadAllHomeScreenData({bool isRefresh = false}) async {
-    if (widget.customerIdFromShell?.isEmpty ?? true) return;
+    if (widget.customerIdFromShell?.isEmpty ?? true) {
+      _logger
+          .warning('Attempted to load home screen data without a customer ID.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'data_loading',
+          message: 'Aborting data load: Customer ID is empty',
+          level: SentryLevel.warning));
+      return;
+    }
     if (mounted) {
       setState(() {
         _isLoading = true;
@@ -131,19 +177,48 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       });
     }
     if (isRefresh) _entryAnimController.reset();
+
+    _logger.info('Loading all home screen data (isRefresh: $isRefresh).');
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'data_loading',
+        message: 'Starting full home screen data fetch',
+        data: {
+          'is_refresh': isRefresh,
+          'customer_id': widget.customerIdFromShell
+        },
+        level: SentryLevel.info));
+
     try {
       const activeOrderStatuses =
-          'Pending Payment,Order Placed,Processing,Driver Assigned,Out for delivery,Driver enroute to pickup,Driver enroute to gas station,Cylinder Refilling';
+          'Order Placed,Processing,Driver Assigned,Out for delivery,Delivered';
 
       final results = await Future.wait([
         _apiService.getActivePromotions(),
         _apiService.getCustomerOrders(
             limit: 1, status: activeOrderStatuses, sortBy: '-orderDate'),
         _apiService.getCustomerOrders(limit: 3, sortBy: '-orderDate'),
+        _apiService.getCustomerConsumptionData(
+            widget.customerIdFromShell!), // NEW: Fetch customer stats
       ], eagerError: false);
-      if (!mounted) return;
+      if (!mounted) {
+        _logger.warning('Home screen data loaded, but widget was unmounted.');
+        return;
+      }
       _processApiResponse(results);
-    } catch (e) {
+      _logger.info('Home screen data loaded successfully.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'data_loading',
+          message: 'All home screen data loaded and processed',
+          level: SentryLevel.info));
+    } catch (e, st) {
+      _logger.severe("Failed to load home screen data: $e", e, st);
+      Sentry.captureException(e,
+          stackTrace: st,
+          hint: Hint.withMap({
+            'customer_id': widget.customerIdFromShell,
+            'action': 'load_home_screen_data',
+            'is_refresh': isRefresh,
+          }));
       if (mounted) {
         setState(() {
           _errorMessage = "Failed to load data. Please try again.";
@@ -155,6 +230,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _processApiResponse(List<dynamic> results) {
     if (!mounted) return;
+    _logger.fine('Processing API responses for home screen.');
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     final List<Color> colorCycle = [
       themeProvider.gas2doorTeal,
@@ -185,6 +261,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             promoCodeToApply: deal.promoCode,
             ctaArgs: deal.ctaArgs);
       }).toList();
+      _logger.info('Processed ${_promotionItems.length} promotion items.');
+    } else {
+      _logger.warning(
+          'Expected List<DealModel> for promotions, got: ${results[0].runtimeType}');
+      Sentry.captureMessage('Unexpected type for promotions API response.',
+          level: SentryLevel.warning,
+          hint: Hint.withMap({
+            'expected_type': 'List<DealModel>',
+            'received_type': results[0].runtimeType.toString(),
+            'customer_id': widget.customerIdFromShell,
+          }));
     }
 
     if (results[1] is Map<String, dynamic>) {
@@ -192,25 +279,70 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final activeOrders =
           activeOrderResponse['orders'] as List<app_order.Order>? ?? [];
       _activeOrder = activeOrders.isNotEmpty ? activeOrders.first : null;
+      _logger.info('Active order status: ${_activeOrder?.status ?? "None"}');
+    } else {
+      _logger.warning(
+          'Expected Map<String, dynamic> for active order response, got: ${results[1].runtimeType}');
+      Sentry.captureMessage('Unexpected type for active order API response.',
+          level: SentryLevel.warning,
+          hint: Hint.withMap({
+            'expected_type': 'Map<String, dynamic>',
+            'received_type': results[1].runtimeType.toString(),
+            'customer_id': widget.customerIdFromShell,
+          }));
     }
 
     if (results[2] is Map<String, dynamic>) {
       final recentOrdersResponse = results[2] as Map<String, dynamic>;
       _recentOrders =
           recentOrdersResponse['orders'] as List<app_order.Order>? ?? [];
+      _logger.info('Processed ${_recentOrders.length} recent orders.');
+    } else {
+      _logger.warning(
+          'Expected Map<String, dynamic> for recent orders response, got: ${results[2].runtimeType}');
+      Sentry.captureMessage('Unexpected type for recent orders API response.',
+          level: SentryLevel.warning,
+          hint: Hint.withMap({
+            'expected_type': 'Map<String, dynamic>',
+            'received_type': results[2].runtimeType.toString(),
+            'customer_id': widget.customerIdFromShell,
+          }));
+    }
+
+    // NEW: Process Customer Stats data
+    if (results[3] is CustomerStatsModel) {
+      _customerStats = results[3] as CustomerStatsModel;
+      _logger.info(
+          'Processed customer stats: Total Orders: ${_customerStats!.totalOrders}');
+    } else {
+      _logger.warning(
+          'Expected CustomerStatsModel for customer stats, got: ${results[3].runtimeType}');
+      Sentry.captureMessage('Unexpected type for customer stats API response.',
+          level: SentryLevel.warning,
+          hint: Hint.withMap({
+            'expected_type': 'CustomerStatsModel',
+            'received_type': results[3].runtimeType.toString(),
+            'customer_id': widget.customerIdFromShell,
+          }));
     }
 
     setState(() => _isLoading = false);
     _entryAnimController.forward();
     _startPromotionAutoScroll();
+    _startActiveOrderPolling(); // NEW: Start active order polling
+    _logger.info('API response processing complete. UI updated.');
   }
 
   void _startPromotionAutoScroll() {
     _promotionTimer?.cancel();
     if (_promotionItems.length > 1) {
+      _logger.fine('Starting promotion auto-scroll timer.');
       _promotionTimer =
           Timer.periodic(const Duration(seconds: 6), (Timer timer) {
         if (!_promotionPageController.hasClients || _promotionItems.isEmpty) {
+          _logger.fine(
+              'Promotion auto-scroll stopped: no clients or empty items.');
+          timer.cancel();
           return;
         }
         int nextPage = _promotionPageController.page!.round() + 1;
@@ -220,8 +352,65 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _promotionPageController.animateToPage(nextPage,
             duration: const Duration(milliseconds: 700),
             curve: Curves.easeInOutCubic);
+        _logger.fine('Auto-scrolling promotion to page: $nextPage');
       });
+    } else {
+      _logger.info(
+          'Not enough promotion items to auto-scroll, timer not started.');
     }
+  }
+
+  // NEW: Method to start polling for active order status
+  void _startActiveOrderPolling() {
+    _activeOrderPollingTimer?.cancel(); // Cancel any existing timer
+    if (_activeOrder == null ||
+            _activeOrder!.status ==
+                'Delivered' || // FIX: Check against high-level statuses
+            _activeOrder!.status
+                .contains('Canceled') || // FIX: Check for cancellation
+            _activeOrder!.status == 'Customer Unavailable' ||
+            _activeOrder!.status == 'Issue Reported' ||
+            _activeOrder!.status ==
+                'Payment Failed' // Any other terminal status
+        ) {
+      _logger.info(
+          'No active order or order in terminal state, not starting active order polling.');
+      return;
+    }
+
+    _logger.info(
+        'Starting active order polling for order ID: ${_activeOrder!.id}');
+    _activeOrderPollingTimer =
+        Timer.periodic(const Duration(seconds: 15), (timer) async {
+      // Poll every 15 seconds
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      try {
+        final fetchedOrder =
+            await _apiService.getOrderDetails(_activeOrder!.id);
+        if (mounted) {
+          setState(() {
+            _activeOrder = fetchedOrder;
+          });
+          // If the order has reached a terminal status, stop polling
+          if (_activeOrder!.status == 'Delivered' ||
+              _activeOrder!.status.contains('Canceled') ||
+              _activeOrder!.status == 'Customer Unavailable' ||
+              _activeOrder!.status == 'Issue Reported' ||
+              _activeOrder!.status == 'Payment Failed') {
+            _logger.info(
+                'Active order ${_activeOrder!.id} reached terminal status: ${_activeOrder!.status}. Stopping polling.');
+            timer.cancel();
+          }
+        }
+      } catch (e) {
+        _logger.warning(
+            'Error during active order polling for ${_activeOrder!.id}: $e');
+        // Continue polling on error, but perhaps with a backoff strategy in a real app
+      }
+    });
   }
 
   void _showFeedbackSnackbar(String message, {bool isError = false}) {
@@ -236,21 +425,50 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       margin: const EdgeInsets.all(12),
     ));
+    if (isError) {
+      _logger.warning('Snackbar Error: $message');
+    } else {
+      _logger.info('Snackbar Success/Info: $message');
+    }
   }
 
   void _navigateToOrderPlacement(
       {String? prefilledPromoCode,
       String? refillCylinderSize,
-      bool isRefill = false}) {
+      bool isRefill = false,
+      String? preselectedCylinderIdFromDeal}) {
     HapticFeedback.mediumImpact();
+    _logger.info('Attempting to navigate to OrderPlacementScreen.');
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'navigation',
+        message: 'Navigating to OrderPlacementScreen',
+        data: {
+          'is_refill': isRefill,
+          'promo_code': prefilledPromoCode,
+          'cylinder_id_from_deal': preselectedCylinderIdFromDeal
+        },
+        level: SentryLevel.info));
+
     if (widget.customerIdFromShell == null) {
       _showFeedbackSnackbar("Please log in to place an order.", isError: true);
+      _logger.warning(
+          'Cannot navigate to order placement: Customer not logged in.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'navigation_blocked',
+          message: 'Order placement blocked: Customer ID missing',
+          level: SentryLevel.warning));
       return;
     }
     if (widget.currentAddressFromShell == null) {
       _showFeedbackSnackbar("Please select a delivery address first.",
           isError: true);
       widget.onChangeAddressTapped();
+      _logger.warning(
+          'Cannot navigate to order placement: No delivery address selected.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'navigation_blocked',
+          message: 'Order placement blocked: No delivery address',
+          level: SentryLevel.warning));
       return;
     }
     Navigator.of(context).pushNamed(
@@ -261,19 +479,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'prefilledPromoCode': prefilledPromoCode,
         'isRefill': isRefill,
         'refillCylinderSize': refillCylinderSize,
+        'preselectedCylinderIdFromDeal':
+            preselectedCylinderIdFromDeal, // Pass this argument
       },
     ).then((value) {
       if (value == true) {
+        _logger.info('Order placement completed, refreshing home screen data.');
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'order_flow',
+            message: 'Order placement successful, refreshing home screen',
+            level: SentryLevel.info));
         _loadAllHomeScreenData(isRefresh: true);
       }
     });
   }
 
   void _navigateToReorder(app_order.Order order) {
+    _logger.info('Attempting to reorder for order ID: ${order.id}');
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'order_action',
+        message: 'Initiating reorder',
+        data: {'original_order_id': order.id},
+        level: SentryLevel.info));
+
     final firstItem = order.items.isNotEmpty ? order.items.first : null;
     if (firstItem == null) {
       _showFeedbackSnackbar("Could not find item details to reorder.",
           isError: true);
+      _logger.warning(
+          'Reorder failed: No items found in original order ${order.id}.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_action',
+          message: 'Reorder failed: No items in original order',
+          data: {'original_order_id': order.id},
+          level: SentryLevel.warning));
       return;
     }
     _navigateToOrderPlacement(
@@ -281,19 +520,44 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _handlePromotionCta(PromotionItem item) {
-    HapticFeedback.lightImpact();
+    HapticFeedback.mediumImpact();
+    _logger.info('Handling promotion CTA for: ${item.title}');
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'promotion',
+        message: 'Promotion CTA clicked',
+        data: {
+          'promotion_title': item.title,
+          'cta_link': item.ctaLink,
+          'promo_code': item.promoCodeToApply
+        },
+        level: SentryLevel.info));
+
+    Map<String, dynamic> navArgs =
+        Map<String, dynamic>.from(item.dealModel.ctaArgs ?? {});
+    navArgs['customerId'] = widget.customerIdFromShell;
+    navArgs['initialAddress'] = widget.currentAddressFromShell;
+    if (item.promoCodeToApply != null) {
+      navArgs['prefilledPromoCode'] = item.promoCodeToApply;
+    }
+
     if (item.ctaLink != null) {
-      Map<String, dynamic> navArgs =
-          Map<String, dynamic>.from(item.ctaArgs ?? {});
-      navArgs['customerId'] = widget.customerIdFromShell;
-      navArgs['initialAddress'] = widget.currentAddressFromShell;
-      if (item.promoCodeToApply != null) {
-        navArgs['prefilledPromoCode'] = item.promoCodeToApply;
-      }
       Navigator.of(context).pushNamed(item.ctaLink!,
           arguments: navArgs.isNotEmpty ? navArgs : null);
+      _logger.info('Navigated to ${item.ctaLink} via promotion CTA.');
     } else if (item.promoCodeToApply != null) {
       _navigateToOrderPlacement(prefilledPromoCode: item.promoCodeToApply);
+      _logger.info(
+          'Initiated order placement with promo code from promotion CTA.');
+    } else {
+      _logger.warning(
+          'Promotion CTA for "${item.title}" has no valid action (ctaLink or promoCodeToApply).');
+      Sentry.captureMessage(
+          'Promotion CTA with no actionable link or promo code.',
+          level: SentryLevel.warning,
+          hint: Hint.withMap({
+            'promotion_title': item.title,
+            'deal_id': item.dealModel.id,
+          }));
     }
   }
 
@@ -302,8 +566,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final String currentUserName = widget.userNameFromShell ?? "Customer";
 
-    final bool hasActiveOrderData = _activeOrder != null &&
-        _activeOrder!.paymentStatus.toLowerCase() != 'pending payment';
+    final bool hasActiveOrderData = _activeOrder != null;
 
     final String ordersActionCardTitle =
         hasActiveOrderData ? 'Track Active Order' : 'My Orders';
@@ -312,6 +575,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     VoidCallback ordersActionCardOnTap = () {
       HapticFeedback.lightImpact();
+      _logger.info(
+          'Order action card tapped. Has active order: $hasActiveOrderData');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'ui_action',
+          message: 'Order Action Card tapped',
+          data: {'has_active_order': hasActiveOrderData},
+          level: SentryLevel.info));
+
       if (hasActiveOrderData) {
         _navigateToOrderDetails(_activeOrder!.id);
       } else {
@@ -322,7 +593,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Scaffold(
       backgroundColor: themeProvider.appSecondaryBackground,
       body: RefreshIndicator(
-        onRefresh: () => _loadAllHomeScreenData(isRefresh: true),
+        onRefresh: () {
+          _logger.info('Refresh indicator triggered.');
+          Sentry.addBreadcrumb(Breadcrumb(
+              category: 'ui_action',
+              message: 'Pull to refresh triggered',
+              level: SentryLevel.info));
+          return _loadAllHomeScreenData(isRefresh: true);
+        },
         color: themeProvider.gas2doorPrimaryBlue,
         backgroundColor: themeProvider.cardBackground,
         child: SingleChildScrollView(
@@ -354,8 +632,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               const SizedBox(height: 20),
                               CustomButton(
                                   text: "Retry",
-                                  onPressed: () =>
-                                      _loadAllHomeScreenData(isRefresh: true),
+                                  onPressed: () {
+                                    _logger.info(
+                                        'Retry button pressed on error state.');
+                                    Sentry.addBreadcrumb(Breadcrumb(
+                                        category: 'error_recovery',
+                                        message:
+                                            'Retry button pressed on home screen error',
+                                        level: SentryLevel.info));
+                                    _loadAllHomeScreenData(isRefresh: true);
+                                  },
                                   color: themeProvider.gas2doorPrimaryBlue)
                             ])))
               else
@@ -431,7 +717,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget _buildAddressDisplayWidget(ThemeProvider themeProvider) {
     const IconData locationPinIcon = Icons.location_on_outlined;
     return InkWell(
-      onTap: widget.onChangeAddressTapped,
+      onTap: () {
+        _logger.info('Address display widget tapped.');
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'ui_action',
+            message: 'Address display widget tapped',
+            level: SentryLevel.info));
+        widget.onChangeAddressTapped();
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
         decoration: BoxDecoration(color: themeProvider.deliveryAddressBgColor),
@@ -497,8 +790,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: PageView.builder(
             controller: _promotionPageController,
             itemCount: _promotionItems.length,
-            onPageChanged: (int page) =>
-                setState(() => _currentPromotionPage = page),
+            onPageChanged: (int page) {
+              setState(() => _currentPromotionPage = page);
+              _logger.fine('Promotion carousel page changed to: $page');
+              Sentry.addBreadcrumb(Breadcrumb(
+                  category: 'ui_interaction',
+                  message: 'Promotion carousel page changed',
+                  data: {'page': page},
+                  level: SentryLevel.debug));
+            },
             itemBuilder: (context, index) => Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4.0),
               child: _buildPromotionCarouselItem(
@@ -663,6 +963,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: InkWell(
         onTap: () {
           HapticFeedback.lightImpact();
+          _logger
+              .info('Active order card tapped for order ID: ${activeOrder.id}');
+          Sentry.addBreadcrumb(Breadcrumb(
+              category: 'ui_action',
+              message: 'Active Order Card tapped',
+              data: {'order_id': activeOrder.id},
+              level: SentryLevel.info));
           _navigateToOrderDetails(activeOrder.id);
         },
         borderRadius: themeProvider.cardBorderRadius,
@@ -728,19 +1035,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       {'text': 'Delivered', 'icon': Icons.check_circle_outline_rounded},
     ];
     final statusMap = {
-      'pending payment': 0,
-      'order placed': 0,
-      'processing': 1,
-      'driver assigned': 1,
-      'cylinder refilling': 1,
-      'driver enroute to pickup': 1,
-      'driver enroute to gas station': 1,
-      'out for delivery': 2,
-      'delivered': 3,
+      'Pending Payment': 0,
+      'Order Placed': 0,
+      'Processing': 1,
+      'Driver Assigned': 1,
+      'Out for delivery': 2,
+      'Delivered': 3,
+      'Customer Unavailable': 3,
+      'Issue Reported': 3,
+      'Payment Failed': 3,
+      'Canceled by Customer': 3,
+      'Canceled by Admin': 3,
     };
 
-    String normalizedStatus = currentStatus.toLowerCase();
-    int currentStageIndex = statusMap[normalizedStatus] ?? 0;
+    int currentStageIndex = statusMap[currentStatus] ?? 0;
 
     String currentStageText = stages[currentStageIndex]['text'] as String;
     IconData currentStageIcon = stages[currentStageIndex]['icon'] as IconData;
@@ -748,10 +1056,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ? stages[currentStageIndex + 1]['text'] as String
         : null;
 
-    if (normalizedStatus.contains('driver assigned')) {
+    if (currentStatus == 'Driver Assigned') {
       currentStageText = 'Driver Assigned';
     }
-    if (normalizedStatus.contains('out for delivery')) {
+    if (currentStatus == 'Out for delivery') {
       currentStageText = 'Out for Delivery';
     }
 
@@ -772,7 +1080,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ],
         ),
         const SizedBox(height: 8),
-        if (nextStageText != null)
+        if (currentStageIndex < stages.length - 1)
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: LinearProgressIndicator(
@@ -806,11 +1114,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       fontWeight: FontWeight.bold,
                       color: themeProvider.primaryText)),
               TextButton(
-                  onPressed: () => widget.onSwitchTab(1),
+                  onPressed: () {
+                    _logger.info('View All Orders button pressed.');
+                    Sentry.addBreadcrumb(Breadcrumb(
+                        category: 'ui_action',
+                        message: 'View All Orders button pressed',
+                        level: SentryLevel.info));
+                    widget.onSwitchTab(1);
+                  },
                   child: const Text('View All')),
             ]),
             const SizedBox(height: 16.0),
-            _buildPerformanceStats(themeProvider),
+            _buildPerformanceStats(themeProvider, _customerStats),
             const SizedBox(height: 8.0),
             Divider(color: themeProvider.tertiaryText.withOpacity(0.2)),
             if (orders.isEmpty)
@@ -843,10 +1158,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // MODIFIED: Recent order card now includes the Order ID.
   Widget _buildRecentOrderItemCard(
       {required app_order.Order order, required ThemeProvider themeProvider}) {
-    bool isCompleted = order.status.toLowerCase() == 'delivered';
+    bool isCompleted = order.status == 'Delivered';
     return CustomCard(
       margin: const EdgeInsets.symmetric(vertical: 6),
       color: themeProvider.cardBackground,
@@ -855,15 +1169,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: InkWell(
         onTap: () {
           HapticFeedback.lightImpact();
-          if (order.paymentStatus.toLowerCase() == 'pending payment') {
+          _logger.info('Recent order item tapped for order ID: ${order.id}');
+          Sentry.addBreadcrumb(Breadcrumb(
+              category: 'ui_action',
+              message: 'Recent Order Item tapped',
+              data: {'order_id': order.id, 'status': order.status},
+              level: SentryLevel.info));
+
+          if (order.paymentStatus.toLowerCase() == 'pending') {
             Navigator.of(context, rootNavigator: true).pushNamed(
               OrderSummaryScreen.routeName,
               arguments: {
                 'orderId': order.id,
                 'customerId': widget.customerIdFromShell!,
                 'isVerifyingPayment': true,
+                'orderPayload': order, // Pass the order object itself
               },
             );
+            _logger.info(
+                'Navigating to payment verification for pending order: ${order.id}');
           } else {
             _navigateToOrderDetails(order.id);
           }
@@ -912,7 +1236,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     width: 100,
                     child: CustomButton(
                       text: 'Reorder',
-                      onPressed: () => _navigateToReorder(order),
+                      onPressed: () {
+                        _logger.info(
+                            'Reorder button pressed for order: ${order.id}');
+                        Sentry.addBreadcrumb(Breadcrumb(
+                            category: 'ui_action',
+                            message: 'Reorder button pressed',
+                            data: {'order_id': order.id},
+                            level: SentryLevel.info));
+                        _navigateToReorder(order);
+                      },
                       height: 36,
                       icon: const Icon(Icons.replay_rounded,
                           size: 16, color: Colors.white),
@@ -934,17 +1267,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Widget _buildStatusTag(app_order.Order order, ThemeProvider themeProvider) {
     Color statusColor;
-    String statusText = order.status;
-    String normalizedStatus = order.status.toLowerCase();
-    if (normalizedStatus.contains('delivered')) {
+    String statusText = order.formattedStatus;
+    String rawStatus = order.status;
+
+    if (rawStatus == 'Delivered') {
       statusColor = themeProvider.successColor;
-    } else if (normalizedStatus.contains('cancelled')) {
+    } else if (rawStatus.contains('Canceled') ||
+        rawStatus.contains('Unavailable') ||
+        rawStatus.contains('Issue') ||
+        rawStatus.contains('Failed')) {
       statusColor = themeProvider.errorColor;
-    } else if (normalizedStatus.contains('pending payment')) {
+    } else if (rawStatus == 'Pending Payment') {
       statusColor = themeProvider.warningColor;
     } else {
       statusColor = themeProvider.gas2doorTeal;
     }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
@@ -957,11 +1295,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildPerformanceStats(ThemeProvider themeProvider) {
-    final int totalOrders =
-        _recentOrders.length + (_activeOrder != null ? 1 : 0);
-    const String totalKg = "120.5kg";
-    const String avgDays = "21 days";
+  // FIX: Update _buildPerformanceStats to use CustomerStatsModel
+  Widget _buildPerformanceStats(
+      ThemeProvider themeProvider, CustomerStatsModel? stats) {
+    final int totalOrders = stats?.totalOrders ?? 0;
+    final String totalKg = stats?.totalGasKg != null
+        ? "${stats!.totalGasKg.toStringAsFixed(1)}kg"
+        : "N/A";
+    final String avgDays = stats?.averageDaysBetweenOrders != null
+        ? "${stats!.averageDaysBetweenOrders.toStringAsFixed(1)} days"
+        : "N/A";
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -995,11 +1338,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _navigateToOrderDetails(String orderId) {
+    _logger.info('Navigating to OrderDetailsScreen for order ID: $orderId');
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'navigation',
+        message: 'Navigating to OrderDetailsScreen',
+        data: {'order_id': orderId, 'customer_id': widget.customerIdFromShell},
+        level: SentryLevel.info));
     if (widget.customerIdFromShell != null) {
       Navigator.of(context).pushNamed(OrderDetailsScreen.routeName, arguments: {
         'orderId': orderId,
         'customerId': widget.customerIdFromShell
       });
+    } else {
+      _logger.warning('Cannot navigate to OrderDetails: Customer ID is null.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'navigation_blocked',
+          message: 'Order details navigation blocked: Customer ID is null',
+          level: SentryLevel.warning));
+      _showFeedbackSnackbar(
+          "Customer ID is missing, cannot view order details.",
+          isError: true);
     }
   }
 }

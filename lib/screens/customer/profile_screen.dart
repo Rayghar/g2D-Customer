@@ -230,7 +230,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                                             .account_balance_wallet_outlined,
                                         title: 'My Wallet',
                                         subtitle:
-                                            '₦${NumberFormat("#,##0.00").format(_userData!.walletBalance)}',
+                                            '₦${NumberFormat("#,##0.00").format(_userData!.walletBalance / 100)}',
                                         themeProvider: themeProvider,
                                         onTap: () {
                                           if (widget.customerId.isNotEmpty) {

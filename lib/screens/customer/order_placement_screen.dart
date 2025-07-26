@@ -1,5 +1,6 @@
 // File: lib/screens/customer/order_placement_screen.dart
 // ADVISORY: This version fixes the navigation error when proceeding to payment.
+// UPDATE: Standardized units to kobo for calculations; deliveryFee now in kobo, display /100.
 
 import 'dart:async';
 import 'dart:math';
@@ -10,6 +11,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:logging/logging.dart'; // Added for internal logging
+import 'package:sentry_flutter/sentry_flutter.dart'; // Added for Sentry integration
 
 import '../../models/address_model.dart';
 import '../../models/user.dart' as app_user;
@@ -28,10 +31,13 @@ import './payment_screen.dart';
 import './order_summary_screen.dart';
 import './customer_dashboard_screen.dart';
 
+// Initialize a logger for this file
+final _logger = Logger('OrderPlacementScreen');
+
 class GasCylinder {
   final String id;
   final String sizeLabel;
-  final double price;
+  final double price; // price in naira
   final IconData icon;
 
   GasCylinder({
@@ -48,7 +54,7 @@ class OrderItem {
 
   OrderItem({required this.cylinder, this.quantity = 1});
 
-  double get itemSubtotal => cylinder.price * quantity;
+  double get itemSubtotal => cylinder.price * quantity * 100; // To kobo
 
   @override
   bool operator ==(Object other) =>
@@ -65,7 +71,7 @@ class Promotion {
   final String code;
   final String description;
   final double discountPercentage;
-  final double fixedDiscountAmount;
+  final double fixedDiscountAmount; // in naira
   final bool freeDelivery;
 
   Promotion({
@@ -126,7 +132,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   late List<Animation<Offset>> _sectionSlideAnimations;
 
   app_user.User? _currentUserProfile;
-  double _walletBalance = 0.0;
+  double _walletBalance = 0.0; // naira
   bool _useWalletBalance = false;
 
   bool _isLoadingInitialData = true;
@@ -138,12 +144,31 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   @override
   void initState() {
     super.initState();
+    _logger.info('OrderPlacementScreen initialized.'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'lifecycle',
+        message: 'OrderPlacementScreen initialized',
+        level: SentryLevel.info)); // Sentry breadcrumb
+
     if (widget.initialAddress != null) {
       _selectedDeliveryAddress = widget.initialAddress;
       _isLoadingAddress = false;
+      _logger.info('Initial address provided from arguments.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_placement',
+          message: 'Initial address set from arguments',
+          data: {'address_id': widget.initialAddress?.id},
+          level: SentryLevel.info));
     }
     if (widget.prefilledPromoCode != null) {
       _promoCodeController.text = widget.prefilledPromoCode!;
+      _logger
+          .info('Prefilled promo code applied: ${widget.prefilledPromoCode}');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_placement',
+          message: 'Prefilled promo code set',
+          data: {'promo_code': widget.prefilledPromoCode},
+          level: SentryLevel.info));
     }
 
     _entryAnimController = AnimationController(
@@ -167,6 +192,11 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     _referralCodeController.dispose();
     _recipientNameController.dispose();
     _recipientPhoneController.dispose();
+    _logger.info('OrderPlacementScreen disposed.'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'lifecycle',
+        message: 'OrderPlacementScreen disposed',
+        level: SentryLevel.info)); // Sentry breadcrumb
     super.dispose();
   }
 
@@ -177,9 +207,16 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     Color backgroundColor = themeProvider.gas2doorPrimaryBlue;
     if (isError) {
       backgroundColor = themeProvider.errorColor;
+      _logger.warning(
+          'Snackbar Error: $message'); // Log warnings for user-facing errors
     } else if (isSuccess) {
       backgroundColor = themeProvider.successColor;
+      _logger.info(
+          'Snackbar Success: $message'); // Log info for user-facing successes
+    } else {
+      _logger.info('Snackbar Info: $message'); // Log info for other messages
     }
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
@@ -194,6 +231,12 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
   Future<void> _initializeScreenData() async {
     if (!mounted) return;
+    _logger.info('Initializing screen data...'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'data_loading',
+        message: 'Starting initial screen data load',
+        level: SentryLevel.info));
+
     setState(() {
       _isLoadingInitialData = true;
       _initialDataErrorMessage = null;
@@ -205,6 +248,12 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       if (currentUserId == null || currentUserId.isEmpty) {
         throw Exception("User not identified. Please login again.");
       }
+      _logger.fine('Current user ID: $currentUserId'); // Log fine (debug-level)
+
+      // Set Sentry user context once user ID is identified
+      Sentry.configureScope((scope) {
+        scope.setUser(SentryUser(id: currentUserId));
+      });
 
       final results = await Future.wait([
         _apiService.getSystemConfig(),
@@ -220,11 +269,30 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           _currentUserProfile = userProfile;
           _walletBalance = userProfile.walletBalance;
 
+          // Set more detailed Sentry user context after profile is loaded
+          Sentry.configureScope((scope) {
+            scope.setUser(SentryUser(
+              id: userProfile.id,
+              email: userProfile.email, // Be mindful of PII in production
+              username: userProfile.name, // Be mindful of PII in production
+            ));
+          });
+          _logger.info('User profile and system config loaded.'); // Log info
+          Sentry.addBreadcrumb(Breadcrumb(
+              category: 'data_loading',
+              message: 'User profile and system config loaded',
+              level: SentryLevel.info));
+
           _availableCylindersFromConfig = systemConfig.cylinderSettings
               .where((cs) => cs.isActive == true)
-              .map((cs) =>
-                  GasCylinder(id: cs.id, sizeLabel: cs.name, price: cs.price))
+              .map((cs) => GasCylinder(
+                  id: cs.id,
+                  sizeLabel: cs.name,
+                  price: cs.price /
+                      100.0)) // FIX: Divide by 100.0 to convert kobo to naira
               .toList();
+          _logger.info(
+              'Available cylinders from config: ${_availableCylindersFromConfig.length}'); // Log info
 
           if (_selectedDeliveryAddress == null &&
               userProfile.defaultAddressId != null &&
@@ -232,18 +300,29 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             _fetchAndSetDefaultAddress(userProfile.defaultAddressId!);
           } else {
             _isLoadingAddress = false;
+            _logger.info(
+                'No default address to fetch or initial address already set.'); // Log info
           }
 
           _prepopulateItemsIfNeeded();
-          if (_promoCodeController.text.isNotEmpty) {
-            _handleApplyPromoCode();
+          if (widget.prefilledPromoCode != null &&
+              widget.prefilledPromoCode!.isNotEmpty) {
+            _handleApplyPromoCode(); // Apply prefilled promo code on load
           }
 
           _isLoadingInitialData = false;
         });
         _entryAnimController.forward();
+        _logger.info('Initial screen data loaded successfully.'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'data_loading',
+            message: 'Initial screen data load complete',
+            level: SentryLevel.info));
       }
-    } catch (e) {
+    } catch (e, st) {
+      // Capture stack trace for Sentry
+      _logger.severe("Error loading page setup: $e", e, st); // Log severe error
+      Sentry.captureException(e, stackTrace: st); // Send error to Sentry
       if (mounted) {
         setState(() {
           _initialDataErrorMessage =
@@ -257,6 +336,14 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
   Future<void> _fetchAndSetDefaultAddress(String defaultAddressId) async {
     if (!mounted) return;
+    _logger.info(
+        'Attempting to fetch and set default address: $defaultAddressId'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'address_management',
+        message: 'Fetching default address',
+        data: {'default_address_id': defaultAddressId},
+        level: SentryLevel.info));
+
     setState(() => _isLoadingAddress = true);
     try {
       final allAddresses = await _apiService.getMyAddresses();
@@ -267,10 +354,28 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           _selectedDeliveryAddress = foundDefault ?? allAddresses.first;
           _isLoadingAddress = false;
         });
+        _logger.info(
+            'Default address found and set: ${_selectedDeliveryAddress?.id}'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'address_management',
+            message: 'Default address set',
+            data: {'address_id': _selectedDeliveryAddress?.id},
+            level: SentryLevel.info));
       } else if (mounted) {
         setState(() => _isLoadingAddress = false);
+        _logger.warning(
+            'No addresses found or default address not found, could not set default.'); // Log warning
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'address_management',
+            message:
+                'Could not set default address (no addresses or not found)',
+            level: SentryLevel.warning));
       }
-    } catch (e) {
+    } catch (e, st) {
+      // Capture stack trace for Sentry
+      _logger.severe(
+          "Error fetching default address: $e", e, st); // Log severe error
+      Sentry.captureException(e, stackTrace: st); // Send error to Sentry
       if (mounted) {
         setState(() => _isLoadingAddress = false);
       }
@@ -279,6 +384,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
   void _prepopulateItemsIfNeeded() {
     if (_availableCylindersFromConfig.isEmpty) return;
+    _logger.info('Checking if items need prepopulation.'); // Log info
 
     if (widget.isRefill && widget.refillCylinderSize != null) {
       final matchingCylinder = _availableCylindersFromConfig.firstWhereOrNull(
@@ -289,21 +395,64 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
               cyl.id == widget.refillCylinderSize);
       if (matchingCylinder != null) {
         _updateOrderItemQuantity(matchingCylinder, 1, fromInit: true);
+        _logger.info(
+            'Refill item prepopulated: ${matchingCylinder.sizeLabel}'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'order_placement',
+            message: 'Refill item prepopulated',
+            data: {'cylinder_id': matchingCylinder.id, 'quantity': 1},
+            level: SentryLevel.info));
+      } else {
+        _logger.warning(
+            'Refill cylinder size not found: ${widget.refillCylinderSize}'); // Log warning
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'order_placement',
+            message: 'Refill cylinder not found for prepopulation',
+            data: {'refill_size_attempted': widget.refillCylinderSize},
+            level: SentryLevel.warning));
       }
     } else if (widget.preselectedCylinderIdFromDeal != null) {
       final matchingCylinder = _availableCylindersFromConfig.firstWhereOrNull(
           (cyl) => cyl.id == widget.preselectedCylinderIdFromDeal);
       if (matchingCylinder != null) {
         _updateOrderItemQuantity(matchingCylinder, 1, fromInit: true);
+        _logger.info(
+            'Preselected deal item prepopulated: ${matchingCylinder.sizeLabel}'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'order_placement',
+            message: 'Deal item prepopulated',
+            data: {'cylinder_id': matchingCylinder.id, 'quantity': 1},
+            level: SentryLevel.info));
+      } else {
+        _logger.warning(
+            'Preselected cylinder ID from deal not found: ${widget.preselectedCylinderIdFromDeal}'); // Log warning
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'order_placement',
+            message: 'Deal cylinder not found for prepopulation',
+            data: {
+              'preselected_id_attempted': widget.preselectedCylinderIdFromDeal
+            },
+            level: SentryLevel.warning));
       }
     }
   }
 
   Future<void> _handleChangeAddress() async {
     HapticFeedback.lightImpact();
+    _logger.info('User initiated change address flow.'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'navigation',
+        message: 'Attempting to change delivery address',
+        level: SentryLevel.info));
+
     final String? currentId = widget.customerId ?? _currentUserProfile?.id;
     if (currentId == null || currentId.isEmpty) {
       _showFeedbackSnackbar("User information missing.", isError: true);
+      _logger.warning('Cannot change address: User ID missing.'); // Log warning
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'address_management',
+          message: 'Cannot change address: User ID missing',
+          level: SentryLevel.warning));
       return;
     }
     final result = await Navigator.of(context, rootNavigator: true).pushNamed(
@@ -318,6 +467,23 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     if (result != null && result is AddressModel && mounted) {
       setState(() => _selectedDeliveryAddress = result);
       _showFeedbackSnackbar('Delivery address updated.', isSuccess: true);
+      _logger.info(
+          'Delivery address successfully updated to: ${result.fullAddress}'); // Log info
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'address_management',
+          message: 'Delivery address updated',
+          data: {
+            'new_address_id': result.id,
+            'full_address': result.fullAddress
+          },
+          level: SentryLevel.info));
+    } else {
+      _logger.info(
+          'Address change cancelled or no new address selected.'); // Log info
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'address_management',
+          message: 'Address selection cancelled or no new address selected',
+          level: SentryLevel.info));
     }
   }
 
@@ -330,67 +496,105 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       if (existingIndex != -1) {
         _orderItems[existingIndex].quantity += change;
         if (_orderItems[existingIndex].quantity <= 0) {
+          final removedCylinderLabel =
+              _orderItems[existingIndex].cylinder.sizeLabel;
           _orderItems.removeAt(existingIndex);
-          if (!fromInit)
-            _showFeedbackSnackbar('${cylinder.sizeLabel} removed from order.');
+          if (!fromInit) {
+            _showFeedbackSnackbar(
+                '${removedCylinderLabel} removed from order.');
+            _logger
+                .info('$removedCylinderLabel removed from order.'); // Log info
+            Sentry.addBreadcrumb(Breadcrumb(
+                category: 'order_item_update',
+                message: 'Item removed from order',
+                data: {'cylinder_id': cylinder.id, 'quantity_change': change},
+                level: SentryLevel.info));
+          }
+        } else {
+          _logger.info(
+              '${cylinder.sizeLabel} quantity updated to ${_orderItems[existingIndex].quantity}.'); // Log info
+          Sentry.addBreadcrumb(Breadcrumb(
+              category: 'order_item_update',
+              message: 'Item quantity updated',
+              data: {
+                'cylinder_id': cylinder.id,
+                'quantity_change': change,
+                'new_quantity': _orderItems[existingIndex].quantity
+              },
+              level: SentryLevel.info));
         }
       } else if (change > 0) {
         _orderItems.add(OrderItem(cylinder: cylinder, quantity: change));
-        if (!fromInit)
+        if (!fromInit) {
           _showFeedbackSnackbar('${cylinder.sizeLabel} added to order.',
               isSuccess: true);
+          _logger.info(
+              '${cylinder.sizeLabel} added to order with quantity $change.'); // Log info
+          Sentry.addBreadcrumb(Breadcrumb(
+              category: 'order_item_update',
+              message: 'Item added to order',
+              data: {'cylinder_id': cylinder.id, 'quantity_added': change},
+              level: SentryLevel.info));
+        }
       }
+      _logger.fine(
+          'Current order items: ${_orderItems.map((e) => '${e.cylinder.sizeLabel} x ${e.quantity}').join(', ')}'); // Log fine
     });
   }
 
   double _calculateItemsSubtotal() =>
-      _orderItems.fold(0.0, (sum, item) => sum + item.itemSubtotal);
+      _orderItems.fold(0.0, (sum, item) => sum + item.itemSubtotal); // kobo
 
   double _calculateDeliveryFee() {
     if (_feeSettings == null) return 0.0;
     if (_appliedUIPromotion?.freeDelivery == true) return 0.0;
 
-    double totalDeliveryFee = _isExpressDelivery
-        ? _feeSettings!.baseDeliveryFee + _feeSettings!.expressDeliverySurcharge
-        : _feeSettings!.baseDeliveryFee;
+    double totalDeliveryFeeKobo = _isExpressDelivery
+        ? (_feeSettings!.baseDeliveryFee +
+                _feeSettings!.expressDeliverySurcharge)
+            .toDouble()
+        : _feeSettings!.baseDeliveryFee.toDouble(); // FIX: Convert to double
 
     final int totalQuantity =
         _orderItems.fold(0, (sum, item) => sum + item.quantity);
 
-    const double perAdditionalCylinderSurcharge = 2000.0;
+    const double perAdditionalCylinderSurchargeKobo =
+        1500.0; // Assuming this is in kobo, or needs conversion from naira
 
     if (totalQuantity > 1) {
-      totalDeliveryFee += (totalQuantity - 1) * perAdditionalCylinderSurcharge;
+      totalDeliveryFeeKobo +=
+          (totalQuantity - 1) * perAdditionalCylinderSurchargeKobo;
     }
-
-    return totalDeliveryFee;
+    return totalDeliveryFeeKobo; // Return in kobo
   }
 
-  double _calculateVat(double amount) =>
-      _feeSettings == null ? 0.0 : amount * (_feeSettings!.vatPercentage / 100);
-
-  double _calculateServiceFee(double subtotal) => _feeSettings == null
+  double _calculateVat(double amount_kobo) => _feeSettings == null
       ? 0.0
-      : subtotal * (_feeSettings!.serviceFeePercentage / 100);
+      : amount_kobo * (_feeSettings!.vatPercentage / 100);
+
+  double _calculateServiceFee(double subtotal_kobo) => _feeSettings == null
+      ? 0.0
+      : subtotal_kobo * (_feeSettings!.serviceFeePercentage / 100);
 
   double _calculateTotalBeforeWallet() {
-    final subtotal = _calculateItemsSubtotal();
+    final subtotal = _calculateItemsSubtotal(); // kobo
     if (subtotal == 0) return 0.0;
     double discount = 0.0;
     if (_appliedUIPromotion != null) {
       discount = _appliedUIPromotion!.fixedDiscountAmount > 0
-          ? _appliedUIPromotion!.fixedDiscountAmount
+          ? _appliedUIPromotion!.fixedDiscountAmount * 100 // naira to kobo
           : subtotal * _appliedUIPromotion!.discountPercentage;
     }
     final subtotalAfterDiscount = subtotal - discount;
     final serviceFee = _calculateServiceFee(subtotalAfterDiscount);
     final vat = _calculateVat(subtotalAfterDiscount);
-    final deliveryFee = _calculateDeliveryFee();
+    final deliveryFee = _calculateDeliveryFee(); // kobo
     return subtotalAfterDiscount + deliveryFee + vat + serviceFee;
   }
 
   double _getWalletAmountToUse() => _useWalletBalance
-      ? min(_calculateTotalBeforeWallet(), _walletBalance)
+      ? min(
+          _calculateTotalBeforeWallet(), _walletBalance * 100) // naira to kobo
       : 0.0;
 
   double _calculateGrandTotal() =>
@@ -400,8 +604,16 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     HapticFeedback.lightImpact();
     final code = _promoCodeController.text.trim().toUpperCase();
     FocusScope.of(context).unfocus();
+    _logger.info('Attempting to apply promo code: $code'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'promotion',
+        message: 'Applying promo code',
+        data: {'promo_code_attempted': code},
+        level: SentryLevel.info));
+
     if (code.isEmpty) {
       _showFeedbackSnackbar('Please enter a promo code.', isError: true);
+      _logger.warning('Promo code input was empty.'); // Log warning
       return;
     }
     final Map<String, Promotion> validPromotionsForUI = {
@@ -418,27 +630,68 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       setState(() => _appliedUIPromotion = validPromotionsForUI[code]);
       _showFeedbackSnackbar('Promo code "$code" applied for estimation!',
           isSuccess: true);
+      _logger.info(
+          'Promo code "$code" successfully applied for UI estimation.'); // Log info
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'promotion',
+          message: 'Promo code applied (UI estimation)',
+          data: {
+            'promo_code': code,
+            'description': _appliedUIPromotion?.description
+          },
+          level: SentryLevel.info));
     } else {
       setState(() => _appliedUIPromotion = null);
       _showFeedbackSnackbar(
           '"$code" will be attempted. Actual discount applied by server.');
+      _logger.info(
+          'Promo code "$code" not recognized for UI estimation, will be sent to server.'); // Log info
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'promotion',
+          message: 'Promo code not recognized for UI, sending to server',
+          data: {'promo_code': code},
+          level: SentryLevel.info));
     }
   }
 
   Future<void> _handlePlaceOrder() async {
+    _logger.info('User initiated order placement.'); // Log info
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'order_flow',
+        message: 'Starting order placement process',
+        level: SentryLevel.info));
+
     if (_selectedDeliveryAddress == null) {
       _showFeedbackSnackbar("Please select a delivery address.", isError: true);
+      _logger.warning(
+          'Order placement blocked: No delivery address selected.'); // Log warning
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_flow',
+          message: 'Order placement failed: No delivery address selected',
+          level: SentryLevel.warning));
       return;
     }
     if (_orderItems.isEmpty) {
       _showFeedbackSnackbar("Please add at least one item to your order.",
           isError: true);
+      _logger.warning(
+          'Order placement blocked: No items in order.'); // Log warning
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_flow',
+          message: 'Order placement failed: No items in order',
+          level: SentryLevel.warning));
       return;
     }
     if (!_isSelfRecipient &&
         !(_recipientFormKey.currentState?.validate() ?? false)) {
       _showFeedbackSnackbar('Please provide valid recipient details.',
           isError: true);
+      _logger.warning(
+          'Order placement blocked: Invalid recipient details.'); // Log warning
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_flow',
+          message: 'Order placement failed: Invalid recipient details',
+          level: SentryLevel.warning));
       return;
     }
     final String? currentActiveCustomerId =
@@ -446,6 +699,12 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     if (currentActiveCustomerId == null || currentActiveCustomerId.isEmpty) {
       _showFeedbackSnackbar("User not identified. Please re-login.",
           isError: true);
+      _logger.severe(
+          'Order placement blocked: User ID missing or invalid.'); // Log severe
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_flow',
+          message: 'Order placement failed: User ID missing',
+          level: SentryLevel.fatal));
       return;
     }
     setState(() => _isPlacingOrder = true);
@@ -454,7 +713,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
               'cylinderId': item.cylinder.id,
               'productName': item.cylinder.sizeLabel,
               'quantity': item.quantity,
-              'unitPrice': item.cylinder.price
+              'unitPrice':
+                  (item.cylinder.price * 100).toInt() // Convert to kobo
             })
         .toList();
     String recipientNameValue;
@@ -467,6 +727,13 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             "Your phone number is missing. Please update your profile.",
             isError: true);
         setState(() => _isPlacingOrder = false);
+        _logger.warning(
+            'Order placement blocked: Self recipient phone number missing from profile.'); // Log warning
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'order_flow',
+            message:
+                'Order placement failed: Self recipient phone number missing',
+            level: SentryLevel.warning));
         return;
       }
     } else {
@@ -485,15 +752,49 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       if (_referralCodeController.text.trim().isNotEmpty)
         'referralCode': _referralCodeController.text.trim().toUpperCase(),
     };
+
+    _logger.fine(
+        'Order payload prepared: $orderPayloadForApi'); // Log fine (debug-level)
+    Sentry.addBreadcrumb(Breadcrumb(
+        category: 'order_flow',
+        message: 'Order payload prepared',
+        data:
+            orderPayloadForApi, // Consider if this payload has sensitive data for production Sentry events
+        level: SentryLevel.debug));
+
     try {
       final PlaceOrderResponseModel response =
           await _apiService.placeOrder(orderPayloadForApi);
-      if (!mounted) return;
+      if (!mounted) {
+        _logger.warning(
+            'Order placement successful, but screen unmounted before navigation.');
+        return;
+      }
+
+      _logger.info(
+          'Order placed successfully. Server response: ${response.message}'); // Log info
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_flow',
+          message: 'Order API call successful',
+          data: {
+            'order_id': response.order.id,
+            'payment_needed': response.paymentNeeded
+          },
+          level: SentryLevel.info));
+
       if (response.paymentNeeded) {
         _showFeedbackSnackbar("Order confirmed. Proceeding to payment...");
-        // =======================================================================
-        // CORRECTED: Added the required 'order' object to the arguments map.
-        // =======================================================================
+        _logger.info(
+            'Navigating to PaymentScreen for order ${response.order.id}.'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'navigation',
+            message: 'Navigating to PaymentScreen',
+            data: {
+              'order_id': response.order.id,
+              'amount': response.grandTotalToPay
+            },
+            level: SentryLevel.info));
+
         Navigator.of(context)
             .pushReplacementNamed(PaymentScreen.routeName, arguments: {
           'orderId': response.order.id,
@@ -509,6 +810,14 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                 ? response.message
                 : "Order placed successfully!",
             isSuccess: true);
+        _logger.info(
+            'Navigating to OrderSummaryScreen for order ${response.order.id} (no payment needed).'); // Log info
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'navigation',
+            message: 'Navigating to OrderSummaryScreen (no payment)',
+            data: {'order_id': response.order.id},
+            level: SentryLevel.info));
+
         Navigator.of(context).pushNamedAndRemoveUntil(
             OrderSummaryScreen.routeName,
             ModalRoute.withName(CustomerDashboardScreen.routeName),
@@ -518,7 +827,17 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
               'orderPayload': response.order
             });
       }
-    } catch (e) {
+    } catch (e, st) {
+      // Capture stack trace for Sentry
+      _logger.severe("Order placement failed: $e", e, st); // Log severe error
+      Sentry.captureException(e,
+          stackTrace: st,
+          hint: Hint.withMap({
+            // Send error to Sentry with additional context
+            'payload_attempted': orderPayloadForApi,
+            'delivery_address_id': _selectedDeliveryAddress?.id,
+            'user_id': currentActiveCustomerId,
+          }));
       if (mounted) {
         _showFeedbackSnackbar(
             "Order placement failed: ${e.toString().replaceFirst("Exception: ", "")}",
@@ -526,6 +845,11 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       }
     } finally {
       if (mounted) setState(() => _isPlacingOrder = false);
+      _logger.info('Order placement process finished.'); // Log info
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_flow',
+          message: 'Order placement process completed',
+          level: SentryLevel.info));
     }
   }
 
@@ -549,7 +873,15 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new_rounded,
               color: themeProvider.primaryText),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () {
+            _logger.info(
+                'Back button pressed on OrderPlacementScreen.'); // Log info
+            Sentry.addBreadcrumb(Breadcrumb(
+                category: 'navigation',
+                message: 'Back button pressed from OrderPlacementScreen',
+                level: SentryLevel.info));
+            Navigator.of(context).pop();
+          },
         ),
       ),
       body: _isLoadingInitialData
@@ -631,7 +963,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
               child: CustomButton(
                 text: _isPlacingOrder
                     ? 'Placing Order...'
-                    : 'Proceed to Checkout (${NumberFormat.currency(locale: 'en_NG', symbol: '₦').format(grandTotal / 100)})',
+                    : 'Proceed to Checkout (${NumberFormat.currency(locale: 'en_NG', symbol: '₦').format(grandTotal / 100)})', // FIX: Divide by 100
                 onPressed: (_isPlacingOrder ||
                         _orderItems.isEmpty ||
                         _selectedDeliveryAddress == null)
@@ -781,8 +1113,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                                 Text(
                                     NumberFormat.currency(
                                             locale: 'en_NG', symbol: '₦')
-                                        .format(
-                                            cylinder.price / 100), // Corrected
+                                        .format(cylinder
+                                            .price), // No /100 if price naira
                                     style: GoogleFonts.inter(
                                         fontSize: 13,
                                         color: themeProvider.secondaryText)),
@@ -868,11 +1200,23 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                     if (value) {
                       _recipientNameController.clear();
                       _recipientPhoneController.clear();
+                      _logger.info('Recipient set to self.'); // Log info
+                      Sentry.addBreadcrumb(Breadcrumb(
+                          category: 'recipient_details',
+                          message: 'Recipient set to self',
+                          level: SentryLevel.info));
                     } else {
                       _recipientNameController.text =
                           _currentUserProfile?.name ?? '';
                       _recipientPhoneController.text =
                           _currentUserProfile?.phone ?? '';
+                      _logger.info(
+                          'Recipient set to other. Prefilled with user profile.'); // Log info
+                      Sentry.addBreadcrumb(Breadcrumb(
+                          category: 'recipient_details',
+                          message:
+                              'Recipient set to other, prefilling from profile',
+                          level: SentryLevel.info));
                     }
                   });
                 },
@@ -934,11 +1278,19 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                       fontWeight: FontWeight.w500,
                       fontSize: 15)),
               subtitle: Text(
-                  '+ ${NumberFormat.currency(locale: 'en_NG', symbol: '₦').format((_feeSettings?.expressDeliverySurcharge ?? 0) / 100)} (Get it faster!)', // Corrected
+                  '+ ${NumberFormat.currency(locale: 'en_NG', symbol: '₦').format((_feeSettings?.expressDeliverySurcharge ?? 0) / 100.0)} (Get it faster!)', // FIX: Divide by 100.0
                   style: GoogleFonts.inter(
                       fontSize: 13, color: themeProvider.secondaryText)),
               value: _isExpressDelivery,
-              onChanged: (value) => setState(() => _isExpressDelivery = value),
+              onChanged: (value) {
+                setState(() => _isExpressDelivery = value);
+                _logger.info('Express Delivery toggled to: $value'); // Log info
+                Sentry.addBreadcrumb(Breadcrumb(
+                    category: 'delivery_options',
+                    message: 'Express Delivery toggled',
+                    data: {'is_express_delivery': value},
+                    level: SentryLevel.info));
+              },
               activeColor: themeProvider.gas2doorTeal,
               contentPadding: EdgeInsets.zero,
               secondary: Icon(Icons.bolt_rounded,
@@ -1012,13 +1364,21 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                   color: themeProvider.primaryText,
                   fontWeight: FontWeight.w600)),
           subtitle: Text(
-              'Available: ${NumberFormat.currency(locale: 'en_NG', symbol: '₦').format(_walletBalance / 100)}', // Corrected
+              'Available: ${NumberFormat.currency(locale: 'en_NG', symbol: '₦').format(_walletBalance / 100)}', // No /100 if naira
               style: GoogleFonts.inter(
                   color: themeProvider.secondaryText, fontSize: 13)),
           value: _useWalletBalance,
           onChanged: _walletBalance <= 0
               ? null
-              : (bool value) => setState(() => _useWalletBalance = value),
+              : (bool value) {
+                  setState(() => _useWalletBalance = value);
+                  _logger.info('Wallet usage toggled to: $value'); // Log info
+                  Sentry.addBreadcrumb(Breadcrumb(
+                      category: 'payment_options',
+                      message: 'Wallet usage toggled',
+                      data: {'use_wallet_balance': value},
+                      level: SentryLevel.info));
+                },
           activeColor: themeProvider.gas2doorTeal,
           secondary: Icon(Icons.account_balance_wallet_outlined,
               color: _useWalletBalance && _walletBalance > 0
@@ -1031,19 +1391,20 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   }
 
   Widget _buildOrderSummaryCard(ThemeProvider themeProvider) {
-    final itemsSubtotal = _calculateItemsSubtotal();
-    final deliveryFee = _calculateDeliveryFee();
+    final itemsSubtotal = _calculateItemsSubtotal(); // kobo
+    final deliveryFee = _calculateDeliveryFee(); // kobo
     final serviceFee = _calculateServiceFee(itemsSubtotal);
     final vat = _calculateVat(itemsSubtotal);
     double uiDiscount = 0.0;
     if (_appliedUIPromotion != null) {
       uiDiscount = _appliedUIPromotion!.fixedDiscountAmount > 0
-          ? _appliedUIPromotion!.fixedDiscountAmount
+          ? _appliedUIPromotion!.fixedDiscountAmount * 100 // naira to kobo
           : itemsSubtotal * _appliedUIPromotion!.discountPercentage;
     }
     final walletUsed = _getWalletAmountToUse();
     final grandTotal = _calculateGrandTotal();
-    final currencyFormat = NumberFormat.currency(locale: 'en_NG', symbol: '₦');
+    final currencyFormat = NumberFormat.currency(
+        locale: 'en_NG', symbol: '₦'); // Changed symbol to '₦'
 
     return CustomCard(
       color: themeProvider.cardBackground.withOpacity(0.7),
@@ -1058,34 +1419,44 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                     fontWeight: FontWeight.bold,
                     color: themeProvider.primaryText)),
             const SizedBox(height: 12),
-            _buildSummaryRow('Items Subtotal:',
-                currencyFormat.format(itemsSubtotal / 100), themeProvider),
+            _buildSummaryRow(
+                'Items Subtotal:',
+                currencyFormat.format(itemsSubtotal / 100),
+                themeProvider), // Divide by 100 for display
             if (vat > 0)
-              _buildSummaryRow('VAT:', '+ ${currencyFormat.format(vat / 100)}',
+              _buildSummaryRow(
+                  'VAT:',
+                  '+ ${currencyFormat.format(vat / 100)}', // Divide by 100 for display
                   themeProvider),
             if (serviceFee > 0)
               _buildSummaryRow(
                   'Service Fee:',
-                  '+ ${currencyFormat.format(serviceFee / 100)}',
+                  '+ ${currencyFormat.format(serviceFee / 100)}', // Divide by 100 for display
                   themeProvider),
             _buildSummaryRow(
                 'Delivery Fee:',
-                '+ ${currencyFormat.format(deliveryFee)}',
-                themeProvider), // Delivery fee is not divided
+                '+ ${currencyFormat.format(deliveryFee / 100)}', // Divide by 100 for display
+                themeProvider),
             if (uiDiscount > 0)
-              _buildSummaryRow('Discount:',
-                  '- ${currencyFormat.format(uiDiscount / 100)}', themeProvider,
+              _buildSummaryRow(
+                  'Discount:',
+                  '- ${currencyFormat.format(uiDiscount / 100)}',
+                  themeProvider, // Divide by 100 for display
                   isDiscount: true),
             if (walletUsed > 0)
-              _buildSummaryRow('Wallet Deduction:',
-                  '- ${currencyFormat.format(walletUsed / 100)}', themeProvider,
+              _buildSummaryRow(
+                  'Wallet Deduction:',
+                  '- ${currencyFormat.format(walletUsed / 100)}',
+                  themeProvider, // Divide by 100 for display
                   isDiscount: true),
             Divider(
                 height: 24,
                 thickness: 0.5,
                 color: themeProvider.tertiaryText.withOpacity(0.4)),
-            _buildSummaryRow('Total Payable:',
-                currencyFormat.format(grandTotal / 100), themeProvider,
+            _buildSummaryRow(
+                'Total Payable:',
+                currencyFormat.format(grandTotal / 100),
+                themeProvider, // Divide by 100 for display
                 isTotal: true),
           ],
         ),
@@ -1145,7 +1516,15 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             const SizedBox(height: 24),
             CustomButton(
                 text: "Retry",
-                onPressed: () => _initializeScreenData(),
+                onPressed: () {
+                  _logger
+                      .info('Retry button pressed on error state.'); // Log info
+                  Sentry.addBreadcrumb(Breadcrumb(
+                      category: 'error_recovery',
+                      message: 'Retry button pressed on error state',
+                      level: SentryLevel.info));
+                  _initializeScreenData();
+                },
                 color: themeProvider.gas2doorPrimaryBlue,
                 icon: Icon(Icons.refresh_rounded, color: Colors.white))
           ],
