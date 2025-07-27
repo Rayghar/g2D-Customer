@@ -1,32 +1,39 @@
-# Flutter
--keep class io.flutter.** { *; } [cite: 1, 2]
+# This is a ProGuard/R8 rules file for Flutter Android release builds.
+# It tells R8/ProGuard which code to keep (not minify or obfuscate)
+# to prevent crashes caused by aggressive optimization.
+
+# Flutter framework-specific rules
+-keep class io.flutter.** { *; }
 -keep class io.flutter.embedding.** { *; }
 
-# Prevent obfuscation of main application class
-# IMPORTANT: Replace 'your.package.name' with your actual Android package name (e.g., com.primejet.gas2door)
--keep class com.example.primejet_mobile.MainActivity { *; } [cite: 3]
+# Prevent obfuscation of your main application class
+# IMPORTANT: Replace 'com.primejet.gas2door' with your ACTUAL Android package name.
+# You can find this in your android/app/build.gradle file under defaultConfig { applicationId "your.package.name" }
+-keep class com.primejet.gas2door.MainActivity { *; } 
 
-# Retain essential Kotlin metadata
--keep class kotlin.** { *; } [cite: 4]
+# Retain essential Kotlin metadata (often used by Flutter plugins)
+-keep class kotlin.** { *; }
 -keep class kotlinx.** { *; }
 
 # Keep Firebase and general Google Play Services classes
--keep class com.google.firebase.** { *; } [cite: 5]
--keep class com.google.android.gms.** { *; } [cite: 5]
+-keep class com.google.firebase.** { *; }
+-keep class com.google.android.gms.** { *; }
 
-# Prevent stripping of Parcelable classes
+# Prevent stripping of Parcelable classes (common for Android components)
 -keepclassmembers class * implements android.os.Parcelable {
-    public static final android.os.Parcelable$Creator *; [cite: 6]
+    public static final android.os.Parcelable$Creator *;
 }
 
-# --- START: Rules added for smart_auth, Google Play Services Credentials, and Play Core ---
+# --- START: Rules for Google Play Services Credentials (SmartAuth, Google Sign-In) and Play Core Libraries ---
+# These rules are crucial for apps using Google Sign-In, Smart Lock, or App Bundles/Deferred Install features.
+# They explicitly tell R8/ProGuard to keep these classes, which are often referenced dynamically.
 
 # Rules for Google Play Services Credentials API (com.google.android.gms.auth.api.credentials)
-# Needed by plugins like smart_auth, Google Sign-In for credential management.
--keep class com.google.android.gms.auth.api.credentials.** { *; } [cite: 7]
--keep interface com.google.android.gms.auth.api.credentials.** { *; } [cite: 8]
+# Broad rule for the package:
+-keep class com.google.android.gms.auth.api.credentials.** { *; }
+-keep interface com.google.android.gms.auth.api.credentials.** { *; }
 
-# --- Explicitly keep specific classes mentioned in missing_rules.txt ---
+# Explicitly keep specific classes that were reported as missing:
 -keep class com.google.android.gms.auth.api.credentials.Credential$Builder { *; }
 -keep class com.google.android.gms.auth.api.credentials.Credential { *; }
 -keep class com.google.android.gms.auth.api.credentials.CredentialPickerConfig$Builder { *; }
@@ -40,11 +47,11 @@
 -keep class com.google.android.gms.auth.api.credentials.HintRequest { *; }
 
 # Rules for Google Play Core Library (com.google.android.play.core)
-# Often used for App Bundles, deferred installs, in-app updates, etc.
--keep class com.google.android.play.core.** { *; } 
+# Broad rule for the package:
+-keep class com.google.android.play.core.** { *; }
 -keep interface com.google.android.play.core.** { *; }
 
-# --- Explicitly keep specific classes mentioned in missing_rules.txt ---
+# Explicitly keep specific classes that were reported as missing:
 -keep class com.google.android.play.core.splitcompat.SplitCompatApplication { *; }
 -keep class com.google.android.play.core.splitinstall.SplitInstallException { *; }
 -keep class com.google.android.play.core.splitinstall.SplitInstallManager { *; }
@@ -59,7 +66,7 @@
 
 # --- END: Rules added ---
 
-# Stripe specific dontwarn rules (from your original file)
+# Stripe specific dontwarn rules (from your original file - generally safe to keep)
 -dontwarn com.stripe.android.pushProvisioning.PushProvisioningActivity$g
 -dontwarn com.stripe.android.pushProvisioning.PushProvisioningActivityStarter$Args
 -dontwarn com.stripe.android.pushProvisioning.PushProvisioningActivityStarter$Error
