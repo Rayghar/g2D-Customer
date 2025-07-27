@@ -72,3 +72,35 @@
 -dontwarn com.stripe.android.pushProvisioning.PushProvisioningActivityStarter$Error
 -dontwarn com.stripe.android.pushProvisioning.PushProvisioningActivityStarter
 -dontwarn com.stripe.android.pushProvisioning.PushProvisioningEphemeralKeyProvider
+
+# Rules for smart_auth and Google Sign-In related classes
+-keep class com.google.android.gms.auth.api.credentials.Credential$Builder { *; }
+-keep class com.google.android.gms.auth.api.credentials.Credential { *; }
+-keep class com.google.android.gms.auth.api.credentials.CredentialPickerConfig$Builder { *; }
+-keep class com.google.android.gms.auth.api.credentials.CredentialPickerConfig { *; }
+-keep class com.google.android.gms.auth.api.credentials.CredentialRequest$Builder { *; }
+-keep class com.google.android.gms.auth.api.credentials.CredentialRequest { *; }
+-keep class com.google.android.gms.auth.api.credentials.CredentialRequestResponse { *; }
+-keep class com.google.android.gms.auth.api.credentials.Credentials { *; }
+-keep class com.google.android.gms.auth.api.credentials.CredentialsClient { *; }
+-keep class com.google.android.gms.auth.api.credentials.HintRequest$Builder { *; }
+-keep class com.google.android.gms.auth.api.credentials.HintRequest { *; }
+
+# Rules for Google Play Core libraries (often implicitly used by Flutter/Firebase)
+-keep class com.google.android.play.core.splitcompat.SplitCompatApplication { *; }
+-keep class com.google.android.play.core.splitinstall.SplitInstallException { *; }
+-keep class com.google.android.play.core.splitinstall.SplitInstallManager { *; }
+-keep class com.google.android.play.core.splitinstall.SplitInstallManagerFactory { *; }
+-keep class com.google.android.play.core.splitinstall.SplitInstallRequest$Builder { *; }
+-keep class com.google.android.play.core.splitinstall.SplitInstallRequest { *; }
+-keep class com.google.android.play.core.splitinstall.SplitInstallSessionState { *; }
+-keep class com.google.android.play.core.splitinstall.SplitInstallStateUpdatedListener { *; }
+-keep class com.google.android.play.core.tasks.OnFailureListener { *; }
+-keep class com.google.android.play.core.tasks.OnSuccessListener { *; }
+-keep class com.google.android.play.core.tasks.Task { *; }
+
+# Common Flutter-related ProGuard rules (often already in getDefaultProguardFile('proguard-android-optimize.txt'), but good to ensure)
+-keep class io.flutter.app.** { *; }
+-keep class io.flutter.plugin.** { *; }
+-keep class io.flutter.embedding.** { *; }
+-keep class io.flutter.view.** { *; }
