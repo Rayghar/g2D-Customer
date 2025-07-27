@@ -2,6 +2,31 @@
 # It tells R8/ProGuard which code to keep (not minify or obfuscate)
 # to prevent crashes caused by aggressive optimization.
 
+# --- START: DONTWARN RULES (added from missing_rules.txt as troubleshooting) ---
+-dontwarn com.google.android.gms.auth.api.credentials.Credential$Builder
+-dontwarn com.google.android.gms.auth.api.credentials.Credential
+-dontwarn com.google.android.gms.auth.api.credentials.CredentialPickerConfig$Builder
+-dontwarn com.google.android.gms.auth.api.credentials.CredentialPickerConfig
+-dontwarn com.google.android.gms.auth.api.credentials.CredentialRequest$Builder
+-dontwarn com.google.android.gms.auth.api.credentials.CredentialRequest
+-dontwarn com.google.android.gms.auth.api.credentials.CredentialRequestResponse
+-dontwarn com.google.android.gms.auth.api.credentials.Credentials
+-dontwarn com.google.android.gms.auth.api.credentials.CredentialsClient
+-dontwarn com.google.android.gms.auth.api.credentials.HintRequest$Builder
+-dontwarn com.google.android.gms.auth.api.credentials.HintRequest
+-dontwarn com.google.android.play.core.splitcompat.SplitCompatApplication
+-dontwarn com.google.android.play.core.splitinstall.SplitInstallException
+-dontwarn com.google.android.play.core.splitinstall.SplitInstallManager
+-dontwarn com.google.android.play.core.splitinstall.SplitInstallManagerFactory
+-dontwarn com.google.android.play.core.splitinstall.SplitInstallRequest$Builder
+-dontwarn com.google.android.play.core.splitinstall.SplitInstallRequest
+-dontwarn com.google.android.play.core.splitinstall.SplitInstallSessionState
+-dontwarn com.google.android.play.core.splitinstall.SplitInstallStateUpdatedListener
+-dontwarn com.google.android.play.core.tasks.OnFailureListener
+-dontwarn com.google.android.play.core.tasks.OnSuccessListener
+-dontwarn com.google.android.play.core.tasks.Task
+# --- END: DONTWARN RULES ---
+
 # Flutter framework-specific rules
 -keep class io.flutter.** { *; }
 -keep class io.flutter.embedding.** { *; }
