@@ -5,5 +5,5 @@
     "lib/flutter_flow/custom_functions.dart": true,
     "lib/flutter_flow/function_changes.json": true
   },
-  "java.configuration.updateBuildConfiguration": "interactive"
+  "java.configuration.updateBuildConfiguration": "disabled"
 }
