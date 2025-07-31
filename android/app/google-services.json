@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "108927420628-89qhe8pl07hus2q0kgaqchekci5tor3j.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.primejet_mobile",
+            "certificate_hash": "58c4d6af7b3e8fc8419e4de8ada9dd6d1337c935"
+          }
+        },
+        {
           "client_id": "108927420628-vbd3hucqfgg55ij4jog7nhs4t5adlrh1.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

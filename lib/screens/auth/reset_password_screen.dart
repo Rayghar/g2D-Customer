@@ -1,8 +1,7 @@
 // File: lib/screens/auth/reset_password_screen.dart
-// ADVISORY: This is the complete, reimagined version with the new "Depth & Clarity" theme.
+// ADVISORY: Updated to retrieve resetToken in didChangeDependencies and fix debug log.
 
 import 'dart:ui';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -10,17 +9,13 @@ import 'package:provider/provider.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
-import '../../widgets/input.dart';
 import './customer_login_screen.dart';
+import '../../services/auth_service.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   static const String routeName = '/reset_password';
-  final String? resetToken;
 
-  const ResetPasswordScreen({
-    super.key,
-    this.resetToken,
-  });
+  const ResetPasswordScreen({super.key});
 
   @override
   State<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
@@ -36,9 +31,32 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
   bool _obscureNewPassword = true;
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
+  String? _resetToken; // Managed as state variable
 
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
+
+  final AuthService _authService = AuthService();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Retrieve resetToken from navigation arguments after context is ready
+    final arguments =
+        ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+    _resetToken = arguments?['resetToken'] as String?;
+    print(
+        'ResetPasswordScreen initialized with resetToken: $_resetToken'); // Fixed debug log
+    if (_resetToken == null || _resetToken!.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showFeedbackSnackbar(
+              'Invalid or missing reset token. Please try again or request a new one.',
+              isError: true);
+        }
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -61,16 +79,34 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
   Future<void> _handleResetPassword() async {
     HapticFeedback.mediumImpact();
     if (_formKey.currentState!.validate()) {
+      if (_resetToken == null || _resetToken!.isEmpty) {
+        _showFeedbackSnackbar(
+            'Invalid or missing reset token. Please try again or request a new one.',
+            isError: true);
+        return;
+      }
       setState(() => _isLoading = true);
 
-      // Simulate API call - replace with your actual service
-      await Future.delayed(const Duration(seconds: 2));
-
-      if (mounted) {
-        _showFeedbackSnackbar('Password updated successfully! Please login.',
-            isError: false);
-        Navigator.pushNamedAndRemoveUntil(
-            context, CustomerLoginScreen.routeName, (route) => false);
+      try {
+        print('Sending reset request with token: $_resetToken'); // Debug log
+        await _authService.resetPassword(
+            _resetToken!, _newPasswordController.text);
+        if (mounted) {
+          _showFeedbackSnackbar('Password updated successfully! Please log in.',
+              isError: false, isSuccess: true);
+          Navigator.pushNamedAndRemoveUntil(
+              context, CustomerLoginScreen.routeName, (route) => false);
+        }
+      } catch (e) {
+        if (mounted) {
+          _showFeedbackSnackbar(e.toString().replaceFirst('Exception: ', ''),
+              isError: true);
+          print('Reset Password Error: $e'); // Debug log
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
       }
     } else {
       HapticFeedback.heavyImpact();
@@ -79,14 +115,18 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
     }
   }
 
-  void _showFeedbackSnackbar(String message, {bool isError = false}) {
+  void _showFeedbackSnackbar(String message,
+      {bool isError = false, bool isSuccess = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
-        backgroundColor:
-            isError ? themeProvider.errorColor : themeProvider.successColor,
+        backgroundColor: isError
+            ? themeProvider.errorColor
+            : (isSuccess
+                ? themeProvider.successColor
+                : themeProvider.gas2doorPrimaryBlue),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(12),
@@ -152,11 +192,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Image.asset(
-                    'assets/images/gas2door_logo_light.png',
-                    height: 80,
-                  ),
-                  const SizedBox(height: 40),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(24),
                     child: BackdropFilter(
@@ -223,8 +258,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
                                       validator: (value) {
                                         if (value == null || value.isEmpty)
                                           return 'Please enter a new password';
-                                        if (value.length < 8)
-                                          return 'Password must be at least 8 characters';
+                                        if (value.length < 6)
+                                          return 'Password must be at least 6 characters';
                                         return null;
                                       },
                                     ),

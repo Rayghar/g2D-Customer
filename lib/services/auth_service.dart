@@ -159,6 +159,9 @@ class AuthService {
     try {
       print('AuthService: Requesting password reset for $email');
       final responseData = await _apiService.requestPasswordReset(email);
+      if (responseData['message'] == null) {
+        print('AuthService: Warning: API response missing message field.');
+      }
       return responseData['message'] as String? ??
           'Password reset request submitted. Check your email.';
     } catch (e) {
@@ -167,11 +170,36 @@ class AuthService {
     }
   }
 
+  Future<Map<String, dynamic>> verifyPasswordResetToken({
+    required String email,
+    required String token,
+  }) async {
+    try {
+      return await _apiService.verifyPasswordResetToken(
+          email: email, token: token);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<String> resetPassword(String token, String newPassword) async {
     try {
       print('AuthService: Attempting to reset password with token $token');
       final responseData = await _apiService.resetPassword(token, newPassword);
-      return responseData['message'] as String? ??
+      print(
+          'AuthService: Reset password response - $responseData'); // Log the full response
+      if (responseData['message'] == null || responseData['message'].isEmpty) {
+        print(
+            'AuthService: Warning: API response missing or empty message field.');
+        throw Exception('Password reset response invalid.');
+      }
+      if (responseData['message'] != 'Password has been reset successfully.') {
+        print(
+            'AuthService: Unexpected success message: ${responseData['message']}');
+        throw Exception('Password reset failed with unexpected response.');
+      }
+      print('AuthService: Password successfully reset for token $token');
+      return responseData['message'] as String ??
           'Password reset successfully.';
     } catch (e) {
       print('AuthService: Password reset failed: $e');

@@ -37,8 +37,8 @@ import '../models/customer_stats_model.dart'; // NEW: Import CustomerStatsModel
 
 class ApiService {
   final _storage = const FlutterSecureStorage();
-  final String baseUrl = dotenv.env['API_BASE_URL'] ??
-      'https://primejet-backend.onrender.com/api/v1';
+  final String baseUrl =
+      dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:3000/api/v1';
 
   Future<String?> _getToken() async {
     final token = await _storage.read(key: 'jwt_token');
@@ -1732,6 +1732,29 @@ class ApiService {
       print('[ApiService] Unexpected error during password reset request: $e');
       throw Exception(
           'An unexpected error occurred while requesting password reset: ${e.toString()}');
+    }
+  }
+
+  Future<Map<String, dynamic>> verifyPasswordResetToken({
+    required String email,
+    required String token,
+  }) async {
+    final String apiUrl = '$baseUrl/auth/verify-password-token';
+    final payload = {'email': email, 'token': token};
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+      final responseBody = jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        return responseBody;
+      } else {
+        throw Exception(responseBody['error'] ?? 'Token verification failed');
+      }
+    } catch (e) {
+      rethrow;
     }
   }
 
