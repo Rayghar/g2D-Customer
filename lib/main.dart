@@ -75,16 +75,14 @@ Future<void> main() async {
   // Ensure Flutter bindings are initialized.
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(); // Keep for Firestore, etc.
 
   // Initialize Sentry directly, wrapping the app launch.
   await SentryFlutter.init(
     (options) {
       options.dsn = dotenv.env['SENTRY_DSN'];
-      // Adjust this value in production to sample a subset of transactions.
       options.tracesSampleRate = 1.0;
     },
-    // The appRunner parameter ensures Sentry can capture errors during the app's lifecycle.
     appRunner: () {
       runApp(
         MultiProvider(

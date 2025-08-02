@@ -1,4 +1,6 @@
 // File: lib/screens/customer/address_list_screen.dart
+// ADVISORY: This version fixes the build error when setting a default address.
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,22 +11,18 @@ import '../../models/address_model.dart';
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/card.dart';
-import './add_edit_address_screen.dart'; // For navigation
-import '../../services/api_service.dart'; // For API calls
+import './add_edit_address_screen.dart';
+import '../../services/api_service.dart';
 
 class AddressListScreen extends StatefulWidget {
   static const String routeName = '/address_list';
   final bool isSelectingAddress;
-  // final GlobalKey<NavigatorState>? navigatorKey; // Not typically needed if pushed by another navigator
-  final String?
-      customerId; // Not directly used if ApiService handles auth token
-  final String?
-      currentAddressId; // ID of the address currently set as default or selected
+  final String? customerId;
+  final String? currentAddressId;
 
   const AddressListScreen({
     super.key,
     this.isSelectingAddress = false,
-    // this.navigatorKey,
     this.customerId,
     this.currentAddressId,
   });
@@ -39,8 +37,7 @@ class _AddressListScreenState extends State<AddressListScreen>
   List<AddressModel> _addresses = [];
   String? _errorMessage;
   late AnimationController _listAnimationController;
-  String?
-      _currentlyProcessingAddressId; // For loading state on individual items
+  String? _currentlyProcessingAddressId;
 
   final ApiService _apiService = ApiService();
 
@@ -86,20 +83,28 @@ class _AddressListScreenState extends State<AddressListScreen>
     }
   }
 
+  // =======================================================================
+  // CORRECTED: This function now correctly handles the API response.
+  // =======================================================================
   Future<void> _handleSetDefault(String addressId) async {
     if (mounted) setState(() => _currentlyProcessingAddressId = addressId);
     HapticFeedback.mediumImpact();
     try {
-      final updatedDefaultAddress =
-          await _apiService.setDefaultAddress(addressId);
+      // The API returns a Map with a message, not the full AddressModel.
+      final response = await _apiService.setDefaultAddress(addressId);
+
       if (mounted) {
-        _showFeedbackSnackbar(
-            'Address "${updatedDefaultAddress.label}" set as default.');
-        _fetchAddresses(
-            showLoading: false); // Refresh list to reflect new default
+        _showFeedbackSnackbar(response['message'] ?? 'Address set as default.');
+
+        // After success, refresh the entire list to get the updated state
+        // and find the newly defaulted address to pop back if needed.
+        await _fetchAddresses(showLoading: false);
+
         if (widget.isSelectingAddress) {
-          // If selecting, pop with the new default
-          Navigator.of(context).pop(updatedDefaultAddress);
+          final newDefaultAddress = _addresses.firstWhere(
+              (addr) => addr.id == addressId,
+              orElse: () => _addresses.first);
+          Navigator.of(context).pop(newDefaultAddress);
         }
       }
     } catch (e) {
@@ -138,13 +143,11 @@ class _AddressListScreenState extends State<AddressListScreen>
 
     if (mounted) setState(() => _currentlyProcessingAddressId = addressId);
     try {
-      // **BACKEND GAP**: Assumes DELETE /api/v1/addresses/:addressId exists
-      // If not, this will fail.
       final response = await _apiService.deleteAddress(addressId);
       if (mounted) {
         _showFeedbackSnackbar(
             response['message'] ?? 'Address deleted successfully.');
-        _fetchAddresses(showLoading: false); // Refresh list
+        _fetchAddresses(showLoading: false);
       }
     } catch (e) {
       if (mounted) {
@@ -163,12 +166,10 @@ class _AddressListScreenState extends State<AddressListScreen>
       AddEditAddressScreen.routeName,
       arguments: {
         'address': addressToEdit,
-        'customerId':
-            widget.customerId, // Pass customerId if needed by AddEditAddress
+        'customerId': widget.customerId,
       },
     );
     if (result == true && mounted) {
-      // true indicates a save was made
       _fetchAddresses(showLoading: false);
     }
   }
@@ -242,14 +243,12 @@ class _AddressListScreenState extends State<AddressListScreen>
                                       curve: Curves.easeOutCubic)));
                           if (!_listAnimationController.isAnimating &&
                               !_listAnimationController.isCompleted) {
-                            _listAnimationController
-                                .forward(); // Start animation if not already
+                            _listAnimationController.forward();
                           }
                           return SlideTransition(
                             position: animation,
                             child: FadeTransition(
-                              opacity:
-                                  _listAnimationController, // Use controller directly for fade
+                              opacity: _listAnimationController,
                               child: _AddressItemCard(
                                 address: address,
                                 themeProvider: themeProvider,
@@ -348,7 +347,6 @@ class _AddressListScreenState extends State<AddressListScreen>
   }
 }
 
-// Extracted Address Item Card Widget
 class _AddressItemCard extends StatelessWidget {
   final AddressModel address;
   final ThemeProvider themeProvider;
@@ -356,7 +354,7 @@ class _AddressItemCard extends StatelessWidget {
   final bool isProcessing;
   final VoidCallback? onSelect;
   final VoidCallback onEdit;
-  final VoidCallback? onSetDefault; // Nullable if already default
+  final VoidCallback? onSetDefault;
   final VoidCallback onDelete;
 
   const _AddressItemCard({
@@ -378,7 +376,6 @@ class _AddressItemCard extends StatelessWidget {
           ? BorderSide(color: themeProvider.gas2doorPrimaryBlue, width: 1.5)
           : null,
       child: InkWell(
-        // Make the whole card tappable if onSelect is provided
         onTap: onSelect,
         borderRadius: themeProvider.cardBorderRadius,
         child: Padding(
@@ -425,8 +422,7 @@ class _AddressItemCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Padding(
-                padding: const EdgeInsets.only(
-                    left: 38), // Align with text under icon
+                padding: const EdgeInsets.only(left: 38),
                 child: Text(
                   address.fullAddress,
                   style: GoogleFonts.inter(

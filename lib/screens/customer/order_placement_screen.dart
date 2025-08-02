@@ -655,7 +655,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   }
 
   Future<void> _handlePlaceOrder() async {
-    _logger.info('User initiated order placement.'); // Log info
+    _logger.info('User initiated order placement.');
     Sentry.addBreadcrumb(Breadcrumb(
         category: 'order_flow',
         message: 'Starting order placement process',
@@ -663,8 +663,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
     if (_selectedDeliveryAddress == null) {
       _showFeedbackSnackbar("Please select a delivery address.", isError: true);
-      _logger.warning(
-          'Order placement blocked: No delivery address selected.'); // Log warning
+      _logger.warning('Order placement blocked: No delivery address selected.');
       Sentry.addBreadcrumb(Breadcrumb(
           category: 'order_flow',
           message: 'Order placement failed: No delivery address selected',
@@ -674,8 +673,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     if (_orderItems.isEmpty) {
       _showFeedbackSnackbar("Please add at least one item to your order.",
           isError: true);
-      _logger.warning(
-          'Order placement blocked: No items in order.'); // Log warning
+      _logger.warning('Order placement blocked: No items in order.');
       Sentry.addBreadcrumb(Breadcrumb(
           category: 'order_flow',
           message: 'Order placement failed: No items in order',
@@ -686,8 +684,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
         !(_recipientFormKey.currentState?.validate() ?? false)) {
       _showFeedbackSnackbar('Please provide valid recipient details.',
           isError: true);
-      _logger.warning(
-          'Order placement blocked: Invalid recipient details.'); // Log warning
+      _logger.warning('Order placement blocked: Invalid recipient details.');
       Sentry.addBreadcrumb(Breadcrumb(
           category: 'order_flow',
           message: 'Order placement failed: Invalid recipient details',
@@ -699,8 +696,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     if (currentActiveCustomerId == null || currentActiveCustomerId.isEmpty) {
       _showFeedbackSnackbar("User not identified. Please re-login.",
           isError: true);
-      _logger.severe(
-          'Order placement blocked: User ID missing or invalid.'); // Log severe
+      _logger.severe('Order placement blocked: User ID missing or invalid.');
       Sentry.addBreadcrumb(Breadcrumb(
           category: 'order_flow',
           message: 'Order placement failed: User ID missing',
@@ -728,7 +724,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             isError: true);
         setState(() => _isPlacingOrder = false);
         _logger.warning(
-            'Order placement blocked: Self recipient phone number missing from profile.'); // Log warning
+            'Order placement blocked: Self recipient phone number missing.');
         Sentry.addBreadcrumb(Breadcrumb(
             category: 'order_flow',
             message:
@@ -753,56 +749,45 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
         'referralCode': _referralCodeController.text.trim().toUpperCase(),
     };
 
-    _logger.fine(
-        'Order payload prepared: $orderPayloadForApi'); // Log fine (debug-level)
+    _logger.fine('Order payload prepared: $orderPayloadForApi');
     Sentry.addBreadcrumb(Breadcrumb(
         category: 'order_flow',
         message: 'Order payload prepared',
-        data:
-            orderPayloadForApi, // Consider if this payload has sensitive data for production Sentry events
+        data: orderPayloadForApi,
         level: SentryLevel.debug));
 
     try {
       final PlaceOrderResponseModel response =
           await _apiService.placeOrder(orderPayloadForApi);
       if (!mounted) {
-        _logger.warning(
-            'Order placement successful, but screen unmounted before navigation.');
+        _logger.warning('Order placement successful, but screen unmounted.');
         return;
       }
 
       _logger.info(
-          'Order placed successfully. Server response: ${response.message}'); // Log info
+          'Order placed successfully. Server response: ${response.message}');
       Sentry.addBreadcrumb(Breadcrumb(
           category: 'order_flow',
           message: 'Order API call successful',
           data: {
             'order_id': response.order.id,
-            'payment_needed': response.paymentNeeded
+            'payment_needed': response.paymentNeeded,
+            'referral_code': _referralCodeController.text.trim().toUpperCase(),
           },
           level: SentryLevel.info));
 
       if (response.paymentNeeded) {
         _showFeedbackSnackbar("Order confirmed. Proceeding to payment...");
         _logger.info(
-            'Navigating to PaymentScreen for order ${response.order.id}.'); // Log info
-        Sentry.addBreadcrumb(Breadcrumb(
-            category: 'navigation',
-            message: 'Navigating to PaymentScreen',
-            data: {
-              'order_id': response.order.id,
-              'amount': response.grandTotalToPay
-            },
-            level: SentryLevel.info));
-
+            'Navigating to PaymentScreen for order ${response.order.id}.');
         Navigator.of(context)
             .pushReplacementNamed(PaymentScreen.routeName, arguments: {
           'orderId': response.order.id,
           'amount': response.grandTotalToPay,
           'customer': _currentUserProfile!,
-          'order': response.order, // This line was missing
+          'order': response.order,
           'itemDescription':
-              '${_orderItems.length} cylinder(s) - Order #${response.order.shortOrderId}'
+              '${_orderItems.length} cylinder(s) - Order #${response.order.shortOrderId}',
         });
       } else {
         _showFeedbackSnackbar(
@@ -811,29 +796,21 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                 : "Order placed successfully!",
             isSuccess: true);
         _logger.info(
-            'Navigating to OrderSummaryScreen for order ${response.order.id} (no payment needed).'); // Log info
-        Sentry.addBreadcrumb(Breadcrumb(
-            category: 'navigation',
-            message: 'Navigating to OrderSummaryScreen (no payment)',
-            data: {'order_id': response.order.id},
-            level: SentryLevel.info));
-
+            'Navigating to OrderSummaryScreen for order ${response.order.id} (no payment needed).');
         Navigator.of(context).pushNamedAndRemoveUntil(
             OrderSummaryScreen.routeName,
             ModalRoute.withName(CustomerDashboardScreen.routeName),
             arguments: {
               'orderId': response.order.id,
               'showConfirmation': true,
-              'orderPayload': response.order
+              'orderPayload': response.order,
             });
       }
     } catch (e, st) {
-      // Capture stack trace for Sentry
-      _logger.severe("Order placement failed: $e", e, st); // Log severe error
+      _logger.severe("Order placement failed: $e", e, st);
       Sentry.captureException(e,
           stackTrace: st,
           hint: Hint.withMap({
-            // Send error to Sentry with additional context
             'payload_attempted': orderPayloadForApi,
             'delivery_address_id': _selectedDeliveryAddress?.id,
             'user_id': currentActiveCustomerId,
@@ -845,7 +822,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       }
     } finally {
       if (mounted) setState(() => _isPlacingOrder = false);
-      _logger.info('Order placement process finished.'); // Log info
+      _logger.info('Order placement process finished.');
       Sentry.addBreadcrumb(Breadcrumb(
           category: 'order_flow',
           message: 'Order placement process completed',

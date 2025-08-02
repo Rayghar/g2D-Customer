@@ -1,6 +1,4 @@
 // File: lib/screens/auth/customer_register_screen.dart
-// ADVISORY: This is the complete, reimagined version with the "Depth & Clarity" theme.
-
 import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +12,7 @@ import '../../services/auth_service.dart';
 import '../../models/registration_response_model.dart';
 import './customer_login_screen.dart';
 import './otp_verification_screen.dart';
+import '../../services/agent_referral_handler.dart';
 
 class CustomerRegisterScreen extends StatefulWidget {
   static const String routeName = '/customer_register';
@@ -32,6 +31,7 @@ class _CustomerRegisterScreenState extends State<CustomerRegisterScreen>
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController =
       TextEditingController();
+  final TextEditingController _referralCodeController = TextEditingController();
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -50,6 +50,11 @@ class _CustomerRegisterScreenState extends State<CustomerRegisterScreen>
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(parent: _fadeController, curve: Curves.easeIn));
     _fadeController.forward();
+
+    final String? capturedAgentCode = AgentReferralHandler.getAgentCode();
+    if (capturedAgentCode != null) {
+      _referralCodeController.text = capturedAgentCode;
+    }
   }
 
   @override
@@ -59,6 +64,7 @@ class _CustomerRegisterScreenState extends State<CustomerRegisterScreen>
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _referralCodeController.dispose();
     _fadeController.dispose();
     super.dispose();
   }
@@ -93,7 +99,10 @@ class _CustomerRegisterScreenState extends State<CustomerRegisterScreen>
         email: _emailController.text.trim(),
         phone: _phoneController.text.trim(),
         password: _passwordController.text,
+        referralCode: _referralCodeController.text.trim(),
       );
+
+      AgentReferralHandler.clearAgentCode();
 
       if (!mounted) return;
       _showFeedbackSnackbar(response.message ??
@@ -326,10 +335,7 @@ class _CustomerRegisterScreenState extends State<CustomerRegisterScreen>
                                       style: GoogleFonts.inter(
                                           color:
                                               themeProvider.textOnDarkGradient),
-                                      textInputAction: TextInputAction.done,
-                                      onFieldSubmitted: _isLoading
-                                          ? null
-                                          : (_) => _handleRegister(),
+                                      textInputAction: TextInputAction.next,
                                       validator: (value) {
                                         if (value == null || value.isEmpty)
                                           return 'Please confirm password';
@@ -337,6 +343,23 @@ class _CustomerRegisterScreenState extends State<CustomerRegisterScreen>
                                           return 'Passwords do not match';
                                         return null;
                                       },
+                                    ),
+                                    const SizedBox(height: 18),
+                                    TextFormField(
+                                      controller: _referralCodeController,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Referral Code (Optional)',
+                                          prefixIcon: Icon(
+                                              Icons.card_giftcard_outlined)),
+                                      style: GoogleFonts.inter(
+                                          color:
+                                              themeProvider.textOnDarkGradient),
+                                      textCapitalization:
+                                          TextCapitalization.characters,
+                                      textInputAction: TextInputAction.done,
+                                      onFieldSubmitted: _isLoading
+                                          ? null
+                                          : (_) => _handleRegister(),
                                     ),
                                   ],
                                 ),

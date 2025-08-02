@@ -37,8 +37,8 @@ import '../models/customer_stats_model.dart'; // NEW: Import CustomerStatsModel
 
 class ApiService {
   final _storage = const FlutterSecureStorage();
-  final String baseUrl =
-      dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:3000/api/v1';
+  final String baseUrl = dotenv.env['API_BASE_URL'] ??
+      'https://primejet-backend.onrender.com/api/v1';
 
   Future<String?> _getToken() async {
     final token = await _storage.read(key: 'jwt_token');
@@ -998,32 +998,40 @@ class ApiService {
     required String email,
     required String phone,
     required String password,
+    String? referralCode, // Accepts the optional referral code
   }) async {
     final String apiUrl = '$baseUrl/auth/register/customer';
     print(
         '[ApiService] Attempting customer registration to $apiUrl for email: $email');
-    final payload = {
+
+    // Build the request body dynamically.
+    final Map<String, String> body = {
       'name': name,
       'email': email,
       'phone': phone,
-      'password': '***'
-    }; // Mask password
-    print('[ApiService] registerCustomer Payload: $payload');
+      'password': password,
+    };
+
+    // Only add the referralCode to the body if it's not null and not empty.
+    if (referralCode != null && referralCode.isNotEmpty) {
+      body['referralCode'] = referralCode;
+    }
+
+    // Log the payload being sent (masking password for security).
+    final logPayload = Map<String, String>.from(body);
+    logPayload['password'] = '***';
+    print('[ApiService] registerCustomer Payload: $logPayload');
 
     try {
       final response = await http.post(
         Uri.parse(apiUrl),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': name,
-          'email': email,
-          'phone': phone,
-          'password': password,
-        }),
+        body: jsonEncode(body), // Send the dynamically built body.
       );
       final responseBody = jsonDecode(response.body);
       print(
           '[ApiService] registerCustomer Response Status: ${response.statusCode}, Body: $responseBody');
+
       if (response.statusCode == 201) {
         print('[ApiService] Customer registration successful.');
         return responseBody;
@@ -2379,10 +2387,9 @@ class ApiService {
     }
   }
 
-  Future<AddressModel> setDefaultAddress(String addressId) async {
+  Future<Map<String, dynamic>> setDefaultAddress(String addressId) async {
     final token = await _getToken();
     if (token == null) {
-      print('[ApiService] setDefaultAddress: Not authenticated.');
       throw Exception('Not authenticated.');
     }
     final String apiUrl = '$baseUrl/addresses/$addressId/default';
@@ -2401,12 +2408,11 @@ class ApiService {
           '[ApiService] setDefaultAddress Response Status: ${response.statusCode}, Body: $responseBody');
       if (response.statusCode == 200) {
         print('[ApiService] Set default address successful.');
-        return AddressModel.fromJson(
-            responseBody['address'] as Map<String, dynamic>);
+        // It returns a map with a 'message', so we return that directly.
+        return responseBody as Map<String, dynamic>;
       } else {
-        final errorMessage = responseBody['error'] ??
-            responseBody['message'] ??
-            'Failed to set default address: ${response.statusCode}';
+        final errorMessage =
+            responseBody['error'] ?? 'Failed to set default address';
         throw Exception(errorMessage);
       }
     } catch (e) {

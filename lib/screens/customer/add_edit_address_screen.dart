@@ -1,4 +1,5 @@
 // File: lib/screens/customer/add_edit_address_screen.dart
+// ADVISORY: This version includes the new address labels.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,17 +9,18 @@ import 'package:google_places_flutter/google_places_flutter.dart';
 import 'package:google_places_flutter/model/prediction.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../widgets/input.dart';
+import '../../widgets/card.dart';
 import '../../models/address_model.dart';
 import '../../services/api_service.dart';
 
-// Custom AddressComponent class to handle address components
 class AddressComponent {
   final String longName;
   final List<String> types;
-
   AddressComponent({required this.longName, required this.types});
 }
 
@@ -37,7 +39,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
   bool _isEditMode = false;
 
   late TextEditingController _labelController;
-  late TextEditingController _fullAddressController;
   late TextEditingController _streetController;
   late TextEditingController _apartmentOrSuiteController;
   late TextEditingController _cityController;
@@ -49,9 +50,18 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
   double? _latitude;
   double? _longitude;
 
+  String? _selectedLabel;
+  // MODIFIED: Added two new common labels as requested.
+  final List<String> _predefinedLabels = [
+    'Home',
+    'Office',
+    'Work',
+    "Parents'",
+    'Other'
+  ];
+
   final ApiService _apiService = ApiService();
-  // IMPORTANT: Replace with your actual Google Maps API key
-  final String _googleApiKey = "AIzaSyBZ3FRunKc6w3WKoYjmOKaEN9f6eo-Zap4";
+  String? _googleApiKey;
 
   @override
   void initState() {
@@ -59,8 +69,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
     _isEditMode = widget.address != null;
     _labelController =
         TextEditingController(text: _isEditMode ? widget.address!.label : '');
-    _fullAddressController = TextEditingController(
-        text: _isEditMode ? widget.address!.fullAddress : '');
     _streetController =
         TextEditingController(text: _isEditMode ? widget.address!.street : '');
     _apartmentOrSuiteController = TextEditingController(
@@ -78,12 +86,22 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
     _isDefaultAddress = _isEditMode ? widget.address!.isDefault : false;
     _latitude = _isEditMode ? widget.address!.latitude : null;
     _longitude = _isEditMode ? widget.address!.longitude : null;
+
+    _googleApiKey = dotenv.env['Maps_API_KEY'];
+
+    if (_isEditMode) {
+      if (_predefinedLabels.contains(widget.address!.label)) {
+        _selectedLabel = widget.address!.label;
+      } else {
+        _selectedLabel = 'Other';
+        _labelController.text = widget.address!.label;
+      }
+    }
   }
 
   @override
   void dispose() {
     _labelController.dispose();
-    _fullAddressController.dispose();
     _streetController.dispose();
     _apartmentOrSuiteController.dispose();
     _cityController.dispose();
@@ -94,68 +112,51 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
     super.dispose();
   }
 
+  String _safeGetComponent(
+      List<AddressComponent> components, List<String> types) {
+    AddressComponent? component = components.firstWhere(
+        (c) => c.types.any((type) => types.contains(type)),
+        orElse: () => AddressComponent(longName: '', types: []));
+    return component.longName;
+  }
+
   Future<void> _populateAddressFields(Prediction prediction) async {
+    if (_googleApiKey == null) {
+      _showFeedbackSnackbar('Google Maps API key not found.', isError: true);
+      return;
+    }
     if (prediction.placeId == null) {
       _showFeedbackSnackbar('Unable to fetch place details.', isError: true);
       return;
     }
-
     final url =
         'https://maps.googleapis.com/maps/api/place/details/json?place_id=${prediction.placeId}&key=$_googleApiKey';
-
     try {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode != 200) {
         throw Exception('Failed to fetch place details from Google API.');
       }
-
       final data = json.decode(response.body);
       final result = data['result'];
       if (result == null) {
         throw Exception('No place details found in API response.');
       }
-
       List<AddressComponent> components = (result['address_components'] as List)
           .map((c) => AddressComponent(
-                longName: c['long_name'] ?? '',
-                types: List<String>.from(c['types'] ?? []),
-              ))
+              longName: c['long_name'] ?? '',
+              types: List<String>.from(c['types'] ?? [])))
           .toList();
-
-      AddressComponent emptyComponent() =>
-          AddressComponent(longName: '', types: []);
-
-      String streetNumber = components
-          .firstWhere((c) => c.types.contains("street_number"),
-              orElse: emptyComponent)
-          .longName;
-      String route = components
-          .firstWhere((c) => c.types.contains("route"), orElse: emptyComponent)
-          .longName;
-      String city = components
-          .firstWhere(
-              (c) =>
-                  c.types.contains("locality") ||
-                  c.types.contains("administrative_area_level_2"),
-              orElse: emptyComponent)
-          .longName;
-      String state = components
-          .firstWhere((c) => c.types.contains("administrative_area_level_1"),
-              orElse: emptyComponent)
-          .longName;
-      String country = components
-          .firstWhere((c) => c.types.contains("country"),
-              orElse: emptyComponent)
-          .longName;
-      String postalCode = components
-          .firstWhere((c) => c.types.contains("postal_code"),
-              orElse: emptyComponent)
-          .longName;
+      String streetNumber = _safeGetComponent(components, ["street_number"]);
+      String route = _safeGetComponent(components, ["route"]);
+      String city = _safeGetComponent(
+          components, ["locality", "administrative_area_level_2"]);
+      String state =
+          _safeGetComponent(components, ["administrative_area_level_1"]);
+      String country = _safeGetComponent(components, ["country"]);
+      String postalCode = _safeGetComponent(components, ["postal_code"]);
 
       setState(() {
-        _fullAddressController.text =
-            result['formatted_address'] ?? prediction.description ?? '';
-        _streetController.text = "$streetNumber $route".trim();
+        _streetController.text = '$streetNumber $route'.trim();
         _cityController.text = city;
         _stateController.text = state;
         _countryController.text = country;
@@ -175,26 +176,33 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
       return;
     }
     setState(() => _isLoading = true);
-    final addressData = {
-      'label': _labelController.text.trim(),
-      'fullAddress': _fullAddressController.text.trim(),
-      'street': _streetController.text.trim(),
-      'apartmentOrSuite': _apartmentOrSuiteController.text.trim(),
-      'city': _cityController.text.trim(),
-      'state': _stateController.text.trim(),
-      'postalCode': _postalCodeController.text.trim(),
-      'country': _countryController.text.trim(),
-      'isDefault': _isDefaultAddress,
-      'deliveryInstructions': _deliveryInstructionsController.text.trim(),
-      'latitude': _latitude,
-      'longitude': _longitude,
-    };
+    String finalLabel = _selectedLabel == 'Other'
+        ? _labelController.text.trim()
+        : _selectedLabel ?? 'Home';
+
+    final addressData = AddressModel(
+      id: widget.address?.id ?? '',
+      label: finalLabel,
+      fullAddress:
+          '${_streetController.text.trim()}, ${_cityController.text.trim()}, ${_stateController.text.trim()}',
+      street: _streetController.text.trim(),
+      apartmentOrSuite: _apartmentOrSuiteController.text.trim(),
+      city: _cityController.text.trim(),
+      state: _stateController.text.trim(),
+      postalCode: _postalCodeController.text.trim(),
+      country: _countryController.text.trim(),
+      isDefault: _isDefaultAddress,
+      deliveryInstructions: _deliveryInstructionsController.text.trim(),
+      latitude: _latitude,
+      longitude: _longitude,
+    );
 
     try {
       if (_isEditMode) {
-        await _apiService.updateAddress(widget.address!.id, addressData);
+        await _apiService.updateAddress(
+            widget.address!.id, addressData.toJson());
       } else {
-        await _apiService.createAddress(addressData);
+        await _apiService.createAddress(addressData.toJson());
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -226,129 +234,218 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
             style: GoogleFonts.inter(
                 color: themeProvider.primaryText, fontWeight: FontWeight.w600)),
         backgroundColor: themeProvider.cardBackground,
-        actions: [
-          if (!_isLoading)
-            TextButton(
-                onPressed: _handleSaveAddress,
-                child: Text(_isEditMode ? 'SAVE' : 'ADD',
-                    style: GoogleFonts.inter(
-                        fontWeight: FontWeight.bold,
-                        color: themeProvider.gas2doorPrimaryBlue)))
-          else
-            const Padding(
-                padding: EdgeInsets.all(16),
-                child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))),
-        ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Form(
-          key: _formKey,
+      body: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CustomInput(
-                  controller: _labelController,
-                  labelText: 'Address Label*',
-                  hintText: 'e.g., Home, Office',
-                  validator: (v) => v!.isEmpty ? 'Label is required' : null,
-                  prefixIcon: Icons.label_outline_rounded),
-              const SizedBox(height: 18),
+              _buildLabelCard(themeProvider),
+              const SizedBox(height: 16),
+              _buildLocationCard(themeProvider),
+              const SizedBox(height: 16),
+              _buildDetailsCard(themeProvider),
+              const SizedBox(height: 16),
+              _buildOptionsCard(themeProvider),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        decoration:
+            BoxDecoration(color: themeProvider.cardBackground, boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, -5))
+        ]),
+        child: CustomButton(
+          text: _isLoading ? 'Saving...' : 'Save Address',
+          onPressed: _isLoading ? null : _handleSaveAddress,
+          color: themeProvider.gas2doorPrimaryBlue,
+          height: 52,
+          icon: _isLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
+              : const Icon(Icons.check_circle_outline, color: Colors.white),
+        ),
+      ),
+    );
+  }
 
-              // ========================== FIX IS HERE ==========================
-              GooglePlaceAutoCompleteTextField(
-                textEditingController: _fullAddressController,
-                googleAPIKey: _googleApiKey,
-                // The itemClick callback is used to get the selected Prediction
-                itemClick: (Prediction prediction) {
-                  _fullAddressController.text = prediction.description ?? '';
-                  _fullAddressController.selection = TextSelection.fromPosition(
-                      TextPosition(
-                          offset: prediction.description?.length ?? 0));
-                  // Manually fetch details after a selection is made
-                  _populateAddressFields(prediction);
-                },
-                // Styling parameters to make the dropdown visible and match your theme
-                textStyle: GoogleFonts.inter(color: themeProvider.primaryText),
-                containerHorizontalPadding: 10,
-                inputDecoration: InputDecoration(
-                  labelText: "Search Address*",
-                  hintText: "Start typing your address...",
-                  prefixIcon:
-                      Icon(Icons.search, color: themeProvider.secondaryText),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                  focusedBorder: OutlineInputBorder(
-                      borderSide:
-                          BorderSide(color: themeProvider.gas2doorPrimaryBlue)),
-                ),
-                countries: ["ng"], // Bias results to Nigeria
+  Widget _buildLabelCard(ThemeProvider themeProvider) {
+    return CustomCard(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Address Label*',
+                style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: themeProvider.primaryText)),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8.0,
+              children: _predefinedLabels.map((label) {
+                final isSelected = _selectedLabel == label;
+                return ChoiceChip(
+                  label: Text(label),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) _selectedLabel = label;
+                    });
+                  },
+                  selectedColor: themeProvider.gas2doorPrimaryBlue,
+                  labelStyle: GoogleFonts.inter(
+                      color: isSelected
+                          ? Colors.white
+                          : themeProvider.primaryText),
+                  shape: StadiumBorder(
+                      side: BorderSide(
+                          color: isSelected
+                              ? Colors.transparent
+                              : themeProvider.tertiaryText.withOpacity(0.3))),
+                );
+              }).toList(),
+            ),
+            if (_selectedLabel == 'Other') ...[
+              const SizedBox(height: 16),
+              CustomInput(
+                controller: _labelController,
+                labelText: 'Custom Label*',
+                hintText: 'e.g., Grandma\'s House',
+                validator: (v) =>
+                    v!.isEmpty ? 'Custom label is required' : null,
+                prefixIcon: Icons.label_outline_rounded,
               ),
-              // =================================================================
+            ]
+          ],
+        ),
+      ),
+    );
+  }
 
-              const SizedBox(height: 24),
-              Text("ADDRESS DETAILS",
-                  style: GoogleFonts.inter(
-                      color: themeProvider.secondaryText,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12)),
-              const Divider(height: 20),
-              CustomInput(
-                  controller: _streetController,
-                  labelText: 'Street Address*',
-                  validator: (v) => v!.isEmpty ? 'Street is required' : null,
-                  prefixIcon: Icons.signpost_outlined),
-              const SizedBox(height: 18),
-              CustomInput(
-                  controller: _apartmentOrSuiteController,
-                  labelText: 'Apt, Suite, etc. (Optional)',
-                  prefixIcon: Icons.door_front_door_outlined),
-              const SizedBox(height: 18),
-              Row(children: [
-                Expanded(
-                    child: CustomInput(
-                        controller: _cityController,
-                        labelText: 'City*',
-                        validator: (v) =>
-                            v!.isEmpty ? 'City is required' : null,
-                        prefixIcon: Icons.location_city_rounded)),
-                const SizedBox(width: 16),
-                Expanded(
-                    child: CustomInput(
-                        controller: _stateController,
-                        labelText: 'State*',
-                        validator: (v) =>
-                            v!.isEmpty ? 'State is required' : null,
-                        prefixIcon: Icons.business_rounded)),
-              ]),
-              const SizedBox(height: 18),
-              Row(children: [
-                Expanded(
-                    child: CustomInput(
-                        controller: _postalCodeController,
-                        labelText: 'Postal Code (Optional)',
-                        prefixIcon: Icons.markunread_mailbox_outlined)),
-                const SizedBox(width: 16),
-                Expanded(
-                    child: CustomInput(
-                        controller: _countryController,
-                        labelText: 'Country*',
-                        validator: (v) =>
-                            v!.isEmpty ? 'Country is required' : null,
-                        prefixIcon: Icons.public_outlined)),
-              ]),
-              const SizedBox(height: 18),
-              CustomInput(
-                  controller: _deliveryInstructionsController,
-                  labelText: 'Delivery Instructions (Optional)',
-                  maxLines: 2,
-                  prefixIcon: Icons.notes_outlined),
-              const SizedBox(height: 24),
-              SwitchListTile.adaptive(
-                title: Text('Set as default delivery address',
+  Widget _buildLocationCard(ThemeProvider themeProvider) {
+    return CustomCard(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Location Details',
+                style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: themeProvider.primaryText)),
+            const SizedBox(height: 16),
+            GooglePlaceAutoCompleteTextField(
+              textEditingController: _streetController,
+              googleAPIKey: _googleApiKey ?? '',
+              inputDecoration: InputDecoration(
+                labelText: "Search Street Address*",
+                prefixIcon:
+                    Icon(Icons.search, color: themeProvider.secondaryText),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                        color: themeProvider.gas2doorPrimaryBlue, width: 2)),
+              ),
+              itemClick: (Prediction prediction) {
+                _streetController.text = prediction.description ?? '';
+                _streetController.selection = TextSelection.fromPosition(
+                    TextPosition(offset: prediction.description?.length ?? 0));
+                _populateAddressFields(prediction);
+              },
+              textStyle: GoogleFonts.inter(color: themeProvider.primaryText),
+              countries: const ["ng"],
+            ),
+            const SizedBox(height: 16),
+            CustomInput(
+              controller: _apartmentOrSuiteController,
+              labelText: 'Apt, Suite, etc. (Optional)',
+              prefixIcon: Icons.door_front_door_outlined,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailsCard(ThemeProvider themeProvider) {
+    return CustomCard(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Row(children: [
+              Expanded(
+                  child: CustomInput(
+                      controller: _cityController,
+                      labelText: 'City*',
+                      validator: (v) => v!.isEmpty ? 'City required' : null,
+                      prefixIcon: Icons.location_city_rounded)),
+              const SizedBox(width: 16),
+              Expanded(
+                  child: CustomInput(
+                      controller: _stateController,
+                      labelText: 'State*',
+                      validator: (v) => v!.isEmpty ? 'State required' : null,
+                      prefixIcon: Icons.business_rounded)),
+            ]),
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(
+                  child: CustomInput(
+                      controller: _postalCodeController,
+                      labelText: 'Postal Code',
+                      prefixIcon: Icons.markunread_mailbox_outlined)),
+              const SizedBox(width: 16),
+              Expanded(
+                  child: CustomInput(
+                      controller: _countryController,
+                      labelText: 'Country*',
+                      validator: (v) => v!.isEmpty ? 'Country required' : null,
+                      prefixIcon: Icons.public_outlined)),
+            ]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptionsCard(ThemeProvider themeProvider) {
+    return CustomCard(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Options',
+                style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: themeProvider.primaryText)),
+            const SizedBox(height: 8),
+            CustomInput(
+              controller: _deliveryInstructionsController,
+              labelText: 'Delivery Instructions (Optional)',
+              hintText: 'e.g., Leave at the front desk',
+              maxLines: 3,
+              prefixIcon: Icons.notes_outlined,
+            ),
+            SwitchListTile.adaptive(
+                title: Text('Set as default address',
                     style: GoogleFonts.inter(
                         color: themeProvider.primaryText,
                         fontWeight: FontWeight.w500)),
@@ -360,9 +457,8 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
                     color: _isDefaultAddress
                         ? themeProvider.gas2doorTeal
                         : themeProvider.secondaryText),
-              ),
-            ],
-          ),
+                contentPadding: const EdgeInsets.only(left: 4, top: 8)),
+          ],
         ),
       ),
     );

@@ -23,6 +23,7 @@ import './order_placement_screen.dart';
 import './order_details_screen.dart';
 import './order_summary_screen.dart';
 import './promotion_details_screen.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // NEW: Import Firebase Messaging
 
 final _logger = Logger('HomeScreen');
 
@@ -81,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final PageController _promotionPageController = PageController();
   int _currentPromotionPage = 0;
   Timer? _promotionTimer;
-  Timer? _activeOrderPollingTimer; // NEW: Timer for active order polling
+  //Timer? _activeOrderPollingTimer; // NEW: Timer for active order polling
 
   app_order.Order? _activeOrder;
   List<app_order.Order> _recentOrders = [];
@@ -118,6 +119,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     (0.7 + (index * 0.08)).clamp(0.0, 1.0),
                     curve: Curves.easeOutCubic))));
 
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      _logger.info(
+          'Foreground FCM message received on HomeScreen: ${message.data}');
+      // Check if the notification is an order update
+      if (message.data['type'] == 'ORDER_STATUS_UPDATE' && mounted) {
+        // Refresh all data to get the latest order status
+        _loadAllHomeScreenData(isRefresh: true);
+      }
+    });
+
     if (widget.customerIdFromShell?.isNotEmpty ?? false) {
       _loadAllHomeScreenData();
     } else {
@@ -150,8 +161,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _entryAnimController.dispose();
     _promotionPageController.dispose();
     _promotionTimer?.cancel();
-    _activeOrderPollingTimer
-        ?.cancel(); // NEW: Cancel active order polling timer
+    //_activeOrderPollingTimer
+    //?.cancel(); // NEW: Cancel active order polling timer
     _logger.info('HomeScreen disposed.');
     Sentry.addBreadcrumb(Breadcrumb(
         category: 'lifecycle',
@@ -329,7 +340,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() => _isLoading = false);
     _entryAnimController.forward();
     _startPromotionAutoScroll();
-    _startActiveOrderPolling(); // NEW: Start active order polling
+    //_startActiveOrderPolling(); // NEW: Start active order polling
     _logger.info('API response processing complete. UI updated.');
   }
 
@@ -361,7 +372,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // NEW: Method to start polling for active order status
-  void _startActiveOrderPolling() {
+  /*void _startActiveOrderPolling() {
     _activeOrderPollingTimer?.cancel(); // Cancel any existing timer
     if (_activeOrder == null ||
             _activeOrder!.status ==
@@ -411,7 +422,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         // Continue polling on error, but perhaps with a backoff strategy in a real app
       }
     });
-  }
+  }*/
 
   void _showFeedbackSnackbar(String message, {bool isError = false}) {
     if (!mounted) return;

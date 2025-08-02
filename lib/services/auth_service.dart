@@ -75,16 +75,23 @@ class AuthService {
     }
   }
 
+  // ============================= MODIFIED =============================
   Future<RegistrationResponseModel> registerCustomer({
     required String name,
     required String email,
     required String phone,
     required String password,
+    String? referralCode, // FIX: Added the optional referralCode parameter
   }) async {
     try {
       print('AuthService: Attempting customer registration for $email');
       final responseData = await _apiService.registerCustomer(
-          name: name, email: email, phone: phone, password: password);
+        name: name,
+        email: email,
+        phone: phone,
+        password: password,
+        referralCode: referralCode, // FIX: Pass the code to the ApiService
+      );
       return RegistrationResponseModel.fromJson(responseData);
     } catch (e) {
       print('AuthService: Customer registration failed: ${e.toString()}');
