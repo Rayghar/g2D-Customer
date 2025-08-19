@@ -203,24 +203,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       const activeOrderStatuses =
           'Order Placed,Processing,Driver Assigned,Out for delivery,Delivered';
 
+      // << MODIFIED: The API call is updated to the new stats method >>
       final results = await Future.wait([
         _apiService.getActivePromotions(),
         _apiService.getCustomerOrders(
             limit: 1, status: activeOrderStatuses, sortBy: '-orderDate'),
         _apiService.getCustomerOrders(limit: 3, sortBy: '-orderDate'),
-        _apiService.getCustomerConsumptionData(
-            widget.customerIdFromShell!), // NEW: Fetch customer stats
+        _apiService.getCustomerStats(
+            widget.customerIdFromShell!), // Use the new method
       ], eagerError: false);
-      if (!mounted) {
-        _logger.warning('Home screen data loaded, but widget was unmounted.');
-        return;
-      }
+
+      if (!mounted) return;
+
       _processApiResponse(results);
-      _logger.info('Home screen data loaded successfully.');
-      Sentry.addBreadcrumb(Breadcrumb(
-          category: 'data_loading',
-          message: 'All home screen data loaded and processed',
-          level: SentryLevel.info));
     } catch (e, st) {
       _logger.severe("Failed to load home screen data: $e", e, st);
       Sentry.captureException(e,

@@ -1,10 +1,16 @@
 // File: lib/models/system_config_model.dart
+// << UPDATED FILE WITH LOGGING >>
+
+import 'dart:convert';
+import 'package:logging/logging.dart';
+
+final _logger = Logger('SystemConfigModel');
 
 class CylinderSetting {
   final String id;
-  final String name; // Maps to backend 'name', frontend 'sizeLabel'
-  final double price; // Price in smallest currency unit
-  final double? weightKg; // If backend provides this
+  final String name;
+  final double price;
+  final double? weightKg;
   final bool? isActive;
 
   CylinderSetting({
@@ -16,21 +22,26 @@ class CylinderSetting {
   });
 
   factory CylinderSetting.fromJson(Map<String, dynamic> json) {
-    return CylinderSetting(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '', // Backend sends 'name'
-      price: (json['price'] as num?)?.toDouble() ?? 0.0,
-      weightKg: (json['weightKg'] as num?)?.toDouble(),
-      isActive: json['isActive'] as bool?,
-    );
+    try {
+      return CylinderSetting(
+        id: json['id'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        price: (json['price'] as num?)?.toDouble() ?? 0.0,
+        weightKg: (json['weightKg'] as num?)?.toDouble(),
+        isActive: json['isActive'] as bool?,
+      );
+    } catch (e, st) {
+      _logger.severe('Error parsing CylinderSetting from JSON: $e', e, st);
+      rethrow;
+    }
   }
 }
 
 class FeeSettings {
   final double vatPercentage;
   final double serviceFeePercentage;
-  final double baseDeliveryFee; // In smallest currency unit
-  final double expressDeliverySurcharge; // In smallest currency unit
+  final double baseDeliveryFee;
+  final double expressDeliverySurcharge;
 
   FeeSettings({
     required this.vatPercentage,
@@ -41,43 +52,132 @@ class FeeSettings {
 
   factory FeeSettings.fromJson(Map<String, dynamic>? json) {
     if (json == null) {
-      // Provide safe defaults if backend doesn't send this, though it should
       return FeeSettings(
           vatPercentage: 0.0,
           serviceFeePercentage: 0.0,
           baseDeliveryFee: 0.0,
           expressDeliverySurcharge: 0.0);
     }
-    return FeeSettings(
-      vatPercentage: (json['vatPercentage'] as num?)?.toDouble() ?? 0.0,
-      serviceFeePercentage:
-          (json['serviceFeePercentage'] as num?)?.toDouble() ?? 0.0,
-      baseDeliveryFee: (json['baseDeliveryFee'] as num?)?.toDouble() ?? 0.0,
-      expressDeliverySurcharge:
-          (json['expressDeliverySurcharge'] as num?)?.toDouble() ?? 0.0,
-    );
+    try {
+      return FeeSettings(
+        vatPercentage: (json['vatPercentage'] as num?)?.toDouble() ?? 0.0,
+        serviceFeePercentage:
+            (json['serviceFeePercentage'] as num?)?.toDouble() ?? 0.0,
+        baseDeliveryFee: (json['baseDeliveryFee'] as num?)?.toDouble() ?? 0.0,
+        expressDeliverySurcharge:
+            (json['expressDeliverySurcharge'] as num?)?.toDouble() ?? 0.0,
+      );
+    } catch (e, st) {
+      _logger.severe('Error parsing FeeSettings from JSON: $e', e, st);
+      rethrow;
+    }
+  }
+}
+
+class ServiceZone {
+  final String id;
+  final String outOfZoneMessage;
+  final List<List<double>> coordinates;
+
+  ServiceZone(
+      {required this.id,
+      required this.coordinates,
+      required this.outOfZoneMessage});
+
+  factory ServiceZone.fromJson(Map<String, dynamic> json) {
+    _logger.fine('Starting to parse ServiceZone JSON for ID: ${json['id']}');
+    try {
+      // The coordinates field in GeoJSON Polygon is [[[lng, lat], [lng, lat], ...]]
+      final List<dynamic> polygons =
+          json['area']?['coordinates'] as List? ?? [];
+      List<List<double>> finalRing = [];
+
+      if (polygons.isNotEmpty) {
+        final List<dynamic> rings = polygons.first as List? ?? [];
+        if (rings.isNotEmpty) {
+          final List<dynamic> points = rings as List? ?? [];
+          finalRing = points.map((point) {
+            final pointList = point as List? ?? [];
+            if (pointList.length >= 2) {
+              // Handle both plain numbers and the MongoDB {$numberDouble: "..."} format
+              final lng = pointList[0] is Map
+                  ? double.tryParse(
+                          pointList[0]['\$numberDouble'].toString()) ??
+                      0.0
+                  : (pointList[0] as num).toDouble();
+              final lat = pointList[1] is Map
+                  ? double.tryParse(
+                          pointList[1]['\$numberDouble'].toString()) ??
+                      0.0
+                  : (pointList[1] as num).toDouble();
+              return [lng, lat];
+            }
+            return [0.0, 0.0];
+          }).toList();
+        }
+      }
+      _logger.fine('Successfully parsed coordinates for zone ${json['id']}.');
+
+      return ServiceZone(
+        id: json['id'] as String? ?? '',
+        outOfZoneMessage: json['outOfZoneMessage'] as String? ??
+            'Default out of zone message.',
+        coordinates: finalRing,
+      );
+    } catch (e, st) {
+      _logger.severe(
+          'Error parsing ServiceZone from JSON for ID: ${json['id']}: $e',
+          e,
+          st);
+      return ServiceZone(
+          id: json['id'] as String? ?? '',
+          coordinates: [],
+          outOfZoneMessage: 'Parsing failed.');
+    }
   }
 }
 
 class SystemConfigModel {
   final List<CylinderSetting> cylinderSettings;
   final FeeSettings feeSettings;
-  // Add other config sections like referralProgram if needed by customer frontend
+  final List<ServiceZone> activeZones;
 
   SystemConfigModel({
     required this.cylinderSettings,
     required this.feeSettings,
+    required this.activeZones,
   });
 
   factory SystemConfigModel.fromJson(Map<String, dynamic> json) {
-    return SystemConfigModel(
-      cylinderSettings: (json['cylinderSettings'] as List<dynamic>?)
-              ?.map((item) =>
-                  CylinderSetting.fromJson(item as Map<String, dynamic>))
-              .toList() ??
-          [],
-      feeSettings:
-          FeeSettings.fromJson(json['feeSettings'] as Map<String, dynamic>?),
-    );
+    _logger.info('Starting to parse SystemConfigModel from API response.');
+    try {
+      final List<dynamic> cylinderSettingsJson =
+          json['cylinderSettings'] as List<dynamic>? ?? [];
+      final List<CylinderSetting> cylinderSettings = cylinderSettingsJson
+          .map((item) => CylinderSetting.fromJson(item as Map<String, dynamic>))
+          .toList();
+      _logger.fine('Parsed ${cylinderSettings.length} cylinder settings.');
+
+      final Map<String, dynamic>? feeSettingsJson =
+          json['feeSettings'] as Map<String, dynamic>?;
+      final FeeSettings feeSettings = FeeSettings.fromJson(feeSettingsJson);
+      _logger.fine('Parsed fee settings.');
+
+      final List<dynamic> activeZonesJson =
+          json['activeZones'] as List<dynamic>? ?? [];
+      final List<ServiceZone> activeZones = activeZonesJson
+          .map((item) => ServiceZone.fromJson(item as Map<String, dynamic>))
+          .toList();
+      _logger.info('Parsed ${activeZones.length} active service zones.');
+
+      return SystemConfigModel(
+        cylinderSettings: cylinderSettings,
+        feeSettings: feeSettings,
+        activeZones: activeZones,
+      );
+    } catch (e, st) {
+      _logger.severe('Error parsing SystemConfigModel from JSON: $e', e, st);
+      rethrow;
+    }
   }
 }

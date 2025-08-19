@@ -503,8 +503,36 @@ class ApiService {
     }
   }
 
+  Future<CustomerStatsModel> getCustomerStats(String customerId) async {
+    final token = await _getToken();
+    if (token == null) {
+      throw Exception('Not authenticated.');
+    }
+    final String apiUrl = '$baseUrl/orders/me/stats'; // Correct, new endpoint
+
+    try {
+      final response = await http.get(
+        Uri.parse(apiUrl),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 200) {
+        final responseBody = jsonDecode(response.body);
+        // The backend now returns a complete object, so we use fromJson directly
+        return CustomerStatsModel.fromJson(responseBody);
+      } else {
+        final responseBody = jsonDecode(response.body);
+        throw Exception(
+            responseBody['error'] ?? 'Failed to get customer stats');
+      }
+    } catch (e) {
+      print('[ApiService] Error fetching customer stats: ${e.toString()}');
+      throw Exception('Failed to process customer stats.');
+    }
+  }
+
   // FIX: Updated return type to CustomerStatsModel
-  Future<CustomerStatsModel> getCustomerConsumptionData(
+  /*Future<CustomerStatsModel> getCustomerConsumptionData(
       String customerId) async {
     final token = await _getToken();
     if (token == null) {
@@ -539,7 +567,7 @@ class ApiService {
       print('[ApiService] Error fetching consumption data: ${e.toString()}');
       rethrow;
     }
-  }
+  }*/
 
   Future<String> initiateChatSession(
       {required String orderId, required String recipientId}) async {

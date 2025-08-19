@@ -23,6 +23,7 @@ class User {
   final String? gatewayCustomerId; // Added for payment gateway customer ID
   final double? latitude; // Added for location (if stored with user)
   final double? longitude; // Added for location (if stored with user)
+  final bool isFirstTimeCustomer; // << NEW >>
 
   User({
     required this.id,
@@ -43,6 +44,7 @@ class User {
     this.gatewayCustomerId, // Initialize here
     this.latitude, // Initialize here
     this.longitude, // Initialize here
+    this.isFirstTimeCustomer = false, // << NEW >>
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -72,6 +74,8 @@ class User {
           json['gatewayCustomerId'] as String?, // Parse new field
       latitude: (json['latitude'] as num?)?.toDouble(), // Parse new field
       longitude: (json['longitude'] as num?)?.toDouble(), // Parse new field
+      isFirstTimeCustomer:
+          json['isFirstTimeCustomer'] as bool? ?? false, // << NEW >>
     );
   }
 
@@ -89,6 +93,8 @@ class User {
     NotificationPreferencesModel?
         notificationPreferences, // Use external model type
     bool? isAvailableOnline,
+    bool? isFirstTimeCustomer, // << NEW >>
+
     String? referredBy, // Add to copyWith
     bool? hasUsedReferralBenefit, // Add to copyWith
     List<String>? fcmTokens, // Add to copyWith
@@ -111,6 +117,9 @@ class User {
       notificationPreferences:
           notificationPreferences ?? this.notificationPreferences,
       isAvailableOnline: isAvailableOnline ?? this.isAvailableOnline,
+      isFirstTimeCustomer:
+          isFirstTimeCustomer ?? this.isFirstTimeCustomer, // << NEW >>
+
       referredBy: referredBy ?? this.referredBy, // Copy new field
       hasUsedReferralBenefit: hasUsedReferralBenefit ??
           this.hasUsedReferralBenefit, // Copy new field
@@ -139,6 +148,7 @@ class User {
       'walletBalance': walletBalance,
       'notificationPreferences': notificationPreferences.toJson(),
       if (isAvailableOnline != null) 'isAvailableOnline': isAvailableOnline,
+      'isFirstTimeCustomer': isFirstTimeCustomer, // << NEW >>
       if (referredBy != null)
         'referredBy': referredBy, // Include new field in toJson
       if (hasUsedReferralBenefit != null)

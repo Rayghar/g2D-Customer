@@ -118,6 +118,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   final TextEditingController _promoCodeController = TextEditingController();
   final TextEditingController _referralCodeController = TextEditingController();
   Promotion? _appliedUIPromotion;
+  SystemConfigModel? _systemConfig;
 
   FeeSettings? _feeSettings;
   bool _isExpressDelivery = false;
@@ -132,11 +133,14 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   late List<Animation<Offset>> _sectionSlideAnimations;
 
   app_user.User? _currentUserProfile;
-  double _walletBalance = 0.0; // naira
+  double _walletBalance = 0.0;
   bool _useWalletBalance = false;
 
   bool _isLoadingInitialData = true;
   String? _initialDataErrorMessage;
+
+  // << NEW: State for Pay on Arrival feature >>
+  String _selectedPaymentMethod = 'online';
 
   final ApiService _apiService = ApiService();
   final AuthService _authService = AuthService();
@@ -173,12 +177,17 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
     _entryAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 700));
+
+    // << FIX: Adjusted the animation interval calculation to prevent the crash >>
     _sectionSlideAnimations = List.generate(
-      8,
+      8, // Number of animated sections
       (index) => Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero)
           .animate(CurvedAnimation(
               parent: _entryAnimController,
-              curve: Interval(0.1 * index, (0.1 * index) + 0.5,
+              curve: Interval(
+                  (0.08 * index).clamp(0.0, 1.0), // Start time
+                  (0.5 + (0.1 * index))
+                      .clamp(0.0, 1.0), // End time, clamped to 1.0
                   curve: Curves.easeOutCubic))),
     );
 
@@ -230,6 +239,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   }
 
   Future<void> _initializeScreenData() async {
+    // << MODIFIED: This method was updated to store the full system config >>
     if (!mounted) return;
     _logger.info('Initializing screen data...'); // Log info
     Sentry.addBreadcrumb(Breadcrumb(
@@ -265,6 +275,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
       if (mounted) {
         setState(() {
+          _systemConfig = systemConfig; // Store the full config
           _feeSettings = systemConfig.feeSettings;
           _currentUserProfile = userProfile;
           _walletBalance = userProfile.walletBalance;
@@ -654,7 +665,31 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     }
   }
 
+  // << NEW HELPER METHOD >>
+  // This is the geometric logic to check if a point is inside a polygon.
+  bool _isPointInZone(double lat, double lng, List<List<double>> polygon) {
+    if (polygon.isEmpty) return false;
+    int intersections = 0;
+    for (int i = 0; i < polygon.length; i++) {
+      List<double> p1 = polygon[i];
+      List<double> p2 = polygon[(i + 1) % polygon.length];
+
+      if (p1.length < 2 || p2.length < 2) continue;
+      double p1Lng = p1[0];
+      double p1Lat = p1[1];
+      double p2Lng = p2[0];
+      double p2Lat = p2[1];
+
+      if (lat < p1Lat != lat < p2Lat &&
+          lng < (p2Lng - p1Lng) * (lat - p1Lat) / (p2Lat - p1Lat) + p1Lng) {
+        intersections++;
+      }
+    }
+    return (intersections % 2) == 1;
+  }
+
   Future<void> _handlePlaceOrder() async {
+    // << MODIFIED: This method was updated for both Service Zone and Pay on Arrival features >>
     _logger.info('User initiated order placement.');
     Sentry.addBreadcrumb(Breadcrumb(
         category: 'order_flow',
@@ -703,6 +738,43 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
           level: SentryLevel.fatal));
       return;
     }
+    // Service Zone Validation
+    final deliveryLat = _selectedDeliveryAddress?.latitude;
+    final deliveryLng = _selectedDeliveryAddress?.longitude;
+    final activeZones = _systemConfig?.activeZones ?? [];
+    String outOfZoneMessage = 'Sorry, we do not currently service your area.';
+
+    if (deliveryLat != null && deliveryLng != null && activeZones.isNotEmpty) {
+      bool isAddressInServiceZone = activeZones.any(
+          (zone) => _isPointInZone(deliveryLat, deliveryLng, zone.coordinates));
+      if (!isAddressInServiceZone) {
+        if (activeZones.isNotEmpty)
+          outOfZoneMessage = activeZones.first.outOfZoneMessage;
+        _showFeedbackSnackbar(outOfZoneMessage, isError: true);
+        _logger
+            .warning('Order placement blocked: Address not in service zone.');
+        Sentry.addBreadcrumb(Breadcrumb(
+            category: 'order_flow',
+            message: 'Order placement failed: Address not in service zone',
+            data: {'lat': deliveryLat, 'lng': deliveryLng},
+            level: SentryLevel.warning));
+        return;
+      }
+    } else if (deliveryLat != null &&
+        deliveryLng != null &&
+        activeZones.isEmpty) {
+      _showFeedbackSnackbar(
+          "We are not currently accepting orders. Please check back later.",
+          isError: true);
+      _logger.warning(
+          'Order placement blocked: No active service zones configured.');
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'order_flow',
+          message: 'Order placement failed: No active service zones configured',
+          level: SentryLevel.warning));
+      return;
+    }
+
     setState(() => _isPlacingOrder = true);
     final List<Map<String, dynamic>> orderItemsPayload = _orderItems
         .map((item) => {
@@ -747,6 +819,11 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
         'promoCodeApplied': _promoCodeController.text.trim().toUpperCase(),
       if (_referralCodeController.text.trim().isNotEmpty)
         'referralCode': _referralCodeController.text.trim().toUpperCase(),
+
+      // Add the selected payment method to the payload if it's a first time customer
+      if (_currentUserProfile?.isFirstTimeCustomer == true)
+        'paymentMethod':
+            _selectedPaymentMethod == 'on_pickup' ? 'payOnPickup' : 'paystack',
     };
 
     _logger.fine('Order payload prepared: $orderPayloadForApi');
@@ -903,6 +980,16 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                                   position: _sectionSlideAnimations[6],
                                   child: _buildWalletUsageCard(themeProvider)),
                             if (_walletBalance > 0) const SizedBox(height: 24),
+                            // << NEW: Add payment method card if first time customer >>
+                            if (_currentUserProfile?.isFirstTimeCustomer ==
+                                true)
+                              SlideTransition(
+                                  position: _sectionSlideAnimations[5],
+                                  child:
+                                      _buildPaymentMethodCard(themeProvider)),
+                            if (_currentUserProfile?.isFirstTimeCustomer ==
+                                true)
+                              const SizedBox(height: 24),
                             if (_orderItems.isNotEmpty)
                               SlideTransition(
                                   position: _sectionSlideAnimations[7],
@@ -1362,6 +1449,66 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                   ? themeProvider.gas2doorTeal
                   : themeProvider.secondaryText.withOpacity(0.7)),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16.0),
+        ),
+      ),
+    );
+  }
+
+  // << NEW: Widget for Pay on Arrival feature >>
+  Widget _buildPaymentMethodCard(ThemeProvider themeProvider) {
+    return CustomCard(
+      color: themeProvider.cardBackground,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('6. Payment Method',
+                style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: themeProvider.primaryText)),
+            const SizedBox(height: 8),
+            RadioListTile<String>(
+              title: Text('Pay Online Now',
+                  style: GoogleFonts.inter(
+                      color: themeProvider.primaryText, fontSize: 15)),
+              subtitle: Text('Secure payment with Card or Bank Transfer.',
+                  style: GoogleFonts.inter(
+                      color: themeProvider.secondaryText, fontSize: 13)),
+              value: 'online',
+              groupValue: _selectedPaymentMethod,
+              onChanged: (value) {
+                setState(() => _selectedPaymentMethod = value!);
+                _logger.info('Payment method selected: online');
+                Sentry.addBreadcrumb(Breadcrumb(
+                    category: 'payment_options',
+                    message: 'Payment method selected: online',
+                    level: SentryLevel.info));
+              },
+              activeColor: themeProvider.gas2doorTeal,
+            ),
+            RadioListTile<String>(
+              title: Text('Pay on Driver Arrival',
+                  style: GoogleFonts.inter(
+                      color: themeProvider.primaryText, fontSize: 15)),
+              subtitle: Text(
+                  'Pay securely in the app when the driver arrives. (First order only)',
+                  style: GoogleFonts.inter(
+                      color: themeProvider.secondaryText, fontSize: 13)),
+              value: 'on_pickup',
+              groupValue: _selectedPaymentMethod,
+              onChanged: (value) {
+                setState(() => _selectedPaymentMethod = value!);
+                _logger.info('Payment method selected: on_pickup');
+                Sentry.addBreadcrumb(Breadcrumb(
+                    category: 'payment_options',
+                    message: 'Payment method selected: on_pickup',
+                    level: SentryLevel.info));
+              },
+              activeColor: themeProvider.gas2doorTeal,
+            ),
+          ],
         ),
       ),
     );
