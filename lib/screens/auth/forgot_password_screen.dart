@@ -1,5 +1,5 @@
 // File: lib/screens/auth/forgot_password_screen.dart
-// ADVISORY: Updated with enhanced debugging to trace resetToken.
+// ADVISORY: Updated with the new glassy, light theme.
 
 import 'dart:ui';
 import 'package:flutter/gestures.dart';
@@ -13,6 +13,7 @@ import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
 import '../../services/auth_service.dart';
 import './reset_password_screen.dart';
+import '../../widgets/curve_painter.dart'; // ADDED: Import the new CurvePainter file
 
 enum ForgotPasswordStage {
   enterEmail,
@@ -149,14 +150,47 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
 
+    // MODIFIED: Updated input decoration for light theme
+    final inputDecorationThemeForScreen = InputDecorationTheme(
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.4),
+      hintStyle: GoogleFonts.inter(color: Colors.black.withOpacity(0.5)),
+      labelStyle: GoogleFonts.inter(color: Colors.black87),
+      prefixIconColor: Colors.black54,
+      suffixIconColor: Colors.black54,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.black.withOpacity(0.2)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.black.withOpacity(0.2)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+            color: Colors.black.withOpacity(0.8), width: 2), // MODIFIED
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: themeProvider.errorColor),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: themeProvider.errorColor, width: 2),
+      ),
+    );
+
+    // MODIFIED: Replaced Container with Stack for the new background
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded,
-              color: themeProvider.textOnDarkGradient),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              color: Colors.black54), // MODIFIED: Icon color
           onPressed: () {
             if (_currentStage == ForgotPasswordStage.enterToken) {
               setState(() {
@@ -170,67 +204,74 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           },
         ),
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              themeProvider.loginScreenGradientStart,
-              themeProvider.loginScreenGradientEnd,
-            ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+      body: Stack(
+        children: [
+          Container(
+            color: Colors.grey.shade200, // Light gray background
           ),
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                child: Container(
-                  padding: const EdgeInsets.all(24.0),
-                  decoration: BoxDecoration(
-                    color: themeProvider.formCardBackground,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
-                  ),
-                  child: Form(
-                    key: _formKey,
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      transitionBuilder: (child, animation) {
-                        return FadeTransition(opacity: animation, child: child);
-                      },
-                      child: _currentStage == ForgotPasswordStage.enterEmail
-                          ? _buildEmailEntry(themeProvider)
-                          : _buildTokenEntry(themeProvider),
+          Positioned(
+            top: -MediaQuery.of(context).size.height * 0.3,
+            left: -MediaQuery.of(context).size.width * 0.1,
+            child: Container(
+              width: MediaQuery.of(context).size.width * 1.2,
+              height: MediaQuery.of(context).size.height * 0.8,
+              child: Transform.rotate(
+                angle: -0.2,
+                child: CustomPaint(
+                  size: Size(MediaQuery.of(context).size.width * 1.2,
+                      MediaQuery.of(context).size.height * 0.8),
+                  painter: CurvePainter(),
+                ),
+              ),
+            ),
+          ),
+          Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                  child: Container(
+                    padding: const EdgeInsets.all(24.0),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.25), // MODIFIED
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: Colors.white.withOpacity(0.6)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Form(
+                      key: _formKey,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                              opacity: animation, child: child);
+                        },
+                        child: _currentStage == ForgotPasswordStage.enterEmail
+                            ? _buildEmailEntry(themeProvider,
+                                inputDecorationThemeForScreen) // MODIFIED
+                            : _buildTokenEntry(themeProvider),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildEmailEntry(ThemeProvider themeProvider) {
-    final inputDecorationThemeForScreen = InputDecorationTheme(
-      filled: true,
-      fillColor: themeProvider.inputFieldFillColor,
-      hintStyle: GoogleFonts.inter(color: Colors.white.withOpacity(0.5)),
-      labelStyle: GoogleFonts.inter(
-          color: themeProvider.textOnDarkGradient.withOpacity(0.8)),
-      prefixIconColor: themeProvider.textOnDarkGradient.withOpacity(0.6),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: themeProvider.inputFieldBorderColor),
-      ),
-    );
-
+  Widget _buildEmailEntry(ThemeProvider themeProvider,
+      InputDecorationTheme inputDecorationThemeForScreen) {
     return Column(
       key: const ValueKey('email_stage'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -240,13 +281,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             style: GoogleFonts.inter(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: themeProvider.textOnDarkGradient)),
+                color: Colors.black87)), // MODIFIED: Text color
         const SizedBox(height: 12),
         Text('Enter your email to receive a 6-digit verification code.',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
-                fontSize: 15,
-                color: themeProvider.textOnDarkGradient.withOpacity(0.8))),
+                fontSize: 15, color: Colors.black54)), // MODIFIED: Text color
         const SizedBox(height: 30),
         Theme(
           data: Theme.of(context)
@@ -256,7 +296,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             decoration: const InputDecoration(
                 labelText: 'Email Address',
                 prefixIcon: Icon(Icons.email_outlined)),
-            style: GoogleFonts.inter(color: themeProvider.textOnDarkGradient),
+            style: GoogleFonts.inter(
+                color: Colors.black87), // MODIFIED: Text color
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.done,
             onFieldSubmitted: _isLoading ? null : (_) => _handleRequestCode(),
@@ -290,17 +331,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
   }
 
   Widget _buildTokenEntry(ThemeProvider themeProvider) {
+    // MODIFIED: Pinput theme for light background
     final defaultPinTheme = PinTheme(
       width: 56,
       height: 60,
       textStyle: GoogleFonts.inter(
           fontSize: 22,
-          color: themeProvider.textOnDarkGradient,
+          color: Colors.black87, // MODIFIED
           fontWeight: FontWeight.bold),
       decoration: BoxDecoration(
-        color: themeProvider.inputFieldFillColor,
+        color: Colors.white.withOpacity(0.4), // MODIFIED
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: themeProvider.inputFieldBorderColor),
+        border: Border.all(color: Colors.black.withOpacity(0.2)), // MODIFIED
       ),
     );
 
@@ -313,13 +355,13 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
             style: GoogleFonts.inter(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: themeProvider.textOnDarkGradient)),
+                color: Colors.black87)), // MODIFIED
         const SizedBox(height: 12),
         Text('We sent a 6-digit code to\n${_emailController.text}',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
                 fontSize: 15,
-                color: themeProvider.textOnDarkGradient.withOpacity(0.8),
+                color: Colors.black54, // MODIFIED
                 height: 1.5)),
         const SizedBox(height: 30),
         Pinput(
@@ -329,7 +371,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
           focusedPinTheme: defaultPinTheme.copyWith(
               decoration: defaultPinTheme.decoration!.copyWith(
                   border: Border.all(
-                      color: themeProvider.inputFieldFocusedBorderColor,
+                      color: Colors.black.withOpacity(0.8), // MODIFIED
                       width: 2))),
           submittedPinTheme: defaultPinTheme.copyWith(
               decoration: defaultPinTheme.decoration!.copyWith(

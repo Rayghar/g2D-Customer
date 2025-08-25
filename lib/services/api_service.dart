@@ -138,6 +138,50 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> initiateChatSession({
+    required String orderId,
+    required String senderId,
+    required String recipientId,
+  }) async {
+    final token = await _getToken();
+    if (token == null) {
+      throw Exception('Not authenticated to initiate chat.');
+    }
+    // This endpoint matches the one we created on the backend
+    final String apiUrl = '$baseUrl/chat/initiate';
+
+    print('ApiService: Initiating chat session via $apiUrl');
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'orderId': orderId,
+          'senderId': senderId,
+          'recipientId': recipientId,
+        }),
+      );
+
+      final responseBody = jsonDecode(response.body);
+
+      if (response.statusCode == 201) {
+        // 201 for Created
+        print('ApiService: Chat session initiated successfully.');
+        return responseBody; // Returns { chatId, message, participants }
+      } else {
+        final errorMessage = responseBody['error'] ?? 'Failed to initiate chat';
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      print('ApiService: Error initiating chat: ${e.toString()}');
+      rethrow;
+    }
+  }
+
   Future<List<AddressModel>> getMyAddresses() async {
     final token = await _getToken();
     if (token == null) {
@@ -568,50 +612,6 @@ class ApiService {
       rethrow;
     }
   }*/
-
-  Future<String> initiateChatSession(
-      {required String orderId, required String recipientId}) async {
-    final token = await _getToken();
-    if (token == null) {
-      print('[ApiService] initiateChatSession: Not authenticated.');
-      throw Exception('Not authenticated.');
-    }
-
-    final String apiUrl = '$baseUrl/chat/initiate';
-    print(
-        '[ApiService] Initiating chat for order $orderId with recipient $recipientId via $apiUrl');
-    final payload = {'orderId': orderId, 'recipientId': recipientId};
-    print('[ApiService] initiateChatSession Payload: $payload');
-
-    try {
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(payload),
-      );
-
-      final responseBody = jsonDecode(response.body);
-      print(
-          '[ApiService] initiateChatSession Response Status: ${response.statusCode}, Body: $responseBody');
-
-      if (response.statusCode == 201) {
-        print(
-            '[ApiService] Chat session initiated. Chat ID: ${responseBody['chatId']}');
-        return responseBody['chatId'] as String;
-      } else {
-        final errorMessage =
-            responseBody['error'] ?? 'Failed to initiate chat session';
-        print('[ApiService] initiateChatSession failed. Error: $errorMessage');
-        throw Exception(errorMessage);
-      }
-    } catch (e) {
-      print('[ApiService] Error initiating chat session: ${e.toString()}');
-      rethrow;
-    }
-  }
 
   Future<Map<String, dynamic>> getWalletDetails() async {
     final token = await _getToken();

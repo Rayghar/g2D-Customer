@@ -61,6 +61,8 @@ import 'screens/admin/admin_add_edit_faq_screen.dart';
 import 'screens/admin/admin_add_edit_promotion_screen.dart';
 import 'screens/admin/admin_active_run_details_screen.dart';
 import 'screens/auth/otp_verification_screen.dart';
+import 'package:firebase_core/firebase_core.dart'; // <-- ADD THIS IMPORT
+import 'firebase_options.dart'; // <-- ADD THIS IMPORT
 
 // Provider and model imports
 import 'providers/theme_provider.dart';
@@ -75,7 +77,9 @@ Future<void> main() async {
   // Ensure Flutter bindings are initialized.
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
-  await Firebase.initializeApp(); // Keep for Firestore, etc.
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   // Initialize Sentry directly, wrapping the app launch.
   await SentryFlutter.init(

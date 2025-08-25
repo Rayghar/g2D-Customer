@@ -59,6 +59,94 @@
     },
     {
       "client_info": {
+        "mobilesdk_app_id": "1:108927420628:android:0cf747b3886f9a34401341",
+        "android_client_info": {
+          "package_name": "com.example.primejet_mobile.admin"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "108927420628-g9bvnl1vdl4eeqcub5a63pv5sfvtgnro.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.primejet_mobile.admin",
+            "certificate_hash": "1776e0068bd36b05aca5a6e50be9e05cc351d4f4"
+          }
+        },
+        {
+          "client_id": "108927420628-ibb2i2ge2oqlui410kcg26mt1gh7s1pt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPV-KhAIIegC-C9xNkviDbRL5mE8beAyI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "108927420628-ibb2i2ge2oqlui410kcg26mt1gh7s1pt.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "108927420628-0tpfap0aei70115vkqhvii7soqfn1j35.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.primejetMobile"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:108927420628:android:2e348f90998c6fcc401341",
+        "android_client_info": {
+          "package_name": "com.example.primejet_mobile.driver"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "108927420628-dph7ckrpp23m0hsqkpeo323kue90lt04.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.primejet_mobile.driver",
+            "certificate_hash": "e65ac9e63c26f0a43a2e2ae4b7d99c916a55a67d"
+          }
+        },
+        {
+          "client_id": "108927420628-ibb2i2ge2oqlui410kcg26mt1gh7s1pt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPV-KhAIIegC-C9xNkviDbRL5mE8beAyI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "108927420628-ibb2i2ge2oqlui410kcg26mt1gh7s1pt.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "108927420628-0tpfap0aei70115vkqhvii7soqfn1j35.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.primejetMobile"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:108927420628:android:79d00a79d3c615c5401341",
         "android_client_info": {
           "package_name": "com.primejet.gas2door"
@@ -71,6 +159,50 @@
           "android_info": {
             "package_name": "com.primejet.gas2door",
             "certificate_hash": "da3fb07372f0bf1a4d789a982d6d612f730e4072"
+          }
+        },
+        {
+          "client_id": "108927420628-ibb2i2ge2oqlui410kcg26mt1gh7s1pt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPV-KhAIIegC-C9xNkviDbRL5mE8beAyI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "108927420628-ibb2i2ge2oqlui410kcg26mt1gh7s1pt.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "108927420628-0tpfap0aei70115vkqhvii7soqfn1j35.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.primejetMobile"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:108927420628:android:f259659c21fe6fdb401341",
+        "android_client_info": {
+          "package_name": "ng.gas2door.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "108927420628-6g6ikd329uatfbnrbde5bhvrhhp6t8oq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ng.gas2door.app",
+            "certificate_hash": "58c4d6af7b3e8fc8419e4de8ada9dd6d1337c935"
           }
         },
         {

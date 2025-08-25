@@ -198,13 +198,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           .add(messageData);
 
       _scrollToBottom(isNewMessage: true);
-
-      // Now this will work because _apiService is in the correct scope
-      await _apiService.updateChatThread(
-        chatId: widget.orderId,
-        lastMessage: messageText,
-        senderId: widget.currentUserId,
-      );
     } catch (e) {
       print("Error sending message: $e");
       if (mounted) {

@@ -883,6 +883,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
 
   Widget _buildDriverInfoCard(DriverInfoForOrder driver, app_order.Order order,
       ThemeProvider themeProvider) {
+    // You'll need an instance of your ApiService available in your State class
+    // final ApiService _apiService = ApiService();
+
     return CustomCard(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -928,45 +931,55 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                           color: themeProvider.gas2doorPrimaryBlue, size: 26),
                       onPressed: () => _handleInitiateCall(driver.phone),
                       tooltip: "Call Driver"),
+
+                // --- UPDATED CHAT BUTTON LOGIC ---
                 IconButton(
                     icon: Icon(Icons.chat_bubble_outline_rounded,
                         color: themeProvider.gas2doorPrimaryBlue, size: 26),
-                    onPressed: () {
+                    onPressed: () async {
+                      // Made the function async
                       HapticFeedback.lightImpact();
-                      _logger.info(
-                          'User initiated chat with driver for order: ${order.id}'); // Log info
-                      Sentry.addBreadcrumb(Breadcrumb(
-                          category: 'communication',
-                          message: 'Initiating chat with driver',
-                          data: {
-                            'order_id': order.id,
-                            'driver_id': driver.id,
-                            'driver_name': driver.name
-                          },
-                          level: SentryLevel.info)); // Sentry breadcrumb
 
+                      // Ensure customer ID is available before making an API call
                       if (order.customer?.id == null) {
                         _showFeedbackSnackbar(
                             "Cannot initiate chat: Customer ID missing.",
                             isError: true);
-                        _logger.warning(
-                            'Cannot initiate chat: Customer ID missing from order object.'); // Log warning
-                        Sentry.addBreadcrumb(Breadcrumb(
-                            category: 'communication',
-                            message:
-                                'Cannot initiate chat: Customer ID missing',
-                            data: {'order_id': order.id},
-                            level: SentryLevel.warning)); // Sentry breadcrumb
                         return;
                       }
-                      Navigator.of(context, rootNavigator: true)
-                          .pushNamed(ChatScreen.routeName, arguments: {
-                        'orderId': order.id,
-                        'currentUserId': order.customer!.id,
-                        'recipientId': driver.id,
-                        'recipientName': driver.name,
-                        'recipientPhoneNumber': driver.phone,
-                      });
+
+                      try {
+                        // 1. Call your backend to securely initiate the chat session
+                        final chatDetails =
+                            await _apiService.initiateChatSession(
+                          orderId: order.id,
+                          senderId: order.customer!.id,
+                          recipientId: driver.id,
+                        );
+
+                        final String chatId = chatDetails['chatId'];
+
+                        // 2. Navigate to the ChatScreen with the verified chatId from the backend
+                        if (mounted) {
+                          // Check if the widget is still in the tree
+                          Navigator.of(context, rootNavigator: true)
+                              .pushNamed(ChatScreen.routeName, arguments: {
+                            'chatId':
+                                chatId, // Use the verified chatId from your backend
+                            'currentUserId': order.customer!.id,
+                            'recipientId': driver.id,
+                            'recipientName': driver.name,
+                            'recipientPhoneNumber': driver.phone,
+                          });
+                        }
+                      } catch (e) {
+                        // Handle any errors from the API call (e.g., user not authorized to chat)
+                        _showFeedbackSnackbar(
+                            "Could not start chat. Please try again.",
+                            isError: true);
+                        Sentry.captureException(e,
+                            stackTrace: StackTrace.current);
+                      }
                     },
                     tooltip: "Chat with Driver")
               ],

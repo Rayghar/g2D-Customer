@@ -19,6 +19,7 @@ import './deals_screen.dart';
 import './profile_screen.dart';
 import './notification_screen.dart';
 import './address_list_screen.dart';
+import '../../widgets/curve_painter.dart'; // ADDED: Import the new CurvePainter file
 
 class CustomerDashboardShellData {
   final String customerId;
@@ -327,11 +328,12 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
     );
 
     return Scaffold(
-      backgroundColor: themeProvider.appPrimaryBackground,
+      backgroundColor: Colors.grey.shade200, // MODIFIED: New background color
       appBar: AppBar(
-        backgroundColor: themeProvider.cardBackground,
-        elevation: 1.0,
-        shadowColor: themeProvider.cardShadowColorGlobal.withOpacity(0.3),
+        // MODIFIED: Updated app bar style
+        backgroundColor: Colors.white.withOpacity(0.4),
+        elevation: 0,
+        shadowColor: Colors.black.withOpacity(0.1),
         automaticallyImplyLeading: false,
         title: appBarTitleWidget,
         actions: <Widget>[
@@ -340,7 +342,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
             children: <Widget>[
               IconButton(
                 icon: Icon(notificationIcon,
-                    color: themeProvider.secondaryText, size: 26.0),
+                    color: Colors.black54, size: 26.0), // MODIFIED: Icon color
                 onPressed: () {
                   HapticFeedback.lightImpact();
                   Navigator.of(context, rootNavigator: true)
@@ -359,7 +361,8 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                       color: themeProvider.errorColor,
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: themeProvider.cardBackground, width: 1.0),
+                          color: Colors.white,
+                          width: 1.0), // MODIFIED: Border color
                     ),
                   ),
                 )
@@ -368,11 +371,97 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
           const SizedBox(width: 8),
         ],
       ),
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _screenOptions,
+      body: Stack(
+        // ADDED: Stack to handle the new background layer
+        children: [
+          Positioned(
+            // ADDED: Gradient background layer
+            top: -MediaQuery.of(context).size.height * 0.3,
+            left: -MediaQuery.of(context).size.width * 0.1,
+            child: Container(
+              width: MediaQuery.of(context).size.width * 1.2,
+              height: MediaQuery.of(context).size.height * 0.8,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.blue.shade300.withOpacity(0.7),
+                    Colors.red.shade300.withOpacity(0.7),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  stops: const [0.3, 0.7],
+                ),
+              ),
+              child: Transform.rotate(
+                angle: -0.2,
+                child: CustomPaint(
+                  size: Size(MediaQuery.of(context).size.width * 1.2,
+                      MediaQuery.of(context).size.height * 0.8),
+                  painter: CurvePainter(),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            // ADDED: Gas station icon on the background
+            top: MediaQuery.of(context).size.height * 0.15,
+            left: MediaQuery.of(context).size.width * 0.15,
+            child: Opacity(
+              opacity: 0.8,
+              child: Container(
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.2),
+                ),
+                child: Icon(Icons.local_gas_station_outlined,
+                    size: 30, color: Colors.white),
+              ),
+            ),
+          ),
+          Positioned(
+            // ADDED: Shipping icon on the background
+            top: MediaQuery.of(context).size.height * 0.4,
+            left: MediaQuery.of(context).size.width * 0.4,
+            child: Opacity(
+              opacity: 0.8,
+              child: Container(
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.2),
+                ),
+                child: Icon(Icons.local_shipping_outlined,
+                    size: 30, color: Colors.white),
+              ),
+            ),
+          ),
+          Positioned(
+            // ADDED: Location icon on the background
+            top: MediaQuery.of(context).size.height * 0.65,
+            left: MediaQuery.of(context).size.width * 0.7,
+            child: Opacity(
+              opacity: 0.8,
+              child: Container(
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.2),
+                ),
+                child: Icon(Icons.location_on_outlined,
+                    size: 30, color: Colors.white),
+              ),
+            ),
+          ),
+          // MODIFIED: IndexedStack is now the top layer
+          IndexedStack(
+            index: _selectedIndex,
+            children: _screenOptions,
+          ),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
+        // MODIFIED: Updated bottom navigation bar style
         items: <BottomNavigationBarItem>[
           const BottomNavigationBarItem(
               icon: Icon(homeIcon),
@@ -393,15 +482,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
         ],
         currentIndex: _selectedIndex,
         selectedItemColor: themeProvider.gas2doorPrimaryBlue,
-        unselectedItemColor: themeProvider.secondaryText.withOpacity(0.7),
+        unselectedItemColor: Colors.black54, // MODIFIED: Color for visibility
         selectedLabelStyle:
             GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 12.0),
         unselectedLabelStyle: GoogleFonts.inter(fontSize: 11.5),
         showUnselectedLabels: true,
         onTap: _onItemTapped,
         type: BottomNavigationBarType.fixed,
-        backgroundColor: themeProvider.cardBackground,
-        elevation: 8.0,
+        backgroundColor:
+            Colors.white.withOpacity(0.4), // MODIFIED: Glassy effect
+        elevation: 0, // MODIFIED: Removed elevation
         landscapeLayout: BottomNavigationBarLandscapeLayout.centered,
       ),
     );

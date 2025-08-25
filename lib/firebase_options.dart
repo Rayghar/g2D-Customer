@@ -64,7 +64,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '108927420628',
     projectId: 'primejetmobile-83583',
     storageBucket: 'primejetmobile-83583.firebasestorage.app',
-    androidClientId: '108927420628-7s575dktrrpnml75ggrltf0b6f89f8or.apps.googleusercontent.com',
+    androidClientId: '108927420628-6g6ikd329uatfbnrbde5bhvrhhp6t8oq.apps.googleusercontent.com',
     iosClientId: '108927420628-0tpfap0aei70115vkqhvii7soqfn1j35.apps.googleusercontent.com',
     iosBundleId: 'com.example.primejetMobile',
   );
@@ -75,7 +75,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '108927420628',
     projectId: 'primejetmobile-83583',
     storageBucket: 'primejetmobile-83583.firebasestorage.app',
-    androidClientId: '108927420628-7s575dktrrpnml75ggrltf0b6f89f8or.apps.googleusercontent.com',
+    androidClientId: '108927420628-6g6ikd329uatfbnrbde5bhvrhhp6t8oq.apps.googleusercontent.com',
     iosClientId: '108927420628-0tpfap0aei70115vkqhvii7soqfn1j35.apps.googleusercontent.com',
     iosBundleId: 'com.example.primejetMobile',
   );
@@ -89,4 +89,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'primejetmobile-83583.firebasestorage.app',
     measurementId: 'G-H1J45RZS9M',
   );
+
 }

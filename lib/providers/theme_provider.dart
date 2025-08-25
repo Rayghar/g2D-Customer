@@ -196,7 +196,7 @@ class ThemeProvider with ChangeNotifier {
         actionsIconTheme: IconThemeData(color: _secondaryTextLight),
         titleTextStyle: GoogleFonts.inter(
           color: gas2doorPrimaryBlue,
-          fontSize: 20,
+          fontSize: 15,
           fontWeight: FontWeight.bold,
         ),
         systemOverlayStyle: SystemUiOverlayStyle.dark,
