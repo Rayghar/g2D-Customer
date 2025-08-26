@@ -397,7 +397,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                 child: CustomPaint(
                   size: Size(MediaQuery.of(context).size.width * 1.2,
                       MediaQuery.of(context).size.height * 0.8),
-                  painter: CurvePainter(),
+                  //painter: CurvePainter(),
                 ),
               ),
             ),
