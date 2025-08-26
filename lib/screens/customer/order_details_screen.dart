@@ -21,6 +21,7 @@ import './track_driver_screen.dart'; // Import the TrackDriverScreen
 import '../../models/driver_info_for_order.dart'; //
 import '../../services/api_service.dart';
 import '../../models/order.dart' as app_order;
+import './payment_screen.dart'; // Added to support Pay Now button
 
 // Initialize a logger for this file
 final _logger = Logger('OrderDetailsScreen');
@@ -434,6 +435,45 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                     ),
                   ),
                 ),
+      // << NEW: Conditional Bottom Navigation Bar for Payment >>
+      bottomNavigationBar: (_orderData?.status == 'Pending Payment' &&
+              _orderData?.paymentMethod == 'payOnPickup')
+          ? _buildPayNowButton(themeProvider)
+          : null,
+    );
+  }
+
+  // << NEW WIDGET >>
+  Widget _buildPayNowButton(ThemeProvider themeProvider) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      decoration: BoxDecoration(
+        color: themeProvider.cardBackground,
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, -5))
+        ],
+      ),
+      child: CustomButton(
+        text:
+            'Pay Now (${NumberFormat.currency(locale: 'en_NG', symbol: '₦').format(_orderData!.grandTotal / 100)})',
+        onPressed: () {
+          // Navigate to the existing PaymentScreen, merging the flow
+          Navigator.of(context).pushNamed(
+            PaymentScreen.routeName,
+            arguments: {
+              'orderId': _orderData!.id,
+              'amount': _orderData!.grandTotal,
+              'customer': _orderData!.customer,
+              'order': _orderData,
+            },
+          );
+        },
+        color: themeProvider.successColor,
+        icon: const Icon(Icons.shield_rounded, color: Colors.white),
+      ),
     );
   }
 

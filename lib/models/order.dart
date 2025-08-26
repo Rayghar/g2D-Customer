@@ -96,6 +96,7 @@ class Order {
   final DateTime orderDate;
   String status;
   final String paymentStatus;
+  final String? paymentMethod;
   final double itemsSubtotal;
   final double discountAmount;
   final String? promoCodeApplied;
@@ -132,6 +133,7 @@ class Order {
     this.feedback,
     required this.recipientName,
     this.recipientPhone,
+    this.paymentMethod, // << NEW >>
   });
 
   String get shortOrderId {
@@ -214,6 +216,7 @@ class Order {
       orderDate: DateTime.tryParse(json['orderDate'] as String? ?? '') ??
           DateTime.now(),
       status: json['status'] as String? ?? 'Unknown',
+      paymentMethod: json['paymentMethod'] as String?, // << NEW >>
       paymentStatus: json['paymentStatus'] as String? ?? 'Unknown',
       itemsSubtotal: (json['itemsSubtotal'] as num?)?.toDouble() ?? 0.0,
       discountAmount: (json['discountAmount'] as num?)?.toDouble() ?? 0.0,
