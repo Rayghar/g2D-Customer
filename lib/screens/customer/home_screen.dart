@@ -1345,25 +1345,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _navigateToOrderDetails(String orderId) {
     _logger.info('Navigating to OrderDetailsScreen for order ID: $orderId');
-    Sentry.addBreadcrumb(Breadcrumb(
-        category: 'navigation',
-        message: 'Navigating to OrderDetailsScreen',
-        data: {'order_id': orderId, 'customer_id': widget.customerIdFromShell},
-        level: SentryLevel.info));
+
     if (widget.customerIdFromShell != null) {
-      Navigator.of(context).pushNamed(OrderDetailsScreen.routeName, arguments: {
-        'orderId': orderId,
-        'customerId': widget.customerIdFromShell
+      // FIX: Use .then() to refresh data after returning from the sub-screen
+      Navigator.of(context).pushNamed(
+        OrderDetailsScreen.routeName,
+        arguments: {
+          'orderId': orderId,
+          'customerId': widget.customerIdFromShell,
+        },
+      ).then((result) {
+        _logger.info('Returned from OrderDetailsScreen, refreshing home data.');
+        _loadAllHomeScreenData(isRefresh: true);
       });
     } else {
       _logger.warning('Cannot navigate to OrderDetails: Customer ID is null.');
-      Sentry.addBreadcrumb(Breadcrumb(
-          category: 'navigation_blocked',
-          message: 'Order details navigation blocked: Customer ID is null',
-          level: SentryLevel.warning));
       _showFeedbackSnackbar(
-          "Customer ID is missing, cannot view order details.",
-          isError: true);
+        "Customer ID is missing, cannot view order details.",
+        isError: true,
+      );
     }
   }
 }

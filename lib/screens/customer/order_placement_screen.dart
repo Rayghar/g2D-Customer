@@ -879,6 +879,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             ModalRoute.withName(CustomerDashboardScreen.routeName),
             arguments: {
               'orderId': response.order.id,
+              'customerId': currentActiveCustomerId, // <-- ADD THIS LINE
               'showConfirmation': true,
               'orderPayload': response.order,
             });

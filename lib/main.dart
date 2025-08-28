@@ -6,6 +6,8 @@ import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // ADDED
+import 'firebase_options.dart'; // Keep this import
 
 // Screen imports
 import 'screens/auth/complete_profile_screen.dart';
@@ -61,7 +63,7 @@ import 'screens/admin/admin_add_edit_faq_screen.dart';
 import 'screens/admin/admin_add_edit_promotion_screen.dart';
 import 'screens/admin/admin_active_run_details_screen.dart';
 import 'screens/auth/otp_verification_screen.dart';
-import 'package:firebase_core/firebase_core.dart'; // <-- ADD THIS IMPORT
+import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart'; // <-- ADD THIS IMPORT
 
 // Provider and model imports
@@ -73,6 +75,13 @@ import 'models/admin/faq_item_model.dart';
 import 'models/order.dart' as app_order;
 import 'models/user.dart' as app_user;
 
+// This function MUST be a top-level function (outside of any class)
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  print("Handling a background message: ${message.messageId}");
+}
+
 Future<void> main() async {
   // Ensure Flutter bindings are initialized.
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,6 +89,9 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Set the background messaging handler
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   // Initialize Sentry directly, wrapping the app launch.
   await SentryFlutter.init(
@@ -469,7 +481,11 @@ class MyApp extends StatelessWidget {
                 args.containsKey('fullAddress') &&
                 args.containsKey('driverId') &&
                 args.containsKey('cylinderDetails') &&
-                args.containsKey('initialStopStatus')) {
+                args.containsKey('initialStopStatus') &&
+                args.containsKey('runId') &&
+                args.containsKey('stopId') &&
+                args.containsKey('paymentMethod') &&
+                args.containsKey('amountToCollect')) {
               return MaterialPageRoute(
                 builder: (_) => DriverOrderDetailsScreen(
                   orderId: args['orderId'] as String,
@@ -481,17 +497,20 @@ class MyApp extends StatelessWidget {
                   customerId: args['customerId'] as String?,
                   customerPhoneNumber: args['customerPhoneNumber'] as String?,
                   sequenceNumber: args['sequenceNumber'] as int?,
+                  //runId: args['runId'] as String,
+                  //stopId: args['stopId'] as String,
+                  //paymentMethod: args['paymentMethod'] as String,
+                  //amountToCollect: (args['amountToCollect'] as num).toDouble(),
                 ),
                 settings: settings,
               );
             }
+            // This error message is now more accurate
             return _buildErrorRoute(settings,
-                "Missing required arguments for DriverOrderDetailsScreen");
-
-          default:
-            return _buildErrorRoute(
-                settings, "Route not found: ${settings.name}");
+                "Missing required arguments for DriverOrderDetailsScreen (requires runId, stopId, paymentMethod, and amountToCollect).");
         }
+        // This is the fallback for any unhandled routes.
+        return _buildErrorRoute(settings, "Route not found or unhandled.");
       },
     );
   }

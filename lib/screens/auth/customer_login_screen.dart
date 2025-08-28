@@ -8,10 +8,12 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // ADDED
 
 import 'complete_profile_screen.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/auth_service.dart';
+import '../../services/api_service.dart'; // ADDED
 import '../customer/customer_dashboard_screen.dart';
 import './forgot_password_screen.dart';
 import './customer_register_screen.dart';
@@ -35,6 +37,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
   bool _isLoading = false;
 
   final AuthService _authService = AuthService();
+  final ApiService _apiService = ApiService(); // ADDED
 
   @override
   void initState() {
@@ -82,6 +85,17 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
         _passwordController.text.trim(),
       );
       if (!mounted) return;
+
+      // Get and Register the Device Token
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      if (fcmToken != null) {
+        try {
+          await _apiService.registerFcmToken(fcmToken);
+        } catch (e) {
+          print('Failed to register FCM token: $e');
+        }
+      }
+
       if (loginData.isNewUser) {
         _showFeedbackSnackbar('Welcome! Please complete your profile.');
         Navigator.of(context).pushNamedAndRemoveUntil(
@@ -120,6 +134,17 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
       final LoginSuccessData loginData =
           await _authService.signInWithGoogle(idToken);
       if (!mounted) return;
+
+      // Get and Register the Device Token
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      if (fcmToken != null) {
+        try {
+          await _apiService.registerFcmToken(fcmToken);
+        } catch (e) {
+          print('Failed to register FCM token: $e');
+        }
+      }
+
       _showFeedbackSnackbar(
           'Google Sign-In successful! Welcome, ${loginData.name}.');
       Navigator.of(context).pushNamedAndRemoveUntil(

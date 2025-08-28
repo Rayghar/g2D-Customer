@@ -550,12 +550,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   // =======================================================================
   Widget _buildVisualTimeline(
       app_order.Order order, ThemeProvider themeProvider) {
-    // These are the *visual* steps of the timeline, defining what gets displayed.
-    // The 'key' here MUST match the exact 'Order.status' string values from the backend.
+    // These are the VISUAL steps shown to the customer.
     final timelineSteps = [
       {
         'key': 'Order Placed',
-        'title': 'Placed',
+        'title': 'Order Placed',
         'icon': Icons.playlist_add_check_circle_outlined
       },
       {
@@ -564,60 +563,77 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
         'icon': Icons.hourglass_top_rounded
       },
       {
-        'key':
-            'Driver Assigned', // The high-level status for "driver is on the way"
+        'key': 'Driver Assigned',
         'title': 'Driver Assigned',
         'icon': Icons.person_pin_circle_outlined
       },
       {
-        // This is a conceptual step. We map 'Processing' (when cylinder picked/refilling) here.
-        'key': 'Processing (In Transit)', // New key for the combined concept
+        'key': 'In Transit',
         'title': 'Refilling/In Transit',
         'icon': Icons.local_gas_station_outlined
       },
       {
-        'key': 'Out for delivery', // Exact match for backend enum value
+        'key': 'Out for Delivery',
         'title': 'Out for Delivery',
         'icon': Icons.local_shipping_outlined
       },
       {
-        'key': 'Delivered', // Exact match for backend enum value
+        'key': 'Delivered',
         'title': 'Delivered',
         'icon': Icons.check_circle_outline_rounded
       },
     ];
 
-    // This map defines how the *actual backend order status* (from `order.status`)
-    // maps to the `timelineSteps` index.
-    // The keys MUST exactly match the values from your `order.model.js` enum.
+    // ============================ THIS IS THE MAIN FIX ============================
+    // This map CORRECTLY maps the GRANULAR backend/driver statuses to the VISUAL timeline index.
+    // The keys MUST exactly match the status strings from the backend and driver app.
     final Map<String, int> statusMap = {
+      // Initial States -> Step 0
       'Pending Payment': 0,
+      'Awaiting Driver Arrival': 0,
       'Order Placed': 0,
+
+      // Processing States -> Step 1
       'Processing': 1,
+      'DRIVER_ENROUTE_PICKUP': 1, // Driver is going to the customer
+
+      // Driver Assigned State -> Step 2
       'Driver Assigned': 2,
-      'Out for delivery': 4, // This matches the simplified order.model.js enum
+
+      // In Transit/Refilling States -> Step 3
+      'PICKED_UP_ENROUTE_STATION': 3,
+      'CYLINDER_REFILLING': 3,
+
+      // Out for Delivery State -> Step 4
+      'Out for Delivery': 4, // From order.model.js status enum
+      'OUT_FOR_DELIVERY':
+          4, // From driver_order_details_screen.dart status update
+
+      // Final States -> Step 5
       'Delivered': 5,
-      'Customer Unavailable': 5, // Maps to a "final" state on the timeline
-      'Issue Reported': 5, // Maps to a "final" state on the timeline
-      'Payment Failed': 5, // Maps to a "final" state on the timeline
-      'Canceled by Customer': 5, // Handled by separate 'cancelled' check
-      'Canceled by Admin': 5, // Handled by separate 'cancelled' check
+      'DELIVERED': 5,
+      'Customer Unavailable': 5,
+      'Issue Reported': 5,
+      'Payment Failed': 5,
+      'Canceled by Customer': 5,
+      'Canceled by Admin': 5,
+      'Canceled': 5,
     };
+    // ==============================================================================
 
     String currentOrderStatus = order.status;
-    int currentStepIndex = statusMap[currentOrderStatus] ?? -1;
+    int currentStepIndex = statusMap[currentOrderStatus] ??
+        0; // Default to the first step if unknown
 
-    // Special handling for cancelled orders
-    if (currentOrderStatus.toLowerCase().contains('canceled') ||
+    // Logic for handling canceled/terminal orders
+    if (currentOrderStatus.toLowerCase().contains('cancel') ||
         currentOrderStatus == 'Customer Unavailable' ||
         currentOrderStatus == 'Issue Reported' ||
         currentOrderStatus == 'Payment Failed') {
-      _logger.info(
-          'Order is in a terminal status. Displaying custom timeline step.');
       return _buildTimelineStep(
           icon: _getStatusVisuals(order.status, themeProvider)['icon'],
-          title: order.formattedStatus, // Use formatted status as title
-          subtitle: "Order has reached a final state.",
+          title: order.formattedStatus,
+          subtitle: "This order has reached a final state.",
           themeProvider: themeProvider,
           isCurrent: true,
           isFirst: true,
@@ -625,23 +641,24 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
           isCompleted: false);
     }
 
-    if (currentStepIndex == -1) {
-      _logger.warning(
-          'Unknown order status "$currentOrderStatus" encountered in timeline, defaulting to initial step.');
-      currentStepIndex = 0; // Default to the first step for unknown statuses
-    }
-
     return Column(
       children: List.generate(timelineSteps.length, (index) {
         final step = timelineSteps[index];
         final bool isCompleted = index < currentStepIndex;
         final bool isCurrent = index == currentStepIndex;
+
+        String subtitle = "Pending";
+        if (isCompleted) {
+          subtitle = "${step['title'] as String} Completed";
+        }
+        if (isCurrent) {
+          subtitle = order.formattedStatus;
+        }
+
         return _buildTimelineStep(
           icon: step['icon'] as IconData,
           title: step['title'] as String,
-          subtitle: isCurrent
-              ? order.formattedStatus
-              : (isCompleted ? "${step['title']} Completed" : "Pending"),
+          subtitle: subtitle,
           isCompleted: isCompleted,
           isCurrent: isCurrent,
           isFirst: index == 0,
@@ -1144,34 +1161,35 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     return themeProvider.secondaryText;
   }
 
+  // This helper method determines the color and icon for a given status
   Map<String, dynamic> _getStatusVisuals(
       String status, ThemeProvider themeProvider) {
-    Color statusColor;
-    IconData statusIcon;
+    // << MODIFIED: Updated to handle the unified status list >>
     if (status == 'Delivered') {
-      statusIcon = Icons.check_circle;
-      statusColor = themeProvider.successColor;
-    } else if (status.contains('Canceled')) {
-      statusIcon = Icons.cancel;
-      statusColor = themeProvider.errorColor;
-    } else if (status == 'Out for delivery' ||
-        status == 'Driver Assigned' ||
-        status == 'Processing') {
-      statusIcon = Icons.local_shipping;
-      statusColor = themeProvider.warningColor;
-    } else if (status == 'Pending Payment') {
-      statusIcon = Icons.pending_actions_outlined;
-      statusColor = themeProvider.secondaryText.withOpacity(0.8);
-    } else if (status == 'Customer Unavailable' ||
-        status == 'Issue Reported' ||
-        status.contains('Failed') ||
-        status.contains('Discrepancy')) {
-      statusIcon = Icons.report_problem_outlined;
-      statusColor = themeProvider.errorColor;
+      return {'color': themeProvider.successColor, 'icon': Icons.check_circle};
+    } else if (status == 'Canceled') {
+      return {'color': themeProvider.errorColor, 'icon': Icons.cancel};
+    } else if (status == 'Out for Delivery') {
+      return {
+        'color': themeProvider.warningColor,
+        'icon': Icons.local_shipping
+      };
+    } else if (status == 'Processing' || status == 'Driver Assigned') {
+      return {
+        'color': themeProvider.warningColor,
+        'icon': Icons.hourglass_top_rounded
+      };
+    } else if (status == 'Customer Unavailable') {
+      return {
+        'color': themeProvider.errorColor,
+        'icon': Icons.person_off_outlined
+      };
     } else {
-      statusIcon = Icons.info;
-      statusColor = themeProvider.secondaryText;
+      // Covers Pending Payment, Awaiting Driver Arrival, Order Placed
+      return {
+        'color': themeProvider.secondaryText.withOpacity(0.8),
+        'icon': Icons.pending_actions_outlined
+      };
     }
-    return {'icon': statusIcon, 'color': statusColor};
   }
 }

@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:firebase_messaging/firebase_messaging.dart'; // Added this import
 
 import '../../providers/theme_provider.dart';
 import '../../models/address_model.dart';
@@ -69,6 +70,32 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
     super.initState();
     _screenOptions = _buildScreenOptions(null);
     _fetchShellData();
+
+    // Listen for foreground FCM messages
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('Foreground message received: ${message.notification?.title}');
+      if (message.notification != null && mounted) {
+        // Show a SnackBar to alert the user
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message.notification!.title ?? 'New Notification'),
+            action: SnackBarAction(
+              label: 'View',
+              onPressed: () {
+                // TODO: Add logic to navigate to the relevant screen,
+                // for example, the order details screen, using the
+                // orderId from message.data
+              },
+            ),
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
   }
 
   Future<void> _fetchShellData({bool isRefresh = false}) async {
