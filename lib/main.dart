@@ -1,6 +1,7 @@
 // File: lib/main.dart
 // ADVISORY: Sentry initialization is now handled directly in the main function.
 
+import 'providers/order_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -104,6 +105,7 @@ Future<void> main() async {
         MultiProvider(
           providers: [
             ChangeNotifierProvider(create: (_) => ThemeProvider()),
+            ChangeNotifierProvider(create: (_) => OrderProvider()),
           ],
           child: const MyApp(),
         ),

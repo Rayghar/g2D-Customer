@@ -22,6 +22,7 @@ import '../../models/driver_info_for_order.dart'; //
 import '../../services/api_service.dart';
 import '../../models/order.dart' as app_order;
 import './payment_screen.dart'; // Added to support Pay Now button
+import '../../providers/order_provider.dart'; // Added to support Pay Now button
 
 // Initialize a logger for this file
 final _logger = Logger('OrderDetailsScreen');
@@ -43,10 +44,7 @@ class OrderDetailsScreen extends StatefulWidget {
 
 class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     with TickerProviderStateMixin {
-  bool _isLoadingOrderDetails = true;
   bool _isCancellingOrder = false;
-  app_order.Order? _orderData;
-  String? _errorMessage;
   bool _feedbackPromptShown = false;
 
   late AnimationController _entryAnimController;
@@ -55,23 +53,27 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   @override
   void initState() {
     super.initState();
-    _logger.info(
-        'OrderDetailsScreen initialized for order ID: ${widget.orderId}'); // Log info
+    _logger
+        .info('OrderDetailsScreen initialized for order ID: ${widget.orderId}');
     Sentry.addBreadcrumb(Breadcrumb(
         category: 'lifecycle',
         message: 'OrderDetailsScreen initialized',
         data: {'order_id': widget.orderId, 'customer_id': widget.customerId},
-        level: SentryLevel.info)); // Sentry breadcrumb
+        level: SentryLevel.info));
 
     // Set orderId as a tag for all events related to this screen
     Sentry.configureScope((scope) {
-      scope.setTag('order_id', widget.orderId); // Set a tag for the order ID
-      scope.setUser(SentryUser(id: widget.customerId)); // Set user context
+      scope.setTag('order_id', widget.orderId);
+      scope.setUser(SentryUser(id: widget.customerId));
     });
 
     _entryAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600));
-    _fetchOrderDetails();
+
+    // Ask the provider to fetch the data as soon as the screen loads.
+    // 'listen: false' is important here because we're in initState.
+    Future.microtask(() => Provider.of<OrderProvider>(context, listen: false)
+        .fetchOrderDetails(widget.orderId));
   }
 
   @override
@@ -87,56 +89,44 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     super.dispose();
   }
 
-  Future<void> _fetchOrderDetails({bool isRefresh = false}) async {
-    if (!mounted) return;
-    _logger.info(
-        'Fetching order details for order ID: ${widget.orderId} (Refresh: $isRefresh)'); // Log info
-    Sentry.addBreadcrumb(Breadcrumb(
-        category: 'data_fetching',
-        message: 'Fetching order details',
-        data: {'order_id': widget.orderId, 'is_refresh': isRefresh},
-        level: SentryLevel.info)); // Sentry breadcrumb
+  void _promptForFeedbackIfNeeded(app_order.Order order) {
+    if (order.status.toLowerCase() == 'delivered' &&
+        order.feedback == null &&
+        !_feedbackPromptShown) {
+      _logger.info(
+          'Prompting for feedback for delivered order: ${order.id}'); // Log info
+      Sentry.addBreadcrumb(Breadcrumb(
+          category: 'feedback',
+          message: 'Prompting for feedback',
+          data: {'order_id': order.id},
+          level: SentryLevel.info)); // Sentry breadcrumb
 
-    if (!isRefresh) {
-      setState(() => _isLoadingOrderDetails = true);
-    }
-    try {
-      final fetchedOrder = await _apiService.getOrderDetails(widget.orderId);
-      if (mounted) {
-        setState(() {
-          _orderData = fetchedOrder;
-          _isLoadingOrderDetails = false;
-          _errorMessage = null;
-        });
-        _entryAnimController.forward(from: 0.0);
-        _logger.info(
-            'Order details fetched successfully for order ID: ${widget.orderId}, status: ${_orderData?.status}'); // Log info
-        Sentry.addBreadcrumb(Breadcrumb(
-            category: 'data_fetching',
-            message: 'Order details fetched successfully',
-            data: {'order_id': widget.orderId, 'status': _orderData?.status},
-            level: SentryLevel.info)); // Sentry breadcrumb
-
-        _promptForFeedbackIfNeeded(fetchedOrder);
-      }
-    } catch (e, st) {
-      // Capture stack trace for Sentry
-      _logger.severe("Error fetching order details for ${widget.orderId}: $e",
-          e, st); // Log severe error
-      Sentry.captureException(e,
-          stackTrace: st,
-          hint: Hint.withMap({
-            // Send error to Sentry
-            'order_id': widget.orderId,
-            'customer_id': widget.customerId,
-            'api_call': 'getOrderDetails',
-          }));
-      if (mounted) {
-        setState(() {
-          _isLoadingOrderDetails = false;
-          _errorMessage = e.toString().replaceFirst("Exception: ", "");
-        });
-      }
+      setState(() => _feedbackPromptShown = true);
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (BuildContext context) {
+              return FeedbackDialog(
+                orderId: order.id,
+                customerId: widget.customerId,
+                onFeedbackSubmitted: () {
+                  _logger.info(
+                      'Feedback submitted, refreshing order details.'); // Log info
+                  Sentry.addBreadcrumb(Breadcrumb(
+                      category: 'feedback',
+                      message: 'Feedback submitted, refreshing order details',
+                      data: {'order_id': order.id},
+                      level: SentryLevel.info)); // Sentry breadcrumb
+                  Provider.of<OrderProvider>(context, listen: false)
+                      .fetchOrderDetails(widget.orderId);
+                },
+              );
+            },
+          );
+        }
+      });
     }
   }
 
@@ -199,54 +189,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     }
   }
 
-  void _promptForFeedbackIfNeeded(app_order.Order order) {
-    if (order.status.toLowerCase() == 'delivered' &&
-        order.feedback == null &&
-        !_feedbackPromptShown) {
-      _logger.info(
-          'Prompting for feedback for delivered order: ${order.id}'); // Log info
-      Sentry.addBreadcrumb(Breadcrumb(
-          category: 'feedback',
-          message: 'Prompting for feedback',
-          data: {'order_id': order.id},
-          level: SentryLevel.info)); // Sentry breadcrumb
-
-      setState(() => _feedbackPromptShown = true);
-      Future.delayed(const Duration(milliseconds: 800), () {
-        if (mounted) {
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (BuildContext context) {
-              return FeedbackDialog(
-                orderId: order.id,
-                customerId: widget.customerId,
-                onFeedbackSubmitted: () {
-                  _logger.info(
-                      'Feedback submitted, refreshing order details.'); // Log info
-                  Sentry.addBreadcrumb(Breadcrumb(
-                      category: 'feedback',
-                      message: 'Feedback submitted, refreshing order details',
-                      data: {'order_id': order.id},
-                      level: SentryLevel.info)); // Sentry breadcrumb
-                  _fetchOrderDetails(isRefresh: true);
-                },
-              );
-            },
-          );
-        }
-      });
-    }
-  }
-
-  Future<void> _handleCancelOrder() async {
-    _logger.info(
-        'User initiated order cancellation for order ID: ${_orderData?.id}'); // Log info
+  Future<void> _handleCancelOrder(String orderId) async {
+    _logger.info('User initiated order cancellation for order ID: $orderId');
     Sentry.addBreadcrumb(Breadcrumb(
         category: 'order_action',
         message: 'User initiated order cancellation dialog',
-        data: {'order_id': _orderData?.id},
-        level: SentryLevel.info)); // Sentry breadcrumb
+        data: {'order_id': orderId},
+        level: SentryLevel.info));
 
     final shouldCancel = await showDialog<bool>(
       context: context,
@@ -266,12 +215,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                     style:
                         GoogleFonts.inter(color: themeProvider.secondaryText)),
                 onPressed: () {
-                  _logger.info(
-                      'Order cancellation dialog: No selected.'); // Log info
+                  _logger.info('Order cancellation dialog: No selected.');
                   Sentry.addBreadcrumb(Breadcrumb(
                       category: 'order_action',
                       message: 'Order cancellation dialog dismissed',
-                      level: SentryLevel.info)); // Sentry breadcrumb
+                      level: SentryLevel.info));
                   Navigator.of(context).pop(false);
                 }),
             TextButton(
@@ -279,12 +227,12 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                     style: GoogleFonts.inter(color: themeProvider.errorColor)),
                 onPressed: () {
                   _logger.info(
-                      'Order cancellation dialog: Yes selected, proceeding to cancel.'); // Log info
+                      'Order cancellation dialog: Yes selected, proceeding to cancel.');
                   Sentry.addBreadcrumb(Breadcrumb(
                       category: 'order_action',
                       message: 'User confirmed order cancellation',
-                      data: {'order_id': _orderData?.id},
-                      level: SentryLevel.info)); // Sentry breadcrumb
+                      data: {'order_id': orderId},
+                      level: SentryLevel.info));
                   Navigator.of(context).pop(true);
                 }),
           ],
@@ -295,45 +243,38 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     if (shouldCancel == true) {
       setState(() => _isCancellingOrder = true);
       try {
-        if (_orderData == null) {
-          throw Exception("Order data is null, cannot cancel.");
-        }
-        final result = await _apiService.cancelOrder(_orderData!.id);
+        final result = await _apiService.cancelOrder(orderId);
         _showFeedbackSnackbar(
             result['message'] ?? 'Order cancelled successfully.',
             isSuccess: true);
         _logger.info(
-            'Order ${_orderData!.id} cancelled successfully. Message: ${result['message']}'); // Log info
+            'Order $orderId cancelled successfully. Message: ${result['message']}');
         Sentry.addBreadcrumb(Breadcrumb(
             category: 'order_action',
             message: 'Order successfully cancelled via API',
-            data: {
-              'order_id': _orderData?.id,
-              'api_response': result['message']
-            },
-            level: SentryLevel.info)); // Sentry breadcrumb
-        await _fetchOrderDetails(isRefresh: true);
+            data: {'order_id': orderId, 'api_response': result['message']},
+            level: SentryLevel.info));
+        // Refresh data from the provider after cancellation
+        Provider.of<OrderProvider>(context, listen: false)
+            .fetchOrderDetails(widget.orderId);
       } catch (e, st) {
-        // Capture stack trace for Sentry
         _showFeedbackSnackbar(e.toString().replaceFirst("Exception: ", ""),
             isError: true);
-        _logger.severe('Error cancelling order ${_orderData?.id}: $e', e,
-            st); // Log severe error
+        _logger.severe('Error cancelling order $orderId: $e', e, st);
         Sentry.captureException(e,
             stackTrace: st,
             hint: Hint.withMap({
-              // Send error to Sentry
-              'order_id': _orderData?.id,
+              'order_id': orderId,
               'customer_id': widget.customerId,
               'action': 'cancel_order',
             }));
       } finally {
         if (mounted) setState(() => _isCancellingOrder = false);
-        _logger.info('Order cancellation process finished.'); // Log info
+        _logger.info('Order cancellation process finished.');
         Sentry.addBreadcrumb(Breadcrumb(
             category: 'order_action',
             message: 'Order cancellation process finished',
-            level: SentryLevel.info)); // Sentry breadcrumb
+            level: SentryLevel.info));
       }
     }
   }
@@ -368,83 +309,87 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    return Scaffold(
-      backgroundColor: themeProvider.appSecondaryBackground,
-      appBar: AppBar(
-        title: Text('Order Details',
-            style: GoogleFonts.inter(
-                fontWeight: FontWeight.w600, color: themeProvider.primaryText)),
-        backgroundColor: themeProvider.cardBackground,
-        elevation: 1.0,
-        leading: IconButton(
-            icon: Icon(Icons.arrow_back_ios_new_rounded,
-                color: themeProvider.primaryText),
-            onPressed: () {
-              _logger.info(
-                  'Back button pressed on OrderDetailsScreen.'); // Log info
-              Sentry.addBreadcrumb(Breadcrumb(
-                  category: 'navigation',
-                  message: 'Back button pressed from OrderDetailsScreen',
-                  data: {'order_id': widget.orderId},
-                  level: SentryLevel.info)); // Sentry breadcrumb
-              Navigator.of(context).pop();
-            }),
-        actions: [
-          IconButton(
-              icon:
-                  Icon(Icons.refresh_rounded, color: themeProvider.primaryText),
-              onPressed: () {
-                _logger.info('Refresh button pressed.'); // Log info
-                Sentry.addBreadcrumb(Breadcrumb(
-                    category: 'ui_action',
-                    message: 'Refresh button pressed',
-                    data: {'order_id': widget.orderId},
-                    level: SentryLevel.info)); // Sentry breadcrumb
-                _fetchOrderDetails(isRefresh: true);
-              },
-              tooltip: "Refresh")
-        ],
-      ),
-      body: _isLoadingOrderDetails
-          ? const Center(child: CircularProgressIndicator())
-          : _errorMessage != null || _orderData == null
-              ? _buildErrorState(
-                  themeProvider, _errorMessage ?? "Order could not be found.")
-              : FadeTransition(
-                  opacity: _entryAnimController,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildStatusAndProgressCard(_orderData!, themeProvider),
-                        const SizedBox(height: 16),
-                        _buildItemsOrderedCard(_orderData!, themeProvider),
-                        const SizedBox(height: 16),
-                        if (_orderData!.driver != null)
-                          Padding(
-                              padding: const EdgeInsets.only(bottom: 16.0),
-                              child: _buildDriverInfoCard(_orderData!.driver!,
-                                  _orderData!, themeProvider)),
-                        _buildDeliveryAddressCard(_orderData!, themeProvider),
-                        const SizedBox(height: 16),
-                        _buildPricingSummaryCard(_orderData!, themeProvider),
-                        const SizedBox(height: 24),
-                        _buildActionButtons(_orderData!, themeProvider),
-                      ],
+
+    // Use a Consumer widget to listen for changes in the OrderProvider
+    return Consumer<OrderProvider>(
+      builder: (context, orderProvider, child) {
+        // Get the specific order and its loading state from the provider
+        final orderData = orderProvider.orders[widget.orderId];
+        final isLoading = orderProvider.isLoading(widget.orderId);
+
+        // Your existing Scaffold goes here
+        return Scaffold(
+          backgroundColor: themeProvider.appSecondaryBackground,
+          appBar: AppBar(
+            title: Text('Order Details',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    color: themeProvider.primaryText)),
+            backgroundColor: themeProvider.cardBackground,
+            elevation: 1.0,
+            leading: IconButton(
+                icon: Icon(Icons.arrow_back_ios_new_rounded,
+                    color: themeProvider.primaryText),
+                onPressed: () {
+                  _logger.info('Back button pressed on OrderDetailsScreen.');
+                  Sentry.addBreadcrumb(Breadcrumb(
+                      category: 'navigation',
+                      message: 'Back button pressed from OrderDetailsScreen',
+                      data: {'order_id': widget.orderId},
+                      level: SentryLevel.info));
+                  Navigator.of(context).pop();
+                }),
+            actions: [
+              IconButton(
+                  icon: Icon(Icons.refresh_rounded,
+                      color: themeProvider.primaryText),
+                  onPressed: () =>
+                      orderProvider.fetchOrderDetails(widget.orderId),
+                  tooltip: "Refresh")
+            ],
+          ),
+          body: (isLoading && orderData == null)
+              ? const Center(child: CircularProgressIndicator())
+              : (orderData == null)
+                  ? _buildErrorState(themeProvider, "Order could not be found.")
+                  : FadeTransition(
+                      opacity: _entryAnimController..forward(),
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildStatusAndProgressCard(
+                                orderData, themeProvider),
+                            const SizedBox(height: 16),
+                            _buildItemsOrderedCard(orderData, themeProvider),
+                            const SizedBox(height: 16),
+                            if (orderData.driver != null)
+                              Padding(
+                                  padding: const EdgeInsets.only(bottom: 16.0),
+                                  child: _buildDriverInfoCard(orderData.driver!,
+                                      orderData, themeProvider)),
+                            _buildDeliveryAddressCard(orderData, themeProvider),
+                            const SizedBox(height: 16),
+                            _buildPricingSummaryCard(orderData, themeProvider),
+                            const SizedBox(height: 24),
+                            _buildActionButtons(orderData, themeProvider),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-      // << NEW: Conditional Bottom Navigation Bar for Payment >>
-      bottomNavigationBar: (_orderData?.status == 'Pending Payment' &&
-              _orderData?.paymentMethod == 'payOnPickup')
-          ? _buildPayNowButton(themeProvider)
-          : null,
+          bottomNavigationBar: (orderData?.status == 'Pending Payment' &&
+                  orderData?.paymentMethod == 'payOnPickup')
+              ? _buildPayNowButton(themeProvider, orderData!)
+              : null,
+        );
+      },
     );
   }
 
   // << NEW WIDGET >>
-  Widget _buildPayNowButton(ThemeProvider themeProvider) {
+  Widget _buildPayNowButton(
+      ThemeProvider themeProvider, app_order.Order orderData) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       decoration: BoxDecoration(
@@ -458,18 +403,27 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
       ),
       child: CustomButton(
         text:
-            'Pay Now (${NumberFormat.currency(locale: 'en_NG', symbol: '₦').format(_orderData!.grandTotal / 100)})',
+            'Pay Now (${NumberFormat.currency(locale: 'en_NG', symbol: '₦').format(orderData.grandTotal / 100)})',
         onPressed: () {
-          // Navigate to the existing PaymentScreen, merging the flow
+          // We navigate to the payment screen. The '.then()' block will automatically
+          // execute after the user finishes the payment flow and returns to this screen.
           Navigator.of(context).pushNamed(
             PaymentScreen.routeName,
             arguments: {
-              'orderId': _orderData!.id,
-              'amount': _orderData!.grandTotal,
-              'customer': _orderData!.customer,
-              'order': _orderData,
+              'orderId': orderData.id,
+              'amount': orderData.grandTotal,
+              'customer': orderData.customer,
+              'order': orderData,
             },
-          );
+          ).then((_) {
+            // This code runs AFTER the payment flow is finished.
+            // We tell our central provider to fetch the latest details for this order.
+            // The screen will then automatically update with the new status, and this button will disappear.
+            _logger
+                .info('Returned from payment flow, refreshing order details.');
+            Provider.of<OrderProvider>(context, listen: false)
+                .fetchOrderDetails(widget.orderId);
+          });
         },
         color: themeProvider.successColor,
         icon: const Icon(Icons.shield_rounded, color: Colors.white),
@@ -501,14 +455,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
             CustomButton(
                 text: "Retry",
                 onPressed: () {
-                  _logger
-                      .info('Retry button pressed on error state.'); // Log info
+                  _logger.info('Retry button pressed on error state.');
                   Sentry.addBreadcrumb(Breadcrumb(
                       category: 'error_recovery',
                       message: 'Retry button pressed on error state',
                       data: {'order_id': widget.orderId},
-                      level: SentryLevel.info)); // Sentry breadcrumb
-                  _fetchOrderDetails(isRefresh: true);
+                      level: SentryLevel.info));
+                  Provider.of<OrderProvider>(context, listen: false)
+                      .fetchOrderDetails(widget.orderId);
                 },
                 color: themeProvider.gas2doorPrimaryBlue),
           ],
@@ -1070,9 +1024,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
       ));
     }
 
-    if (currentOrderStatus == 'Driver Assigned' ||
+    /*if (currentOrderStatus == 'Driver Assigned' ||
         currentOrderStatus == 'Processing' ||
-        currentOrderStatus == 'Out for delivery') {
+        currentOrderStatus == 'Out for Delivery') {
       buttons.add(
         CustomButton(
           text: 'Track My Order',
@@ -1098,14 +1052,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
               color: Colors.white), // Using white for better contrast
         ),
       );
-    }
+    }*/
 
     if (currentOrderStatus == 'Pending Payment' ||
         currentOrderStatus == 'Order Placed' ||
         currentOrderStatus == 'Processing') {
       buttons.add(CustomButton(
           text: 'Cancel Order',
-          onPressed: _isCancellingOrder ? null : _handleCancelOrder,
+          onPressed:
+              _isCancellingOrder ? null : () => _handleCancelOrder(order.id),
           color: themeProvider.errorColor.withOpacity(0.15),
           textStyle: GoogleFonts.inter(
               fontWeight: FontWeight.w600, color: themeProvider.errorColor),
@@ -1149,7 +1104,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     } else if (status == 'Order Placed' ||
         status == 'Processing' ||
         status == 'Driver Assigned' ||
-        status == 'Out for delivery' ||
+        status == 'Out for Delivery' ||
         status == 'Customer Unavailable' ||
         status == 'Issue Reported') {
       return themeProvider.warningColor;
@@ -1167,7 +1122,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     // << MODIFIED: Updated to handle the unified status list >>
     if (status == 'Delivered') {
       return {'color': themeProvider.successColor, 'icon': Icons.check_circle};
-    } else if (status == 'Canceled') {
+    } else if (status.contains('Canceled')) {
       return {'color': themeProvider.errorColor, 'icon': Icons.cancel};
     } else if (status == 'Out for Delivery') {
       return {

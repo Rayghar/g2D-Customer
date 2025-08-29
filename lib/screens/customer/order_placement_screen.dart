@@ -19,6 +19,7 @@ import '../../models/user.dart' as app_user;
 import '../../models/system_config_model.dart';
 import '../../models/place_order_response_model.dart';
 import '../../models/order.dart' as app_order_model;
+import './order_details_screen.dart'; // <-- ADD THIS LINE
 
 import '../../providers/theme_provider.dart';
 import '../../services/api_service.dart';
@@ -875,7 +876,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
         _logger.info(
             'Navigating to OrderSummaryScreen for order ${response.order.id} (no payment needed).');
         Navigator.of(context).pushNamedAndRemoveUntil(
-            OrderSummaryScreen.routeName,
+            OrderDetailsScreen.routeName, // <-- Corrected route
             ModalRoute.withName(CustomerDashboardScreen.routeName),
             arguments: {
               'orderId': response.order.id,

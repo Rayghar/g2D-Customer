@@ -24,6 +24,7 @@ import './order_details_screen.dart';
 import './order_summary_screen.dart';
 import './promotion_details_screen.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // NEW: Import Firebase Messaging
+import '../../providers/order_provider.dart';
 
 final _logger = Logger('HomeScreen');
 
@@ -84,8 +85,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Timer? _promotionTimer;
   //Timer? _activeOrderPollingTimer; // NEW: Timer for active order polling
 
-  app_order.Order? _activeOrder;
-  List<app_order.Order> _recentOrders = [];
   List<PromotionItem> _promotionItems = [];
   CustomerStatsModel? _customerStats; // NEW: Customer stats data
   String? _errorMessage;
@@ -200,21 +199,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         level: SentryLevel.info));
 
     try {
-      const activeOrderStatuses =
-          'Order Placed,Processing,Driver Assigned,Out for delivery,Delivered';
+      // 1. Ask the OrderProvider to fetch the order data first.
+      await Provider.of<OrderProvider>(context, listen: false)
+          .fetchHomeScreenData();
 
-      // << MODIFIED: The API call is updated to the new stats method >>
+      // 2. Then, fetch the other non-order data like before.
       final results = await Future.wait([
         _apiService.getActivePromotions(),
-        _apiService.getCustomerOrders(
-            limit: 1, status: activeOrderStatuses, sortBy: '-orderDate'),
-        _apiService.getCustomerOrders(limit: 3, sortBy: '-orderDate'),
-        _apiService.getCustomerStats(
-            widget.customerIdFromShell!), // Use the new method
+        _apiService.getCustomerStats(widget.customerIdFromShell!),
       ], eagerError: false);
 
       if (!mounted) return;
 
+      // 3. The process function now only handles non-order data.
       _processApiResponse(results);
     } catch (e, st) {
       _logger.severe("Failed to load home screen data: $e", e, st);
@@ -280,54 +277,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           }));
     }
 
-    if (results[1] is Map<String, dynamic>) {
-      final activeOrderResponse = results[1] as Map<String, dynamic>;
-      final activeOrders =
-          activeOrderResponse['orders'] as List<app_order.Order>? ?? [];
-      _activeOrder = activeOrders.isNotEmpty ? activeOrders.first : null;
-      _logger.info('Active order status: ${_activeOrder?.status ?? "None"}');
-    } else {
-      _logger.warning(
-          'Expected Map<String, dynamic> for active order response, got: ${results[1].runtimeType}');
-      Sentry.captureMessage('Unexpected type for active order API response.',
-          level: SentryLevel.warning,
-          hint: Hint.withMap({
-            'expected_type': 'Map<String, dynamic>',
-            'received_type': results[1].runtimeType.toString(),
-            'customer_id': widget.customerIdFromShell,
-          }));
-    }
-
-    if (results[2] is Map<String, dynamic>) {
-      final recentOrdersResponse = results[2] as Map<String, dynamic>;
-      _recentOrders =
-          recentOrdersResponse['orders'] as List<app_order.Order>? ?? [];
-      _logger.info('Processed ${_recentOrders.length} recent orders.');
-    } else {
-      _logger.warning(
-          'Expected Map<String, dynamic> for recent orders response, got: ${results[2].runtimeType}');
-      Sentry.captureMessage('Unexpected type for recent orders API response.',
-          level: SentryLevel.warning,
-          hint: Hint.withMap({
-            'expected_type': 'Map<String, dynamic>',
-            'received_type': results[2].runtimeType.toString(),
-            'customer_id': widget.customerIdFromShell,
-          }));
-    }
-
-    // NEW: Process Customer Stats data
-    if (results[3] is CustomerStatsModel) {
-      _customerStats = results[3] as CustomerStatsModel;
+    if (results[1] is CustomerStatsModel) {
+      _customerStats = results[1] as CustomerStatsModel;
       _logger.info(
           'Processed customer stats: Total Orders: ${_customerStats!.totalOrders}');
     } else {
       _logger.warning(
-          'Expected CustomerStatsModel for customer stats, got: ${results[3].runtimeType}');
+          'Expected CustomerStatsModel for customer stats, got: ${results[1].runtimeType}');
       Sentry.captureMessage('Unexpected type for customer stats API response.',
           level: SentryLevel.warning,
           hint: Hint.withMap({
             'expected_type': 'CustomerStatsModel',
-            'received_type': results[3].runtimeType.toString(),
+            'received_type': results[1].runtimeType.toString(),
             'customer_id': widget.customerIdFromShell,
           }));
     }
@@ -335,7 +296,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() => _isLoading = false);
     _entryAnimController.forward();
     _startPromotionAutoScroll();
-    //_startActiveOrderPolling(); // NEW: Start active order polling
     _logger.info('API response processing complete. UI updated.');
   }
 
@@ -572,30 +532,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final String currentUserName = widget.userNameFromShell ?? "Customer";
 
-    final bool hasActiveOrderData = _activeOrder != null;
-
-    final String ordersActionCardTitle =
-        hasActiveOrderData ? 'Track Active Order' : 'My Orders';
-    final IconData ordersActionCardIcon =
-        hasActiveOrderData ? Icons.route_outlined : Icons.receipt_long_outlined;
-
-    VoidCallback ordersActionCardOnTap = () {
-      HapticFeedback.lightImpact();
-      _logger.info(
-          'Order action card tapped. Has active order: $hasActiveOrderData');
-      Sentry.addBreadcrumb(Breadcrumb(
-          category: 'ui_action',
-          message: 'Order Action Card tapped',
-          data: {'has_active_order': hasActiveOrderData},
-          level: SentryLevel.info));
-
-      if (hasActiveOrderData) {
-        _navigateToOrderDetails(_activeOrder!.id);
-      } else {
-        widget.onSwitchTab(1);
-      }
-    };
-
     return Scaffold(
       backgroundColor: themeProvider.appSecondaryBackground,
       body: RefreshIndicator(
@@ -609,112 +545,140 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         },
         color: themeProvider.gas2doorPrimaryBlue,
         backgroundColor: themeProvider.cardBackground,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildAddressDisplayWidget(themeProvider),
-              if (_isLoading)
-                Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 150.0),
-                    child: Center(
-                        child: CircularProgressIndicator(
-                            color: themeProvider.gas2doorPrimaryBlue)))
-              else if (_errorMessage != null)
-                Center(
-                    child: Padding(
-                        padding: const EdgeInsets.all(30.0),
-                        child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.cloud_off_rounded,
-                                  size: 50, color: themeProvider.secondaryText),
-                              const SizedBox(height: 16),
-                              Text(_errorMessage!,
-                                  textAlign: TextAlign.center,
+        child: Consumer<OrderProvider>(
+          // 1. Wrap the body with a Consumer
+          builder: (context, orderProvider, child) {
+            // 2. Get the order-related data from the provider
+            final activeOrder = orderProvider.activeOrder;
+            final recentOrders = orderProvider.recentOrders;
+            final bool hasActiveOrderData = activeOrder != null;
+
+            // 3. Your existing UI and variables for other data remain the same
+            final String ordersActionCardTitle =
+                hasActiveOrderData ? 'Track Active Order' : 'My Orders';
+            final IconData ordersActionCardIcon = hasActiveOrderData
+                ? Icons.route_outlined
+                : Icons.receipt_long_outlined;
+
+            VoidCallback ordersActionCardOnTap = () {
+              if (hasActiveOrderData) {
+                _navigateToOrderDetails(activeOrder.id);
+              } else {
+                widget.onSwitchTab(1);
+              }
+            };
+
+            // 4. The rest of your build method uses these variables
+            return SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildAddressDisplayWidget(themeProvider),
+                  if (_isLoading) // Use the local _isLoading for overall page load
+                    Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 150.0),
+                        child: Center(
+                            child: CircularProgressIndicator(
+                                color: themeProvider.gas2doorPrimaryBlue)))
+                  else if (_errorMessage != null)
+                    Center(
+                        child: Padding(
+                            padding: const EdgeInsets.all(30.0),
+                            child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.cloud_off_rounded,
+                                      size: 50,
+                                      color: themeProvider.secondaryText),
+                                  const SizedBox(height: 16),
+                                  Text(_errorMessage!,
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.inter(
+                                          color: themeProvider.secondaryText,
+                                          fontSize: 16)),
+                                  const SizedBox(height: 20),
+                                  CustomButton(
+                                      text: "Retry",
+                                      onPressed: () {
+                                        _logger.info(
+                                            'Retry button pressed on error state.');
+                                        Sentry.addBreadcrumb(Breadcrumb(
+                                            category: 'error_recovery',
+                                            message:
+                                                'Retry button pressed on home screen error',
+                                            level: SentryLevel.info));
+                                        _loadAllHomeScreenData(isRefresh: true);
+                                      },
+                                      color: themeProvider.gas2doorPrimaryBlue)
+                                ])))
+                  else
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SlideTransition(
+                              position: _sectionSlideAnimations[0],
+                              child: Text('Hi, $currentUserName!',
                                   style: GoogleFonts.inter(
-                                      color: themeProvider.secondaryText,
-                                      fontSize: 16)),
-                              const SizedBox(height: 20),
-                              CustomButton(
-                                  text: "Retry",
-                                  onPressed: () {
-                                    _logger.info(
-                                        'Retry button pressed on error state.');
-                                    Sentry.addBreadcrumb(Breadcrumb(
-                                        category: 'error_recovery',
-                                        message:
-                                            'Retry button pressed on home screen error',
-                                        level: SentryLevel.info));
-                                    _loadAllHomeScreenData(isRefresh: true);
-                                  },
-                                  color: themeProvider.gas2doorPrimaryBlue)
-                            ])))
-              else
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SlideTransition(
-                          position: _sectionSlideAnimations[0],
-                          child: Text('Hi, $currentUserName!',
-                              style: GoogleFonts.inter(
-                                  fontSize: 26.0,
-                                  fontWeight: FontWeight.bold,
-                                  color: themeProvider.primaryText,
-                                  height: 1.3))),
-                      const SizedBox(height: 20.0),
-                      SlideTransition(
-                          position: _sectionSlideAnimations[1],
-                          child: Row(
-                            children: [
-                              Expanded(
-                                  child: _buildActionCard(
-                                      iconData:
-                                          Icons.local_gas_station_outlined,
-                                      title: 'New Order',
-                                      backgroundColor: themeProvider
-                                          .gas2doorPrimaryBlueLightVer,
-                                      iconTextColor:
-                                          themeProvider.infoColorOnDarkBgs,
-                                      onTap: () => _navigateToOrderPlacement(),
-                                      themeProvider: themeProvider)),
-                              const SizedBox(width: 16.0),
-                              Expanded(
-                                  child: _buildActionCard(
-                                      iconData: ordersActionCardIcon,
-                                      title: ordersActionCardTitle,
-                                      backgroundColor:
-                                          themeProvider.gas2doorTealLightVer,
-                                      iconTextColor:
-                                          themeProvider.infoColorOnDarkBgs,
-                                      onTap: ordersActionCardOnTap,
-                                      themeProvider: themeProvider)),
-                            ],
-                          )),
-                      const SizedBox(height: 24.0),
-                      if (_promotionItems.isNotEmpty)
-                        SlideTransition(
-                            position: _sectionSlideAnimations[2],
-                            child: _buildPromotionsSection(themeProvider)),
-                      if (hasActiveOrderData)
-                        SlideTransition(
-                            position: _sectionSlideAnimations[3],
-                            child: _buildActiveOrderCard(
-                                themeProvider, _activeOrder!)),
-                      if (hasActiveOrderData) const SizedBox(height: 24.0),
-                      SlideTransition(
-                          position: _sectionSlideAnimations[4],
-                          child: _buildOrderHistorySection(
-                              themeProvider: themeProvider,
-                              orders: _recentOrders)),
-                      const SizedBox(height: 20),
-                    ],
-                  ),
-                ),
-            ],
-          ),
+                                      fontSize: 26.0,
+                                      fontWeight: FontWeight.bold,
+                                      color: themeProvider.primaryText,
+                                      height: 1.3))),
+                          const SizedBox(height: 20.0),
+                          SlideTransition(
+                              position: _sectionSlideAnimations[1],
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                      child: _buildActionCard(
+                                          iconData:
+                                              Icons.local_gas_station_outlined,
+                                          title: 'New Order',
+                                          backgroundColor: themeProvider
+                                              .gas2doorPrimaryBlueLightVer,
+                                          iconTextColor:
+                                              themeProvider.infoColorOnDarkBgs,
+                                          onTap: () =>
+                                              _navigateToOrderPlacement(),
+                                          themeProvider: themeProvider)),
+                                  const SizedBox(width: 16.0),
+                                  Expanded(
+                                      child: _buildActionCard(
+                                          iconData: ordersActionCardIcon,
+                                          title: ordersActionCardTitle,
+                                          backgroundColor: themeProvider
+                                              .gas2doorTealLightVer,
+                                          iconTextColor:
+                                              themeProvider.infoColorOnDarkBgs,
+                                          onTap: ordersActionCardOnTap,
+                                          themeProvider: themeProvider)),
+                                ],
+                              )),
+                          const SizedBox(height: 24.0),
+                          if (_promotionItems.isNotEmpty)
+                            SlideTransition(
+                                position: _sectionSlideAnimations[2],
+                                child: _buildPromotionsSection(themeProvider)),
+                          if (hasActiveOrderData)
+                            SlideTransition(
+                                position: _sectionSlideAnimations[3],
+                                child: _buildActiveOrderCard(
+                                    themeProvider, activeOrder)),
+                          if (hasActiveOrderData) const SizedBox(height: 24.0),
+                          SlideTransition(
+                              position: _sectionSlideAnimations[4],
+                              child: _buildOrderHistorySection(
+                                  themeProvider: themeProvider,
+                                  orders: recentOrders)),
+                          const SizedBox(height: 20),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -1176,27 +1140,32 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         onTap: () {
           HapticFeedback.lightImpact();
           _logger.info('Recent order item tapped for order ID: ${order.id}');
-          Sentry.addBreadcrumb(Breadcrumb(
-              category: 'ui_action',
-              message: 'Recent Order Item tapped',
-              data: {'order_id': order.id, 'status': order.status},
-              level: SentryLevel.info));
 
-          if (order.paymentStatus.toLowerCase() == 'pending') {
-            Navigator.of(context, rootNavigator: true).pushNamed(
-              OrderSummaryScreen.routeName,
-              arguments: {
-                'orderId': order.id,
-                'customerId': widget.customerIdFromShell!,
-                'isVerifyingPayment': true,
-                'orderPayload': order, // Pass the order object itself
-              },
-            );
-            _logger.info(
-                'Navigating to payment verification for pending order: ${order.id}');
+          // ======================= INTELLIGENT FIX STARTS HERE =======================
+          if (order.status == 'Pending Payment') {
+            // Case A: This is a "Pay on Arrival" order and the driver has arrived.
+            // Navigate to the OrderDetailsScreen so the customer can find the "Pay Now" button.
+            if (order.paymentMethod == 'payOnPickup') {
+              _navigateToOrderDetails(order.id);
+            } else {
+              // Case B: This is a regular online order where payment is still pending.
+              // Navigate to the payment verification screen as originally intended.
+              Navigator.of(context, rootNavigator: true).pushNamed(
+                OrderSummaryScreen.routeName,
+                arguments: {
+                  'orderId': order.id,
+                  'customerId': widget.customerIdFromShell!,
+                  'isVerifyingPayment': true,
+                  'orderPayload': order,
+                },
+              );
+            }
           } else {
+            // For all other statuses ('Awaiting Driver Arrival', 'Delivered', etc.),
+            // the correct destination is the standard order details screen.
             _navigateToOrderDetails(order.id);
           }
+          // ======================== INTELLIGENT FIX ENDS HERE ========================
         },
         borderRadius: themeProvider.cardBorderRadius,
         child: Padding(
@@ -1204,6 +1173,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ... The rest of this widget's UI code remains exactly the same
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1245,11 +1215,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       onPressed: () {
                         _logger.info(
                             'Reorder button pressed for order: ${order.id}');
-                        Sentry.addBreadcrumb(Breadcrumb(
-                            category: 'ui_action',
-                            message: 'Reorder button pressed',
-                            data: {'order_id': order.id},
-                            level: SentryLevel.info));
                         _navigateToReorder(order);
                       },
                       height: 36,

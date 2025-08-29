@@ -16,6 +16,7 @@ import '../../models/address_model.dart';
 import './order_placement_screen.dart';
 import '../../services/api_service.dart';
 import '../../models/order.dart' as app_order;
+import '../../providers/order_provider.dart';
 
 class OrderListScreen extends StatefulWidget {
   static const String routeName = '/order_list_customer';
@@ -35,19 +36,11 @@ class OrderListScreen extends StatefulWidget {
 }
 
 class _OrderListScreenState extends State<OrderListScreen>
-    with TickerProviderStateMixin {
-  bool _isLoading = true;
-  List<app_order.Order> _orders = [];
-  String? _errorMessage;
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   String? _selectedStatusFilter;
   DateTime? _selectedStartDate;
   DateTime? _selectedEndDate;
-  int _currentPage = 1;
-  int _totalPages = 1;
-  bool _isFetchingMore = false;
-
-  late AnimationController _listAnimationController;
-  final ScrollController _scrollController = ScrollController();
+  String? _errorMessage;
 
   final ApiService _apiService = ApiService();
   final List<String> _availableStatuses = [
@@ -60,18 +53,21 @@ class _OrderListScreenState extends State<OrderListScreen>
     "Cancelled"
   ];
 
+  late AnimationController _listAnimationController;
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _listAnimationController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
+
+    // 2. Start listening for app lifecycle changes (like resuming the app).
+    WidgetsBinding.instance.addObserver(this);
+
     if (widget.customerId != null) {
-      _fetchOrders(page: 1);
-    } else {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = "Login required to view orders.";
-      });
+      Future.microtask(() => Provider.of<OrderProvider>(context, listen: false)
+          .fetchOrderList(isRefresh: true));
     }
     _scrollController.addListener(_onScroll);
   }
@@ -80,66 +76,32 @@ class _OrderListScreenState extends State<OrderListScreen>
   void dispose() {
     _listAnimationController.dispose();
     _scrollController.dispose();
+    // 3. Stop listening when the screen is removed.
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  void _onScroll() {
-    if (_scrollController.position.pixels >=
-            _scrollController.position.maxScrollExtent - 200 &&
-        !_isFetchingMore &&
-        _currentPage < _totalPages) {
-      _fetchOrders(page: _currentPage + 1, isLoadMore: true);
+  // 4. This new method is called whenever the app's state changes.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // When the app is resumed from the background, we want to refresh the data.
+    if (state == AppLifecycleState.resumed) {
+      Provider.of<OrderProvider>(context, listen: false)
+          .fetchOrderList(isRefresh: true);
     }
   }
 
-  Future<void> _fetchOrders(
-      {int page = 1, bool isRefresh = false, bool isLoadMore = false}) async {
-    if (!mounted) return;
-    if (isLoadMore) {
-      setState(() => _isFetchingMore = true);
-    } else {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
-    }
+  // ... The rest of your functions (_onScroll, _applyFiltersFromSheet, build, etc.)
+  // remain exactly the same as before. No changes are needed there.
 
-    try {
-      final paginatedResponse = await _apiService.getCustomerOrders(
-        page: page,
-        limit: 15,
-        status: _selectedStatusFilter == "All" ? null : _selectedStatusFilter,
-        // CORRECTED: Removed startDate and endDate parameters as they are not supported
-      );
-
-      if (mounted) {
-        final List<app_order.Order> fetchedOrders =
-            paginatedResponse['orders'] as List<app_order.Order>;
-
-        setState(() {
-          if (isLoadMore) {
-            _orders.addAll(fetchedOrders);
-          } else {
-            _orders = fetchedOrders;
-          }
-          _currentPage = paginatedResponse['currentPage'] as int? ?? 1;
-          _totalPages = paginatedResponse['totalPages'] as int? ?? 1;
-          _isLoading = false;
-          _isFetchingMore = false;
-        });
-
-        if (!isLoadMore && _orders.isNotEmpty) {
-          _listAnimationController.forward(from: 0.0);
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _isFetchingMore = false;
-          _errorMessage = e.toString().replaceFirst("Exception: ", "");
-        });
-      }
+  void _onScroll() {
+    final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+    if (_scrollController.position.pixels >=
+            _scrollController.position.maxScrollExtent - 200 &&
+        !orderProvider.isFetchingMore &&
+        orderProvider.currentPage < orderProvider.totalPages) {
+      orderProvider.fetchOrderList(statusFilter: _selectedStatusFilter);
     }
   }
 
@@ -148,10 +110,9 @@ class _OrderListScreenState extends State<OrderListScreen>
       _selectedStatusFilter = status;
       _selectedStartDate = start;
       _selectedEndDate = end;
-      _currentPage = 1;
-      _orders.clear();
     });
-    _fetchOrders(page: 1, isRefresh: true);
+    Provider.of<OrderProvider>(context, listen: false).fetchOrderList(
+        isRefresh: true, statusFilter: status == "All" ? null : status);
     Navigator.pop(context);
   }
 
@@ -313,19 +274,8 @@ class _OrderListScreenState extends State<OrderListScreen>
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    return Navigator(
-        key: widget.navigatorKey,
-        initialRoute: '/',
-        onGenerateRoute: (RouteSettings settings) {
-          return MaterialPageRoute(
-              builder: (context) =>
-                  _buildOrderListContent(context, themeProvider),
-              settings: settings);
-        });
-  }
+    final orderProvider = Provider.of<OrderProvider>(context, listen: false);
 
-  Widget _buildOrderListContent(
-      BuildContext context, ThemeProvider themeProvider) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: themeProvider.cardBackground,
@@ -345,7 +295,10 @@ class _OrderListScreenState extends State<OrderListScreen>
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () => _fetchOrders(isRefresh: true),
+        onRefresh: () => orderProvider.fetchOrderList(
+            isRefresh: true,
+            statusFilter:
+                _selectedStatusFilter == "All" ? null : _selectedStatusFilter),
         color: themeProvider.gas2doorPrimaryBlue,
         backgroundColor: themeProvider.cardBackground,
         child: _buildBody(themeProvider),
@@ -355,43 +308,51 @@ class _OrderListScreenState extends State<OrderListScreen>
   }
 
   Widget _buildBody(ThemeProvider themeProvider) {
-    if (_isLoading && _orders.isEmpty)
-      return _buildLoadingShimmer(themeProvider);
-    if (_errorMessage != null) return _buildErrorState(themeProvider);
-    if (_orders.isEmpty)
-      return _buildEmptyState(themeProvider,
-          isFiltered: _selectedStatusFilter != null);
+    return Consumer<OrderProvider>(
+      builder: (context, orderProvider, child) {
+        final orders = orderProvider.orderList;
+        final isLoading = orderProvider.isLoadingList;
+        final isFetchingMore = orderProvider.isFetchingMore;
 
-    return ListView.separated(
-      controller: _scrollController,
-      padding: const EdgeInsets.all(16.0),
-      itemCount: _orders.length + (_isFetchingMore ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (index == _orders.length) {
-          return const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20.0),
-              child: Center(child: CircularProgressIndicator()));
-        }
-        final order = _orders[index];
-        final itemAnimation =
-            Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero)
-                .animate(CurvedAnimation(
-                    parent: _listAnimationController,
-                    curve: Interval((0.1 * index).clamp(0.0, 1.0),
-                        (0.6 + 0.1 * index).clamp(0.0, 1.0),
-                        curve: Curves.easeOutCubic)));
-        return FadeTransition(
-          opacity: _listAnimationController,
-          child: SlideTransition(
-            position: itemAnimation,
-            child: UnifiedOrderCard(
-                order: order,
-                themeProvider: themeProvider,
-                onTap: () => _navigateToOrderDetails(order.id)),
-          ),
+        if (isLoading && orders.isEmpty)
+          return _buildLoadingShimmer(themeProvider);
+        if (_errorMessage != null) return _buildErrorState(themeProvider);
+        if (orders.isEmpty)
+          return _buildEmptyState(themeProvider,
+              isFiltered: _selectedStatusFilter != null);
+        _listAnimationController.forward();
+        return ListView.separated(
+          controller: _scrollController,
+          padding: const EdgeInsets.all(16.0),
+          itemCount: orders.length + (isFetchingMore ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index == orders.length) {
+              return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20.0),
+                  child: Center(child: CircularProgressIndicator()));
+            }
+            final order = orders[index];
+            final itemAnimation =
+                Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero)
+                    .animate(CurvedAnimation(
+                        parent: _listAnimationController,
+                        curve: Interval((0.1 * index).clamp(0.0, 1.0),
+                            (0.6 + 0.1 * index).clamp(0.0, 1.0),
+                            curve: Curves.easeOutCubic)));
+            return FadeTransition(
+              opacity: _listAnimationController,
+              child: SlideTransition(
+                position: itemAnimation,
+                child: UnifiedOrderCard(
+                    order: order,
+                    themeProvider: themeProvider,
+                    onTap: () => _navigateToOrderDetails(order.id)),
+              ),
+            );
+          },
+          separatorBuilder: (context, index) => const SizedBox(height: 12),
         );
       },
-      separatorBuilder: (context, index) => const SizedBox(height: 12),
     );
   }
 
@@ -470,7 +431,7 @@ class _OrderListScreenState extends State<OrderListScreen>
                       fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Text(
-                  _errorMessage ??
+                  "Order could not be found." ??
                       'Please check your connection and try again.',
                   style: GoogleFonts.inter(
                       fontSize: 15, color: themeProvider.secondaryText),
@@ -478,7 +439,7 @@ class _OrderListScreenState extends State<OrderListScreen>
               const SizedBox(height: 24),
               CustomButton(
                   text: "Retry",
-                  onPressed: () => _fetchOrders(isRefresh: true),
+                  onPressed: () => print("hi"),
                   color: themeProvider.gas2doorPrimaryBlue,
                   icon: Icon(Icons.refresh_rounded,
                       color: themeProvider.infoColorOnDarkBgs))
@@ -532,7 +493,10 @@ class _OrderListScreenState extends State<OrderListScreen>
                         _selectedStartDate = null;
                         _selectedEndDate = null;
                       });
-                      _fetchOrders(page: 1, isRefresh: true);
+                      Provider.of<OrderProvider>(context, listen: false)
+                          .fetchOrderList(
+                              isRefresh: true,
+                              statusFilter: _selectedStatusFilter);
                     },
                     color: themeProvider.secondaryText.withOpacity(0.2),
                     textStyle: GoogleFonts.inter(
@@ -620,15 +584,25 @@ class UnifiedOrderCard extends StatelessWidget {
 
   Widget _buildStatusTag(app_order.Order order, ThemeProvider themeProvider) {
     Color statusColor;
-    String statusText = order.status;
-    String normalizedStatus = order.status.toLowerCase();
+    String statusText =
+        order.formattedStatus; // Use the formatted status for display
+    String rawStatus = order.status.toLowerCase();
 
-    if (normalizedStatus.contains('delivered')) {
-      statusColor = themeProvider.successColor;
-    } else if (normalizedStatus.contains('cancelled')) {
-      statusColor = themeProvider.errorColor;
+    // This expanded logic assigns a color to each important status group
+    if (rawStatus.contains('delivered')) {
+      statusColor = themeProvider.successColor; // Green
+    } else if (rawStatus.contains('cancel') || rawStatus.contains('failed')) {
+      statusColor = themeProvider.errorColor; // Red
+    } else if (rawStatus.contains('processing') ||
+        rawStatus.contains('out for delivery') ||
+        rawStatus.contains('driver assigned')) {
+      statusColor = themeProvider.warningColor; // Amber/Orange
+    } else if (rawStatus.contains('pending payment') ||
+        rawStatus.contains('awaiting driver arrival') ||
+        rawStatus.contains('order placed')) {
+      statusColor = themeProvider.secondaryText; // Neutral Gray
     } else {
-      statusColor = themeProvider.secondaryText;
+      statusColor = themeProvider.secondaryText; // Default fallback
     }
 
     return Container(
