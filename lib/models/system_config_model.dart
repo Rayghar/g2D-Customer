@@ -74,15 +74,30 @@ class FeeSettings {
   }
 }
 
+// <<-- NEW: Create a class to model a single price override -->>
+class PriceOverride {
+  final String cylinderId;
+  final double newPrice; // Stored in kobo
+
+  PriceOverride({required this.cylinderId, required this.newPrice});
+
+  factory PriceOverride.fromJson(Map<String, dynamic> json) {
+    return PriceOverride(
+      cylinderId: json['cylinderId'] as String? ?? '',
+      newPrice: (json['newPrice'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
+
 class ServiceZone {
   final String id;
   final String outOfZoneMessage;
   final List<List<double>> coordinates;
+  final double deliveryFee;
+  final double expressSurcharge;
 
-  // ======================= NEW FIELDS START HERE =======================
-  final double deliveryFee; // in kobo
-  final double expressSurcharge; // in kobo
-  // ======================== NEW FIELDS END HERE ========================
+  // <<-- NEW: Add the list of price overrides to the model -->>
+  final List<PriceOverride> priceOverrides;
 
   ServiceZone({
     required this.id,
@@ -90,6 +105,7 @@ class ServiceZone {
     required this.outOfZoneMessage,
     required this.deliveryFee,
     required this.expressSurcharge,
+    required this.priceOverrides, // Add to constructor
   });
 
   factory ServiceZone.fromJson(Map<String, dynamic> json) {
@@ -130,10 +146,13 @@ class ServiceZone {
         outOfZoneMessage: json['outOfZoneMessage'] as String? ??
             'Default out of zone message.',
         coordinates: finalRing,
-        // ======================= NEW FIELDS START HERE =======================
         deliveryFee: (json['deliveryFee'] as num?)?.toDouble() ?? 0.0,
         expressSurcharge: (json['expressSurcharge'] as num?)?.toDouble() ?? 0.0,
-        // ======================== NEW FIELDS END HERE ========================
+
+        // <<-- NEW: Parse the priceOverrides array from the JSON -->>
+        priceOverrides: (json['priceOverrides'] as List<dynamic>? ?? [])
+            .map((item) => PriceOverride.fromJson(item as Map<String, dynamic>))
+            .toList(),
       );
     } catch (e, st) {
       _logger.severe(
@@ -141,12 +160,14 @@ class ServiceZone {
           e,
           st);
       return ServiceZone(
-          id: json['id'] as String? ?? '',
-          coordinates: [],
-          outOfZoneMessage: 'Parsing failed.',
-          // Add default values for the new fields in the error case
-          deliveryFee: 0.0,
-          expressSurcharge: 0.0);
+        id: json['id'] as String? ?? '',
+        coordinates: [],
+        outOfZoneMessage: 'Parsing failed.',
+        // Add default values for the new fields in the error case
+        deliveryFee: 0.0,
+        expressSurcharge: 0.0,
+        priceOverrides: [],
+      );
     }
   }
 }

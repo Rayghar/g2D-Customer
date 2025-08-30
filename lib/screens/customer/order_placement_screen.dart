@@ -296,17 +296,6 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
               message: 'User profile and system config loaded',
               level: SentryLevel.info));
 
-          _availableCylindersFromConfig = systemConfig.cylinderSettings
-              .where((cs) => cs.isActive == true)
-              .map((cs) => GasCylinder(
-                  id: cs.id,
-                  sizeLabel: cs.name,
-                  price: cs.price /
-                      100.0)) // FIX: Divide by 100.0 to convert kobo to naira
-              .toList();
-          _logger.info(
-              'Available cylinders from config: ${_availableCylindersFromConfig.length}'); // Log info
-
           if (_selectedDeliveryAddress == null &&
               userProfile.defaultAddressId != null &&
               userProfile.defaultAddressId!.isNotEmpty) {
@@ -315,6 +304,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
             _isLoadingAddress = false;
             _logger.info(
                 'No default address to fetch or initial address already set.'); // Log info
+            // <<-- ADD THIS CALL -->>
+            _updateCylinderPricesForZone();
           }
 
           _prepopulateItemsIfNeeded();
@@ -384,6 +375,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                 'Could not set default address (no addresses or not found)',
             level: SentryLevel.warning));
       }
+      _updateCylinderPricesForZone();
     } catch (e, st) {
       // Capture stack trace for Sentry
       _logger.severe(
@@ -479,6 +471,8 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
 
     if (result != null && result is AddressModel && mounted) {
       setState(() => _selectedDeliveryAddress = result);
+      // <<-- ADD THIS CALL -->>
+      _updateCylinderPricesForZone();
       _showFeedbackSnackbar('Delivery address updated.', isSuccess: true);
       _logger.info(
           'Delivery address successfully updated to: ${result.fullAddress}'); // Log info
@@ -552,6 +546,46 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       }
       _logger.fine(
           'Current order items: ${_orderItems.map((e) => '${e.cylinder.sizeLabel} x ${e.quantity}').join(', ')}'); // Log fine
+    });
+  }
+
+  // Add the following new method inside your _OrderPlacementScreenState class.
+  // This is the core logic for applying dynamic prices.
+  void _updateCylinderPricesForZone() {
+    if (_systemConfig == null || _selectedDeliveryAddress == null) return;
+
+    final lat = _selectedDeliveryAddress!.latitude;
+    final lng = _selectedDeliveryAddress!.longitude;
+    final activeZones = _systemConfig!.activeZones;
+
+    ServiceZone? currentZone;
+    if (lat != null && lng != null) {
+      // Find the zone that contains the user's address
+      currentZone = activeZones.firstWhereOrNull(
+          (zone) => _isPointInZone(lat, lng, zone.coordinates));
+    }
+
+    // Create a map of price overrides from the current zone for quick lookup.
+    final priceOverrideMap = {
+      if (currentZone != null)
+        for (var override in currentZone.priceOverrides)
+          override.cylinderId: override.newPrice
+    };
+
+    // Rebuild the list of available cylinders with potentially updated prices.
+    setState(() {
+      _availableCylindersFromConfig = _systemConfig!.cylinderSettings
+          .where((cs) => cs.isActive == true)
+          .map((cs) {
+        // If an override exists for this cylinder in the current zone, use it.
+        // Otherwise, use the default price from the system config.
+        final effectivePrice = priceOverrideMap[cs.id] ?? cs.price;
+        return GasCylinder(
+            id: cs.id,
+            sizeLabel: cs.name,
+            price: effectivePrice / 100.0 // Convert from kobo for display
+            );
+      }).toList();
     });
   }
 
