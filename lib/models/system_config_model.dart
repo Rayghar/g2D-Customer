@@ -79,15 +79,22 @@ class ServiceZone {
   final String outOfZoneMessage;
   final List<List<double>> coordinates;
 
-  ServiceZone(
-      {required this.id,
-      required this.coordinates,
-      required this.outOfZoneMessage});
+  // ======================= NEW FIELDS START HERE =======================
+  final double deliveryFee; // in kobo
+  final double expressSurcharge; // in kobo
+  // ======================== NEW FIELDS END HERE ========================
+
+  ServiceZone({
+    required this.id,
+    required this.coordinates,
+    required this.outOfZoneMessage,
+    required this.deliveryFee,
+    required this.expressSurcharge,
+  });
 
   factory ServiceZone.fromJson(Map<String, dynamic> json) {
     _logger.fine('Starting to parse ServiceZone JSON for ID: ${json['id']}');
     try {
-      // The coordinates field in GeoJSON Polygon is [[[lng, lat], [lng, lat], ...]]
       final List<dynamic> polygons =
           json['area']?['coordinates'] as List? ?? [];
       List<List<double>> finalRing = [];
@@ -99,12 +106,12 @@ class ServiceZone {
           finalRing = points.map((point) {
             final pointList = point as List? ?? [];
             if (pointList.length >= 2) {
-              // Handle both plain numbers and the MongoDB {$numberDouble: "..."} format
               final lng = pointList[0] is Map
                   ? double.tryParse(
                           pointList[0]['\$numberDouble'].toString()) ??
                       0.0
                   : (pointList[0] as num).toDouble();
+
               final lat = pointList[1] is Map
                   ? double.tryParse(
                           pointList[1]['\$numberDouble'].toString()) ??
@@ -123,6 +130,10 @@ class ServiceZone {
         outOfZoneMessage: json['outOfZoneMessage'] as String? ??
             'Default out of zone message.',
         coordinates: finalRing,
+        // ======================= NEW FIELDS START HERE =======================
+        deliveryFee: (json['deliveryFee'] as num?)?.toDouble() ?? 0.0,
+        expressSurcharge: (json['expressSurcharge'] as num?)?.toDouble() ?? 0.0,
+        // ======================== NEW FIELDS END HERE ========================
       );
     } catch (e, st) {
       _logger.severe(
@@ -132,7 +143,10 @@ class ServiceZone {
       return ServiceZone(
           id: json['id'] as String? ?? '',
           coordinates: [],
-          outOfZoneMessage: 'Parsing failed.');
+          outOfZoneMessage: 'Parsing failed.',
+          // Add default values for the new fields in the error case
+          deliveryFee: 0.0,
+          expressSurcharge: 0.0);
     }
   }
 }

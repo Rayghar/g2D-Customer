@@ -172,7 +172,7 @@ class Order {
         return 'Processing';
       case 'Driver Assigned':
         return 'Driver Assigned';
-      case 'Out for delivery': // Matches the backend enum string
+      case 'Out for Delivery': // Matches the backend enum string
         return 'Out for Delivery'; // Display format
       case 'Delivered':
         return 'Delivered';

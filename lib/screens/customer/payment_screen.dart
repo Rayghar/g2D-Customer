@@ -251,6 +251,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (isPaid) {
         _showFeedbackSnackbar('Payment initiated. Verifying with server...',
             isSuccess: true);
+        try {
+          await _apiService.markOrderAsVerifying(widget.orderId);
+        } catch (e) {
+          _logger.warning(
+              "Failed to mark order as verifying, but proceeding with navigation: $e");
+        }
         _logger.info(
             'Payment successful. Navigating to OrderSummaryScreen for verification.'); // Log info
         Sentry.addBreadcrumb(Breadcrumb(

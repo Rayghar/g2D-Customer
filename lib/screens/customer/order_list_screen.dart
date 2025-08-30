@@ -17,6 +17,7 @@ import './order_placement_screen.dart';
 import '../../services/api_service.dart';
 import '../../models/order.dart' as app_order;
 import '../../providers/order_provider.dart';
+import './order_summary_screen.dart';
 
 class OrderListScreen extends StatefulWidget {
   static const String routeName = '/order_list_customer';
@@ -314,12 +315,14 @@ class _OrderListScreenState extends State<OrderListScreen>
         final isLoading = orderProvider.isLoadingList;
         final isFetchingMore = orderProvider.isFetchingMore;
 
-        if (isLoading && orders.isEmpty)
+        if (isLoading && orders.isEmpty) {
           return _buildLoadingShimmer(themeProvider);
+        }
         if (_errorMessage != null) return _buildErrorState(themeProvider);
-        if (orders.isEmpty)
+        if (orders.isEmpty) {
           return _buildEmptyState(themeProvider,
               isFiltered: _selectedStatusFilter != null);
+        }
         _listAnimationController.forward();
         return ListView.separated(
           controller: _scrollController,
@@ -344,9 +347,47 @@ class _OrderListScreenState extends State<OrderListScreen>
               child: SlideTransition(
                 position: itemAnimation,
                 child: UnifiedOrderCard(
-                    order: order,
-                    themeProvider: themeProvider,
-                    onTap: () => _navigateToOrderDetails(order.id)),
+                  order: order,
+                  themeProvider: themeProvider,
+                  // ======================= FIX APPLIED HERE =======================
+                  onTap: () {
+                    HapticFeedback.lightImpact();
+
+                    // 1. If payment is being verified, always go to the verification screen.
+                    if (order.status == 'Verifying Payment') {
+                      Navigator.of(context, rootNavigator: true).pushNamed(
+                        OrderSummaryScreen.routeName,
+                        arguments: {
+                          'orderId': order.id,
+                          'customerId': widget.customerId!,
+                          'isVerifyingPayment': true,
+                          'orderPayload': order,
+                        },
+                      );
+                    } else if (order.status == 'Pending Payment') {
+                      // 2. If payment is pending, check if it's a POA order.
+                      if (order.paymentMethod == 'payOnPickup') {
+                        // POA orders go to details screen for the "Pay Now" button.
+                        _navigateToOrderDetails(order.id);
+                      } else {
+                        // Regular orders go back to the verification screen.
+                        Navigator.of(context, rootNavigator: true).pushNamed(
+                          OrderSummaryScreen.routeName,
+                          arguments: {
+                            'orderId': order.id,
+                            'customerId': widget.customerId!,
+                            'isVerifyingPayment': true,
+                            'orderPayload': order,
+                          },
+                        );
+                      }
+                    } else {
+                      // 3. For all other statuses, go to the details screen.
+                      _navigateToOrderDetails(order.id);
+                    }
+                  },
+                  // =================================================================
+                ),
               ),
             );
           },

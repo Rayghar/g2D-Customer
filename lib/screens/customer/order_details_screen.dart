@@ -894,9 +894,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
 
   Widget _buildDriverInfoCard(DriverInfoForOrder driver, app_order.Order order,
       ThemeProvider themeProvider) {
-    // You'll need an instance of your ApiService available in your State class
-    // final ApiService _apiService = ApiService();
-
     return CustomCard(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -942,51 +939,42 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                           color: themeProvider.gas2doorPrimaryBlue, size: 26),
                       onPressed: () => _handleInitiateCall(driver.phone),
                       tooltip: "Call Driver"),
-
-                // --- UPDATED CHAT BUTTON LOGIC ---
                 IconButton(
                     icon: Icon(Icons.chat_bubble_outline_rounded,
                         color: themeProvider.gas2doorPrimaryBlue, size: 26),
                     onPressed: () async {
-                      // Made the function async
                       HapticFeedback.lightImpact();
 
-                      // Ensure customer ID is available before making an API call
                       if (order.customer?.id == null) {
                         _showFeedbackSnackbar(
-                            "Cannot initiate chat: Customer ID missing.",
+                            "Cannot initiate chat: Your user ID is missing.",
                             isError: true);
                         return;
                       }
 
                       try {
-                        // 1. Call your backend to securely initiate the chat session
                         final chatDetails =
                             await _apiService.initiateChatSession(
                           orderId: order.id,
+                          // <<-- FIX: Added the required 'senderId' parameter -->>
                           senderId: order.customer!.id,
                           recipientId: driver.id,
                         );
 
-                        final String chatId = chatDetails['chatId'];
-
-                        // 2. Navigate to the ChatScreen with the verified chatId from the backend
                         if (mounted) {
-                          // Check if the widget is still in the tree
                           Navigator.of(context, rootNavigator: true)
                               .pushNamed(ChatScreen.routeName, arguments: {
-                            'chatId':
-                                chatId, // Use the verified chatId from your backend
+                            'orderId': chatDetails['chatId'],
                             'currentUserId': order.customer!.id,
                             'recipientId': driver.id,
                             'recipientName': driver.name,
                             'recipientPhoneNumber': driver.phone,
+                            // 'recipientPhotoUrl' can be added if available on the driver model
                           });
                         }
                       } catch (e) {
-                        // Handle any errors from the API call (e.g., user not authorized to chat)
                         _showFeedbackSnackbar(
-                            "Could not start chat. Please try again.",
+                            e.toString().replaceFirst("Exception: ", ""),
                             isError: true);
                         Sentry.captureException(e,
                             stackTrace: StackTrace.current);

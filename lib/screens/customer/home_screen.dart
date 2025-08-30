@@ -1009,7 +1009,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       'Order Placed': 0,
       'Processing': 1,
       'Driver Assigned': 1,
-      'Out for delivery': 2,
+      'Out for Delivery': 2,
       'Delivered': 3,
       'Customer Unavailable': 3,
       'Issue Reported': 3,
@@ -1141,15 +1141,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           HapticFeedback.lightImpact();
           _logger.info('Recent order item tapped for order ID: ${order.id}');
 
-          // ======================= INTELLIGENT FIX STARTS HERE =======================
-          if (order.status == 'Pending Payment') {
-            // Case A: This is a "Pay on Arrival" order and the driver has arrived.
-            // Navigate to the OrderDetailsScreen so the customer can find the "Pay Now" button.
+          // ======================= INTELLIGENT FIX APPLIED HERE =======================
+          // This logic now handles all three scenarios correctly.
+
+          // 1. If payment is being verified, always go back to the verification screen.
+          if (order.status == 'Verifying Payment') {
+            Navigator.of(context, rootNavigator: true).pushNamed(
+              OrderSummaryScreen.routeName,
+              arguments: {
+                'orderId': order.id,
+                'customerId': widget.customerIdFromShell!,
+                'isVerifyingPayment': true,
+                'orderPayload': order,
+              },
+            );
+          } else if (order.status == 'Pending Payment') {
+            // 2. If payment is pending, check if it's a POA order.
             if (order.paymentMethod == 'payOnPickup') {
+              // POA orders go to details screen for the "Pay Now" button.
               _navigateToOrderDetails(order.id);
             } else {
-              // Case B: This is a regular online order where payment is still pending.
-              // Navigate to the payment verification screen as originally intended.
+              // Regular orders go to the verification screen.
               Navigator.of(context, rootNavigator: true).pushNamed(
                 OrderSummaryScreen.routeName,
                 arguments: {
@@ -1161,11 +1173,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               );
             }
           } else {
-            // For all other statuses ('Awaiting Driver Arrival', 'Delivered', etc.),
-            // the correct destination is the standard order details screen.
+            // 3. For all other statuses, go to the details screen.
             _navigateToOrderDetails(order.id);
           }
-          // ======================== INTELLIGENT FIX ENDS HERE ========================
+          // =========================================================================
         },
         borderRadius: themeProvider.cardBorderRadius,
         child: Padding(
@@ -1173,7 +1184,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ... The rest of this widget's UI code remains exactly the same
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

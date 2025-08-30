@@ -182,6 +182,26 @@ class ApiService {
     }
   }
 
+  Future<void> markOrderAsVerifying(String orderId) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated.');
+
+    final String apiUrl = '$baseUrl/orders/$orderId/mark-as-verifying';
+    print('ApiService: Marking order $orderId as verifying payment.');
+
+    try {
+      final response = await http.put(
+        Uri.parse(apiUrl),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode != 200) {
+        throw Exception('Failed to update order status to verifying.');
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<List<AddressModel>> getMyAddresses() async {
     final token = await _getToken();
     if (token == null) {

@@ -47,7 +47,7 @@ class OrderProvider with ChangeNotifier {
 
     try {
       const activeOrderStatuses =
-          'Order Placed,Processing,Driver Assigned,Out for delivery,Awaiting Driver Arrival';
+          'Order Placed,Processing,Driver Assigned,Out for Delivery,Awaiting Driver Arrival';
 
       final results = await Future.wait([
         _apiService.getCustomerOrders(
@@ -155,5 +155,22 @@ class OrderProvider with ChangeNotifier {
 
     print("Real-time event processed. Notifying listeners.");
     notifyListeners();
+  }
+
+  // This function allows us to manually inject a new order into the state.
+  void addNewlyPlacedOrder(app_order.Order newOrder) {
+    // If the new order is an "active" one, set it as the active order.
+    if (newOrder.status == 'Awaiting Driver Arrival' ||
+        newOrder.status == 'Order Placed') {
+      _activeOrder = newOrder;
+
+      // Add the new order to the top of the recent orders list for consistency.
+      _recentOrders.insert(0, newOrder);
+      if (_recentOrders.length > 3) {
+        _recentOrders.removeLast();
+      }
+
+      notifyListeners(); // Notify the HomeScreen to rebuild and show the new card.
+    }
   }
 }

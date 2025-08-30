@@ -20,6 +20,7 @@ import '../../models/system_config_model.dart';
 import '../../models/place_order_response_model.dart';
 import '../../models/order.dart' as app_order_model;
 import './order_details_screen.dart'; // <-- ADD THIS LINE
+import '../../providers/order_provider.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../services/api_service.dart';
@@ -558,26 +559,52 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       _orderItems.fold(0.0, (sum, item) => sum + item.itemSubtotal); // kobo
 
   double _calculateDeliveryFee() {
-    if (_feeSettings == null) return 0.0;
+    // If essential data isn't loaded yet, return 0 to avoid errors.
+    if (_feeSettings == null || _selectedDeliveryAddress == null) return 0.0;
+    // If a promotion offers free delivery, return 0 immediately.
     if (_appliedUIPromotion?.freeDelivery == true) return 0.0;
 
-    double totalDeliveryFeeKobo = _isExpressDelivery
-        ? (_feeSettings!.baseDeliveryFee +
-                _feeSettings!.expressDeliverySurcharge)
-            .toDouble()
-        : _feeSettings!.baseDeliveryFee.toDouble(); // FIX: Convert to double
+    final lat = _selectedDeliveryAddress!.latitude;
+    final lng = _selectedDeliveryAddress!.longitude;
+    final activeZones = _systemConfig?.activeZones ?? [];
 
+    ServiceZone? currentZone;
+    // Check if coordinates and zones are available.
+    if (lat != null && lng != null && activeZones.isNotEmpty) {
+      // Find the first zone that contains the selected address's coordinates.
+      currentZone = activeZones.firstWhereOrNull(
+          (zone) => _isPointInZone(lat, lng, zone.coordinates));
+    }
+
+    double baseFee;
+    double surcharge;
+
+    if (currentZone != null) {
+      // If a zone is found, use its specific fees (which are in kobo).
+      baseFee = currentZone.deliveryFee;
+      surcharge = currentZone.expressSurcharge;
+    } else {
+      // Otherwise, use the global fees from the config as a safe fallback (also in kobo).
+      baseFee = _feeSettings!.baseDeliveryFee.toDouble();
+      surcharge = _feeSettings!.expressDeliverySurcharge.toDouble();
+    }
+
+    // Calculate the initial delivery fee based on whether express is selected.
+    double totalDeliveryFeeKobo =
+        _isExpressDelivery ? (baseFee + surcharge) : baseFee;
+
+    // Your existing logic for per-cylinder surcharges is preserved here.
     final int totalQuantity =
         _orderItems.fold(0, (sum, item) => sum + item.quantity);
-
-    const double perAdditionalCylinderSurchargeKobo =
-        1500.0; // Assuming this is in kobo, or needs conversion from naira
+    const double perAdditionalCylinderSurchargeKobo = 1500.0;
 
     if (totalQuantity > 1) {
       totalDeliveryFeeKobo +=
           (totalQuantity - 1) * perAdditionalCylinderSurchargeKobo;
     }
-    return totalDeliveryFeeKobo; // Return in kobo
+
+    // Return the final fee in kobo.
+    return totalDeliveryFeeKobo;
   }
 
   double _calculateVat(double amount_kobo) => _feeSettings == null
@@ -873,6 +900,9 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
                 ? response.message
                 : "Order placed successfully!",
             isSuccess: true);
+        Provider.of<OrderProvider>(context, listen: false)
+            .addNewlyPlacedOrder(response.order);
+
         _logger.info(
             'Navigating to OrderSummaryScreen for order ${response.order.id} (no payment needed).');
         Navigator.of(context).pushNamedAndRemoveUntil(
