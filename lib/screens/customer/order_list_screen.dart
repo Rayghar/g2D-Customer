@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:primejet_mobile/screens/customer/payment_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
@@ -372,7 +373,7 @@ class _OrderListScreenState extends State<OrderListScreen>
                       } else {
                         // Regular orders go back to the verification screen.
                         Navigator.of(context, rootNavigator: true).pushNamed(
-                          OrderSummaryScreen.routeName,
+                          PaymentScreen.routeName,
                           arguments: {
                             'orderId': order.id,
                             'customerId': widget.customerId!,

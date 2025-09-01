@@ -222,6 +222,7 @@ class MyApp extends StatelessWidget {
                 settings, "Missing user name for Complete Profile Screen");
 
           case PaymentScreen.routeName:
+            // FIX: Ensure all four required arguments are checked
             if (args != null &&
                 args.containsKey('orderId') &&
                 args.containsKey('amount') &&

@@ -666,8 +666,7 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
   }
 
   double _getWalletAmountToUse() => _useWalletBalance
-      ? min(
-          _calculateTotalBeforeWallet(), _walletBalance * 100) // naira to kobo
+      ? min(_calculateTotalBeforeWallet(), _walletBalance) // naira to kobo
       : 0.0;
 
   double _calculateGrandTotal() =>

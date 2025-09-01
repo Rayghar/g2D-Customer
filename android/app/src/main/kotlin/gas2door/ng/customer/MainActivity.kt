@@ -1,4 +1,4 @@
-package com.example.primejet_mobile // Your package name
+package gas2door.ng.customer // Your package name
 
 import io.flutter.embedding.android.FlutterFragmentActivity // <<< CHANGE THIS IMPORT
 import io.flutter.embedding.engine.FlutterEngine

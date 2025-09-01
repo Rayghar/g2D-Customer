@@ -191,6 +191,42 @@
     },
     {
       "client_info": {
+        "mobilesdk_app_id": "1:108927420628:android:73cdb1b30eb71cae401341",
+        "android_client_info": {
+          "package_name": "gas2door.ng.customer"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "108927420628-ibb2i2ge2oqlui410kcg26mt1gh7s1pt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPV-KhAIIegC-C9xNkviDbRL5mE8beAyI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "108927420628-ibb2i2ge2oqlui410kcg26mt1gh7s1pt.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "108927420628-0tpfap0aei70115vkqhvii7soqfn1j35.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.primejetMobile"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:108927420628:android:f259659c21fe6fdb401341",
         "android_client_info": {
           "package_name": "ng.gas2door.app"

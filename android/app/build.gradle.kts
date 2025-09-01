@@ -12,11 +12,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.primejet_mobile"
+    namespace = "gas2door.ng.customer"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.primejet_mobile"
+        applicationId = "gas2door.ng.customer"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

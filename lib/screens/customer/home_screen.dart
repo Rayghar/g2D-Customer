@@ -25,6 +25,7 @@ import './order_summary_screen.dart';
 import './promotion_details_screen.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // NEW: Import Firebase Messaging
 import '../../providers/order_provider.dart';
+import './payment_screen.dart';
 
 final _logger = Logger('HomeScreen');
 
@@ -655,7 +656,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                           themeProvider: themeProvider)),
                                 ],
                               )),
-                          const SizedBox(height: 24.0),
+                          const SizedBox(height: 25.0),
                           if (_promotionItems.isNotEmpty)
                             SlideTransition(
                                 position: _sectionSlideAnimations[2],
@@ -665,7 +666,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 position: _sectionSlideAnimations[3],
                                 child: _buildActiveOrderCard(
                                     themeProvider, activeOrder)),
-                          if (hasActiveOrderData) const SizedBox(height: 24.0),
+                          if (hasActiveOrderData) const SizedBox(height: 25.0),
                           SlideTransition(
                               position: _sectionSlideAnimations[4],
                               child: _buildOrderHistorySection(
@@ -756,7 +757,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     fontWeight: FontWeight.bold,
                     color: themeProvider.primaryText))),
         SizedBox(
-          height: 181,
+          height: 183,
           child: PageView.builder(
             controller: _promotionPageController,
             itemCount: _promotionItems.length,
@@ -1128,6 +1129,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  // In lib/screens/customer/home_screen.dart
+
   Widget _buildRecentOrderItemCard(
       {required app_order.Order order, required ThemeProvider themeProvider}) {
     bool isCompleted = order.status == 'Delivered';
@@ -1141,11 +1144,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           HapticFeedback.lightImpact();
           _logger.info('Recent order item tapped for order ID: ${order.id}');
 
-          // ======================= INTELLIGENT FIX APPLIED HERE =======================
-          // This logic now handles all three scenarios correctly.
-
-          // 1. If payment is being verified, always go back to the verification screen.
           if (order.status == 'Verifying Payment') {
+            // If payment is being verified, always go to the verification screen.
             Navigator.of(context, rootNavigator: true).pushNamed(
               OrderSummaryScreen.routeName,
               arguments: {
@@ -1156,27 +1156,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               },
             );
           } else if (order.status == 'Pending Payment') {
-            // 2. If payment is pending, check if it's a POA order.
+            // ======================= FIX APPLIED HERE =======================
             if (order.paymentMethod == 'payOnPickup') {
               // POA orders go to details screen for the "Pay Now" button.
               _navigateToOrderDetails(order.id);
             } else {
-              // Regular orders go to the verification screen.
+              // Regular online orders go to the PaymentScreen to try paying again.
+              if (order.customer == null) {
+                _showFeedbackSnackbar(
+                    "Cannot proceed to payment: User details missing.",
+                    isError: true);
+                return;
+              }
               Navigator.of(context, rootNavigator: true).pushNamed(
-                OrderSummaryScreen.routeName,
+                PaymentScreen.routeName,
                 arguments: {
                   'orderId': order.id,
-                  'customerId': widget.customerIdFromShell!,
-                  'isVerifyingPayment': true,
-                  'orderPayload': order,
+                  'amount': order.grandTotal,
+                  'customer': order.customer!,
+                  'order': order,
                 },
               );
             }
+            // ================================================================
           } else {
-            // 3. For all other statuses, go to the details screen.
+            // For all other statuses, go to the details screen.
             _navigateToOrderDetails(order.id);
           }
-          // =========================================================================
         },
         borderRadius: themeProvider.cardBorderRadius,
         child: Padding(
