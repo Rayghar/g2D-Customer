@@ -3194,36 +3194,33 @@ class ApiService {
     }
   }
 
+  // Add this function. If it already exists, replace it.
   Future<void> registerFcmToken(String token) async {
     final authToken = await _getToken();
     if (authToken == null) {
-      print(
-          '[ApiService] registerFcmToken: Cannot register FCM token, user not authenticated.');
+      print('[ApiService] registerFcmToken: User not authenticated. Skipping.');
       return;
     }
 
-    final String apiUrl = '$baseUrl/users/me/fcm-token';
-    print('[ApiService] Registering FCM token to $apiUrl');
-    final payload = {'fcmToken': token};
-    print('[ApiService] registerFcmToken Payload: $payload');
+    // CORRECTED: URL and HTTP Method
+    final String apiUrl = '$baseUrl/users/fcm-token';
 
     try {
-      final response = await http.post(
+      final response = await http.put(
+        // Use PUT
         Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $authToken',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode(payload),
+        body: jsonEncode({'fcmToken': token}),
       );
-      print(
-          '[ApiService] registerFcmToken Response Status: ${response.statusCode}, Body: ${response.body}');
 
-      if (response.statusCode != 200) {
+      if (response.statusCode == 200) {
+        print('[ApiService] FCM token registered successfully.');
+      } else {
         print(
             '[ApiService] Failed to register FCM token. Status: ${response.statusCode}, Body: ${response.body}');
-      } else {
-        print('[ApiService] FCM token registered successfully.');
       }
     } catch (e) {
       print('[ApiService] Error registering FCM token: $e');

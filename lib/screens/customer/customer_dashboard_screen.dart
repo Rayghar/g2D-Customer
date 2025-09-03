@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart'; // Added this import
+import '../../services/fcm_service.dart'; // Make sure you have this import
 
 import '../../providers/theme_provider.dart';
 import '../../models/address_model.dart';
@@ -69,6 +70,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
   void initState() {
     super.initState();
     _screenOptions = _buildScreenOptions(null);
+    FcmService().initializeFirebaseMessaging(context);
     _fetchShellData();
 
     // Listen for foreground FCM messages

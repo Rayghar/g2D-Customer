@@ -115,7 +115,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         apiKey: apiKey,
         contractCode: contractCode,
         applicationMode:
-            ApplicationMode.TEST, // Use ApplicationMode.LIVE for production
+            ApplicationMode.LIVE, // Use ApplicationMode.LIVE for production
       );
 
       if (mounted) {
