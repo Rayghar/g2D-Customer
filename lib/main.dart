@@ -75,6 +75,7 @@ import 'models/admin/admin_promotion_model.dart';
 import 'models/admin/faq_item_model.dart';
 import 'models/order.dart' as app_order;
 import 'models/user.dart' as app_user;
+import 'services/fcm_service.dart';
 
 // This function MUST be a top-level function (outside of any class)
 @pragma('vm:entry-point')
@@ -119,6 +120,9 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final fcmService = FcmService();
+    fcmService.initializeFirebaseMessaging(context);
+
     final themeProvider = Provider.of<ThemeProvider>(context);
 
     return MaterialApp(

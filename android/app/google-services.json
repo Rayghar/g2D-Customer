@@ -198,6 +198,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "108927420628-89ftjjae9e4oe08alppqvr8k2tm9eolo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "gas2door.ng.customer",
+            "certificate_hash": "e4a4f5c355dd53dc5f30601fba13f49d2fbcc3f8"
+          }
+        },
+        {
           "client_id": "108927420628-ibb2i2ge2oqlui410kcg26mt1gh7s1pt.apps.googleusercontent.com",
           "client_type": 3
         }

@@ -2,6 +2,8 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
@@ -36,15 +38,56 @@ import '../models/payment_method_model.dart';
 import '../models/customer_stats_model.dart'; // NEW: Import CustomerStatsModel
 
 class ApiService {
+  final Dio _dio;
   final _storage = const FlutterSecureStorage();
   final String baseUrl = dotenv.env['API_BASE_URL'] ??
-      'https://primejet-backend.onrender.com/api/v1';
+      'https://primejet-backend.onrender.com/api/v1'; //http://10.0.2.2:3000/api/v1';
+  //https://primejet-backend.onrender.com/api/v1
+  final String _nodeBackendUrl = kDebugMode
+      ? 'https://primejet-backend.onrender.com/api/v1' // Or your local Node.js port
+      : dotenv.env['NODE_BACKEND_URL'] ??
+          'https://primejet-backend.onrender.com/api/v1';
+  final String _firebaseFunctionsUrl = dotenv.env['FIREBASE_FUNCTIONS_URL'] ??
+      'https://us-central1-primejetmobile-83583.cloudfunctions.net';
+  final String _firebaseChatUrl = dotenv.env['FIREBASE_CHAT_URL'] ??
+      'https://chatapi-ia3wcidvva-uc.a.run.app/api/v1/chat';
+
+  final String _firebaseFcmUrl = dotenv.env['FIREBASE_FCM_URL'] ??
+      'https://fcmapi-ia3wcidvva-uc.a.run.app/api/v1/fcm';
 
   Future<String?> _getToken() async {
     final token = await _storage.read(key: 'jwt_token');
     print(
         '[ApiService] Fetched token: ${token != null ? 'Present' : 'Absent'}');
     return token;
+  }
+
+  ApiService() : _dio = Dio() {
+    // --- SETUP HAPPENS HERE ---
+    _dio.options.baseUrl = 'https://primejet-backend.onrender.com/api/v1';
+
+    // This "interceptor" automatically adds the auth token to every request
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final token = await _storage.read(key: 'jwt_token');
+          if (token != null) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          return handler.next(options); // Continue with the request
+        },
+      ),
+    );
+  }
+
+  Future<String> getFirebaseToken() async {
+    try {
+      final response = await _dio.post('/chat/firebase-token');
+      return response.data['firebaseToken'] as String;
+    } on DioException catch (e) {
+      // ... your error handling
+      throw Exception('Failed to get Firebase token');
+    }
   }
 
   // Auth methods
@@ -148,7 +191,7 @@ class ApiService {
       throw Exception('Not authenticated to initiate chat.');
     }
     // This endpoint matches the one we created on the backend
-    final String apiUrl = '$baseUrl/chat/initiate';
+    final String apiUrl = '$_firebaseChatUrl/initiate';
 
     print('ApiService: Initiating chat session via $apiUrl');
 
@@ -3203,7 +3246,8 @@ class ApiService {
     }
 
     // CORRECTED: URL and HTTP Method
-    final String apiUrl = '$baseUrl/users/fcm-token';
+    //final String apiUrl = '$baseUrl/users/fcm-token';
+    final String apiUrl = '$_nodeBackendUrl/users/me/fcm-token';
 
     try {
       final response = await http.put(

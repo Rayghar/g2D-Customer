@@ -84,6 +84,8 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
+
+      await _authService.signInToFirebase();
       if (!mounted) return;
 
       // Get and Register the Device Token

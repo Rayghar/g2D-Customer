@@ -4,10 +4,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import './api_service.dart'; // Your ApiService
 import '../models/auth_response_model.dart'; // For LoginSuccessData
 import '../models/registration_response_model.dart'; // For RegistrationResponseModel
+import 'package:firebase_auth/firebase_auth.dart'; // Add this import
 import '../models/user.dart'
     as app_user; // Your frontend User model for adminCreateUser response
 
 class AuthService {
+  final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
   final ApiService _apiService = ApiService();
   final _storage = const FlutterSecureStorage();
 
@@ -159,6 +161,20 @@ class AuthService {
     } catch (e) {
       print('AuthService: Admin failed to create user: ${e.toString()}');
       rethrow;
+    }
+  }
+
+  // ✅ ADD THIS NEW METHOD
+  Future<void> signInToFirebase() async {
+    try {
+      // Get the custom token from your backend
+      final String customToken = await _apiService.getFirebaseToken();
+      // Use the token to sign in on the device
+      await _firebaseAuth.signInWithCustomToken(customToken);
+      print('AuthService: Successfully signed into Firebase.');
+    } catch (e) {
+      print('AuthService: Firebase sign-in failed: $e');
+      // Decide if you want to throw an error or fail silently
     }
   }
 
