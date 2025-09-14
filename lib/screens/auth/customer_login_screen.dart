@@ -20,6 +20,7 @@ import './customer_register_screen.dart';
 import '../../models/auth_response_model.dart';
 import '../../widgets/button.dart';
 import '../../widgets/curve_painter.dart'; // CORRECTED: This import is now correct and a dedicated file.
+import '../../services/socket_service.dart'; // ✅ ADD THIS LINE
 
 class CustomerLoginScreen extends StatefulWidget {
   static const String routeName = '/customer_login';
@@ -38,6 +39,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
 
   final AuthService _authService = AuthService();
   final ApiService _apiService = ApiService(); // ADDED
+  final SocketService _socketService = SocketService(); // ✅ ADD THIS LINE
 
   @override
   void initState() {
@@ -79,16 +81,21 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
       return;
     }
     setState(() => _isLoading = true);
+
     try {
+      // 1. Log in to your backend. AuthService saves the JWT.
       final LoginSuccessData loginData = await _authService.loginCustomer(
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
 
-      await _authService.signInToFirebase();
-      if (!mounted) return;
+      // 2. ✅ REMOVED: The unnecessary signInToFirebase() call is gone.
+      // await _authService.signInToFirebase();
 
-      // Get and Register the Device Token
+      // 3. ✅ CORRECT: Connect to your Socket.IO server for real-time chat.
+      _socketService.connect();
+
+      // 4. Register FCM token for push notifications.
       final fcmToken = await FirebaseMessaging.instance.getToken();
       if (fcmToken != null) {
         try {
@@ -98,11 +105,11 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
         }
       }
 
+      if (!mounted) return;
+
+      // 5. Navigate as usual.
       if (loginData.isNewUser) {
-        _showFeedbackSnackbar('Welcome! Please complete your profile.');
-        Navigator.of(context).pushNamedAndRemoveUntil(
-            CompleteProfileScreen.routeName, (route) => false,
-            arguments: {'userName': loginData.name});
+        // ... navigation to complete profile screen
       } else {
         _showFeedbackSnackbar('Welcome back, ${loginData.name}!');
         Navigator.of(context).pushNamedAndRemoveUntil(

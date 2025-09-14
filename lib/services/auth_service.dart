@@ -164,7 +164,7 @@ class AuthService {
     }
   }
 
-  // ✅ ADD THIS NEW METHOD
+  /*// ✅ ADD THIS NEW METHOD
   Future<void> signInToFirebase() async {
     try {
       // Get the custom token from your backend
@@ -176,7 +176,7 @@ class AuthService {
       print('AuthService: Firebase sign-in failed: $e');
       // Decide if you want to throw an error or fail silently
     }
-  }
+  }*/
 
   Future<String> requestPasswordReset(String email) async {
     try {

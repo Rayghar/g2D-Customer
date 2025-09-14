@@ -35,6 +35,8 @@ import '../models/referral_model.dart';
 import '../models/wallet_transaction.dart';
 import '../models/admin/admin_referral_summary_model.dart';
 import '../models/payment_method_model.dart';
+import '../models/message.dart'; // You will need to create this simple model
+
 import '../models/customer_stats_model.dart'; // NEW: Import CustomerStatsModel
 
 class ApiService {
@@ -78,6 +80,16 @@ class ApiService {
         },
       ),
     );
+  }
+
+  Future<List<Message>> getChatHistory(String chatId) async {
+    try {
+      final response = await _dio.get('/chat/$chatId/history');
+      final List<dynamic> messagesJson = response.data;
+      return messagesJson.map((json) => Message.fromJson(json)).toList();
+    } on DioException catch (e) {
+      throw Exception('Failed to fetch chat history: ${e.message}');
+    }
   }
 
   Future<String> getFirebaseToken() async {
@@ -183,6 +195,26 @@ class ApiService {
 
   Future<Map<String, dynamic>> initiateChatSession({
     required String orderId,
+    required String recipientId,
+  }) async {
+    try {
+      // ✅ This now correctly calls your main backend, not the old Firebase Function
+      final response = await _dio.post(
+        '/chat/initiate',
+        data: {
+          'orderId': orderId,
+          'recipientId': recipientId,
+        },
+      );
+      return response.data;
+    } on DioException catch (e) {
+      throw Exception(
+          'Failed to initiate chat: ${e.response?.data['message'] ?? e.message}');
+    }
+  }
+
+  /*Future<Map<String, dynamic>> initiateChatSession({
+    required String orderId,
     required String senderId,
     required String recipientId,
   }) async {
@@ -223,7 +255,7 @@ class ApiService {
       print('ApiService: Error initiating chat: ${e.toString()}');
       rethrow;
     }
-  }
+  }*/
 
   Future<void> markOrderAsVerifying(String orderId) async {
     final token = await _getToken();

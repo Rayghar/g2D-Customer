@@ -69,6 +69,8 @@ import 'firebase_options.dart'; // <-- ADD THIS IMPORT
 
 // Provider and model imports
 import 'providers/theme_provider.dart';
+import 'providers/order_provider.dart'; // This was already here
+import 'services/socket_service.dart'; // ✅ NEW: Import SocketService
 import 'models/address_model.dart';
 import 'models/deal_model.dart';
 import 'models/admin/admin_promotion_model.dart';
@@ -107,6 +109,9 @@ Future<void> main() async {
           providers: [
             ChangeNotifierProvider(create: (_) => ThemeProvider()),
             ChangeNotifierProvider(create: (_) => OrderProvider()),
+            ChangeNotifierProvider(
+                create: (_) =>
+                    SocketService()), // ✅ NEW: Add SocketService provider
           ],
           child: const MyApp(),
         ),
@@ -381,7 +386,7 @@ class MyApp extends StatelessWidget {
                 args.containsKey('recipientName')) {
               return MaterialPageRoute(
                 builder: (_) => ChatScreen(
-                  orderId: args['orderId'] as String,
+                  chatId: args['orderId'],
                   currentUserId: args['currentUserId'] as String,
                   recipientId: args['recipientId'] as String,
                   recipientName: args['recipientName'] as String,

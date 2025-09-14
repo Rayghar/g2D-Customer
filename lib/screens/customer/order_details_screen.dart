@@ -953,19 +953,18 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                       }
 
                       try {
-                        final chatDetails =
+                        final authResponse =
                             await _apiService.initiateChatSession(
                           orderId: order.id,
-                          // <<-- FIX: Added the required 'senderId' parameter -->>
-                          senderId: order.customer!.id,
                           recipientId: driver.id,
                         );
+                        final String chatId = authResponse['chatId'];
 
                         if (mounted) {
                           Navigator.of(context, rootNavigator: true)
                               .pushNamed(ChatScreen.routeName, arguments: {
-                            'orderId': chatDetails['chatId'],
-                            'currentUserId': order.customer!.id,
+                            'chatId': chatId,
+                            'currentUserId': widget.customerId,
                             'recipientId': driver.id,
                             'recipientName': driver.name,
                             'recipientPhoneNumber': driver.phone,

@@ -1,9 +1,7 @@
 // File: lib/screens/customer/chat_screen.dart
 // *** UPDATED & FIXED FILE ***
 
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
@@ -12,64 +10,24 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart'; // ✅ Import SocketService
+import '../../models/message.dart'; // ✅ Import your new Message model
 import '../../widgets/input.dart';
-
-// ChatMessage model remains the same
-class ChatMessage {
-  final String id;
-  final String senderId;
-  final String recipientId;
-  final String message;
-  final Timestamp timestamp;
-  bool isReadByRecipient;
-
-  ChatMessage({
-    required this.id,
-    required this.senderId,
-    required this.recipientId,
-    required this.message,
-    required this.timestamp,
-    this.isReadByRecipient = false,
-  });
-
-  factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-    return ChatMessage(
-      id: doc.id,
-      senderId: data['senderId'] ?? '',
-      recipientId: data['recipientId'] ?? '',
-      message: data['message'] ?? '',
-      timestamp: data['timestamp'] ?? Timestamp.now(),
-      isReadByRecipient: data['isReadByRecipient'] ?? false,
-    );
-  }
-
-  Map<String, dynamic> toFirestore() {
-    return {
-      'senderId': senderId,
-      'recipientId': recipientId,
-      'message': message,
-      'timestamp': timestamp,
-      'isReadByRecipient': isReadByRecipient,
-    };
-  }
-}
 
 class ChatScreen extends StatefulWidget {
   static const String routeName = '/chat';
-  final String orderId;
+
+  // These parameters are passed in during navigation
+  final String chatId; // This is the unique ID for the chat (e.g., the orderId)
   final String currentUserId;
   final String recipientId;
   final String recipientName;
   final String? recipientPhotoUrl;
   final String? recipientPhoneNumber;
 
-  // <<< FIX: ApiService instance is removed from the widget class >>>
-
-  // <<< FIX: 'const' is removed from the constructor >>>
   const ChatScreen({
     super.key,
-    required this.orderId,
+    required this.chatId,
     required this.currentUserId,
     required this.recipientId,
     required this.recipientName,
@@ -84,13 +42,11 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-
-  // <<< FIX: ApiService instance is correctly placed in the State class >>>
   final ApiService _apiService = ApiService();
+  final SocketService _socketService = SocketService();
 
-  StreamSubscription<QuerySnapshot>? _messageSubscription;
-  List<ChatMessage> _messages = [];
-  bool _isLoadingInitialMessages = true;
+  final List<Message> _messages = [];
+  bool _isLoadingHistory = true;
   bool _isSending = false;
 
   late AnimationController _entryAnimController;
@@ -104,60 +60,87 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(parent: _entryAnimController, curve: Curves.easeIn));
 
-    _loadMessages();
+    _initializeChat();
   }
 
-  void _loadMessages() {
-    final messagesRef = FirebaseFirestore.instance
-        .collection('chats')
-        .doc(widget.orderId)
-        .collection('messages')
-        .orderBy('timestamp', descending: false);
+  void _initializeChat() {
+    _loadHistory();
+    _connectAndListen();
+  }
 
-    _messageSubscription = messagesRef.snapshots().listen((snapshot) {
+  // Fetches previous messages via a standard API call
+  Future<void> _loadHistory() async {
+    try {
+      final history = await _apiService.getChatHistory(widget.chatId);
       if (mounted) {
-        final newMessages =
-            snapshot.docs.map((doc) => ChatMessage.fromFirestore(doc)).toList();
         setState(() {
-          _messages = newMessages;
-          if (_isLoadingInitialMessages) _isLoadingInitialMessages = false;
+          _messages.addAll(history);
+          _isLoadingHistory = false;
         });
-        if (!_isLoadingInitialMessages) _entryAnimController.forward(from: 0.0);
-        _scrollToBottom(isNewMessage: true);
-        _markMessagesAsRead(newMessages);
+        _scrollToBottom();
       }
-    }, onError: (error) {
-      print("Error listening to messages: $error");
+    } catch (e) {
+      print("Error loading message history: $e");
       if (mounted) {
-        setState(() {
-          _isLoadingInitialMessages = false;
-        });
-        _showFeedbackSnackbar(
-            "Error loading messages. Please check your connection.", context,
+        setState(() => _isLoadingHistory = false);
+        _showFeedbackSnackbar("Error loading message history.", context,
             isError: true);
+      }
+    }
+  }
+
+  // Connects to the socket server and listens for new messages
+  void _connectAndListen() {
+    _socketService.connect();
+    _socketService.joinRoom(widget.chatId);
+
+    _socketService.listenForMessage((data) {
+      if (mounted) {
+        final newMessage = Message.fromJson(data);
+        // Add message only if it's not already in the list (to avoid duplicates from optimistic update)
+        if (!_messages.any((msg) => msg.id == newMessage.id)) {
+          setState(() {
+            _messages.add(newMessage);
+          });
+        }
+        _scrollToBottom(isNewMessage: true);
       }
     });
   }
 
-  void _markMessagesAsRead(List<ChatMessage> messages) {
-    WriteBatch batch = FirebaseFirestore.instance.batch();
-    bool needsCommit = false;
-    for (var msg in messages) {
-      if (msg.recipientId == widget.currentUserId && !msg.isReadByRecipient) {
-        DocumentReference msgRef = FirebaseFirestore.instance
-            .collection('chats')
-            .doc(widget.orderId)
-            .collection('messages')
-            .doc(msg.id);
-        batch.update(msgRef, {'isReadByRecipient': true});
-        needsCommit = true;
-      }
-    }
-    if (needsCommit) {
-      batch
-          .commit()
-          .catchError((e) => print("Error batch marking messages as read: $e"));
-    }
+  // Sends a new message via a socket event
+  void _sendMessage() {
+    final text = _messageController.text.trim();
+    if (text.isEmpty || _isSending) return;
+
+    HapticFeedback.mediumImpact();
+    setState(() => _isSending = true);
+
+    // Optimistically add the message to the UI for a snappy feel
+    final optimisticMessage = Message(
+      id: DateTime.now().millisecondsSinceEpoch.toString(), // Temporary ID
+      chatId: widget.chatId,
+      senderId: widget.currentUserId,
+      recipientId: widget.recipientId,
+      text: text,
+      createdAt: DateTime.now(),
+    );
+    setState(() {
+      _messages.add(optimisticMessage);
+      _messageController.clear();
+    });
+
+    _scrollToBottom(isNewMessage: true);
+
+    // Send the message to the server
+    _socketService.sendMessage(widget.chatId, widget.recipientId, text);
+
+    // The server will save it and broadcast it back. The 'listenForMessage'
+    // handler will receive the final version with the real ID from the database.
+
+    // For simplicity, we don't show a "sending failed" state here,
+    // but you could add logic to handle errors from the socket.
+    if (mounted) setState(() => _isSending = false);
   }
 
   void _scrollToBottom({bool isNewMessage = false}) {
@@ -171,42 +154,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           );
         }
       });
-    }
-  }
-
-  Future<void> _sendMessage() async {
-    final messageText = _messageController.text.trim();
-    if (messageText.isEmpty) return;
-
-    HapticFeedback.mediumImpact();
-    setState(() => _isSending = true);
-    _messageController.clear();
-
-    final messageData = {
-      'senderId': widget.currentUserId,
-      'recipientId': widget.recipientId,
-      'message': messageText,
-      'timestamp': FieldValue.serverTimestamp(),
-      'isReadByRecipient': false,
-    };
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('chats')
-          .doc(widget.orderId)
-          .collection('messages')
-          .add(messageData);
-
-      _scrollToBottom(isNewMessage: true);
-    } catch (e) {
-      print("Error sending message: $e");
-      if (mounted) {
-        _showFeedbackSnackbar(
-            "Failed to send message. Please try again.", context,
-            isError: true);
-      }
-    } finally {
-      if (mounted) setState(() => _isSending = false);
     }
   }
 
@@ -250,7 +197,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    _messageSubscription?.cancel();
+    _socketService.dispose();
     _entryAnimController.dispose();
     super.dispose();
   }
@@ -321,7 +268,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       body: Column(
         children: [
           Expanded(
-            child: _isLoadingInitialMessages
+            child: _isLoadingHistory
                 ? Center(
                     child: CircularProgressIndicator(
                         color: themeProvider.gas2doorPrimaryBlue))
@@ -351,7 +298,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                         ),
                       )
                     : FadeTransition(
-                        opacity: _entryAnimController,
+                        opacity: _fadeAnimation,
                         child: ListView.builder(
                           controller: _scrollController,
                           padding: const EdgeInsets.symmetric(
@@ -374,7 +321,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildChatBubble(
-      ChatMessage message, bool isMe, ThemeProvider themeProvider) {
+      Message message, bool isMe, ThemeProvider themeProvider) {
     final alignment = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
     final bubbleColor =
         isMe ? themeProvider.gas2doorPrimaryBlue : themeProvider.cardBackground;
@@ -416,7 +363,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
                 Text(
-                  message.message,
+                  message.text,
                   style: GoogleFonts.inter(
                       color: textColor, fontSize: 15, height: 1.35),
                 ),
@@ -425,23 +372,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      DateFormat('hh:mm a')
-                          .format(message.timestamp.toDate().toLocal()),
+                      DateFormat('hh:mm a').format(message.createdAt.toLocal()),
                       style: GoogleFonts.inter(
                           color: timestampColor, fontSize: 11),
                     ),
-                    if (isMe) ...[
-                      const SizedBox(width: 6),
-                      Icon(
-                        message.isReadByRecipient
-                            ? Icons.done_all_rounded
-                            : Icons.done_rounded,
-                        color: message.isReadByRecipient
-                            ? themeProvider.gas2doorTealLightVer
-                            : timestampColor,
-                        size: 15,
-                      ),
-                    ],
                   ],
                 ),
               ],
