@@ -1,131 +1,174 @@
 // lib/models/chat_thread_model.dart
 
-// Note: We are keeping the fromFirestore constructor for now in case
-// any part of your app still uses it, but adding the new fromJson factory.
+import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
+import 'message.dart';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-
+/// Thread row for the Messages list.
+/// - `chatId` == orderId (room id)
+/// - `lastMessage` is a Message parsed from the server (or null if none)
+/// - `recipientName`/`recipientPhone` are optional conveniences if your API sends them
 class ChatThreadModel {
   final String chatId;
-  final String orderId;
-  final Participant otherParticipant;
-  final LastMessage lastMessage;
+  final Message? lastMessage;
+
+  /// Optional convenience fields if your API includes them
+  final String? recipientName;
+  final String? recipientPhone;
+
+  /// Unread info (if your API provides it)
+  final int unreadCount;
   final bool hasUnreadMessages;
 
   ChatThreadModel({
     required this.chatId,
-    required this.orderId,
-    required this.otherParticipant,
-    required this.lastMessage,
+    this.lastMessage,
+    this.recipientName,
+    this.recipientPhone,
+    this.unreadCount = 0,
     this.hasUnreadMessages = false,
   });
 
-  // ✅ FACTORY CONSTRUCTOR TO PARSE JSON FROM YOUR API
+  // -------------------------
+  // JSON (REST) constructor
+  // -------------------------
+  ///
+  /// Accepts multiple shapes, e.g.:
+  /// {
+  ///   "chatId": "uuid",
+  ///   "lastMessage": { ...Message json... },
+  ///   "recipientName": "Neme Iloh",
+  ///   "recipientPhone": "0913...",
+  ///   "unreadCount": 2,
+  ///   "hasUnread": true
+  /// }
   factory ChatThreadModel.fromJson(Map<String, dynamic> json) {
+    final lm = json['lastMessage'];
+    Message? parsedLast;
+    if (lm is Map<String, dynamic>) {
+      parsedLast = Message.fromJson(lm);
+    }
+
     return ChatThreadModel(
-      chatId: json['chatId'] as String? ?? '',
-      orderId: json['orderId'] as String? ?? '',
-      otherParticipant: Participant.fromJson(
-          json['otherParticipant'] as Map<String, dynamic>? ?? {}),
-      lastMessage:
-          LastMessage.fromJson(json['lastMessage'] as Map<String, dynamic>?),
-      // You can add logic for unread status if the API provides it
-      hasUnreadMessages: false,
+      chatId: json['chatId']?.toString() ?? json['orderId']?.toString() ?? '',
+      lastMessage: parsedLast,
+      recipientName: json['recipientName']?.toString(),
+      recipientPhone: json['recipientPhone']?.toString(),
+      unreadCount: _asInt(json['unreadCount']),
+      hasUnreadMessages: _asBool(json['hasUnread']),
     );
   }
 
-  // Your existing fromFirestore factory (can be kept or removed if no longer used)
+  // ---------------------------------
+  // Firestore (legacy) constructor
+  // ---------------------------------
+  ///
+  /// Keeps compatibility with any old collection that looked like:
+  /// {
+  ///   participants: [customerId, driverId],
+  ///   participantInfo: {
+  ///     "<userId>": { name, role, photoUrl }
+  ///   },
+  ///   orderId: "<uuid>",
+  ///   lastMessage: { text, senderId, timestamp },
+  ///   readStatus: { "<userId>": true/false }
+  /// }
   factory ChatThreadModel.fromFirestore(
     Map<String, dynamic> data,
     String docId,
     String currentUserId,
   ) {
-    // ... existing fromFirestore logic ...
-    final List<dynamic> participants = data['participants'] ?? [];
-    final String otherParticipantId =
-        participants.firstWhere((id) => id != currentUserId, orElse: () => '');
-    final Map<String, dynamic> participantInfo = data['participantInfo'] ?? {};
+    final List<dynamic> participants =
+        (data['participants'] as List?) ?? const [];
+    final String otherParticipantId = participants
+            .firstWhere((id) => id != currentUserId, orElse: () => '')
+            ?.toString() ??
+        '';
+
+    final Map<String, dynamic> participantInfo =
+        (data['participantInfo'] as Map?)?.cast<String, dynamic>() ?? const {};
     final Map<String, dynamic> otherParticipantData =
-        participantInfo[otherParticipantId] ?? {};
+        (participantInfo[otherParticipantId] as Map?)
+                ?.cast<String, dynamic>() ??
+            const {};
+
+    final lm = (data['lastMessage'] as Map?)?.cast<String, dynamic>();
+    final msg = _messageFromLegacyLast(
+      lastMessageMap: lm,
+      chatId: docId,
+      otherParticipantId: otherParticipantId,
+    );
+
+    final bool isUnreadForMe = (lm != null &&
+        (lm['senderId']?.toString() ?? '') != currentUserId &&
+        !((data['readStatus'] as Map?)?[currentUserId] == true));
 
     return ChatThreadModel(
       chatId: docId,
-      orderId: data['orderId'] ?? '',
-      otherParticipant: Participant.fromJson(otherParticipantData),
-      lastMessage: LastMessage.fromMap(data['lastMessage']),
-      hasUnreadMessages: (data['lastMessage'] != null &&
-          data['lastMessage']['senderId'] != currentUserId &&
-          !(data['readStatus']?[currentUserId] ?? false)),
+      lastMessage: msg,
+      recipientName: (otherParticipantData['name'] as String?)?.trim(),
+      recipientPhone: (otherParticipantData['phone'] as String?)?.trim(),
+      unreadCount: isUnreadForMe ? 1 : 0,
+      hasUnreadMessages: isUnreadForMe,
     );
   }
-}
 
-class Participant {
-  final String id;
-  final String name;
-  final String role;
-  final String? photoUrl;
-
-  Participant({
-    required this.id,
-    required this.name,
-    required this.role,
-    this.photoUrl,
-  });
-
-  // ✅ FACTORY CONSTRUCTOR TO PARSE JSON
-  factory Participant.fromJson(Map<String, dynamic> json) {
-    return Participant(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? 'Unknown User',
-      role: json['role'] as String? ?? 'user',
-      photoUrl: json['photoUrl'] as String?,
-    );
+  // -------------------------
+  // Helpers
+  // -------------------------
+  static int _asInt(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    return int.tryParse(v.toString()) ?? 0;
   }
-}
 
-class LastMessage {
-  final String text;
-  final String senderId;
-  final DateTime timestamp;
+  static bool _asBool(dynamic v) {
+    if (v is bool) return v;
+    if (v == null) return false;
+    final s = v.toString().toLowerCase();
+    return s == 'true' || s == '1';
+  }
 
-  LastMessage({
-    required this.text,
-    required this.senderId,
-    required this.timestamp,
-  });
-
-  // ✅ FACTORY CONSTRUCTOR TO PARSE JSON
-  factory LastMessage.fromJson(Map<String, dynamic>? json) {
-    if (json == null) {
-      return LastMessage(
-        text: 'No messages yet.',
-        senderId: '',
-        timestamp: DateTime.now(),
-      );
+  static DateTime _parseDateFlexible(dynamic v) {
+    if (v == null) return DateTime.now();
+    if (v is Timestamp) return v.toDate();
+    if (v is int)
+      return DateTime.fromMillisecondsSinceEpoch(v, isUtc: true).toLocal();
+    if (v is String) {
+      final iso = DateTime.tryParse(v);
+      if (iso != null) return iso.toLocal();
+      final ms = int.tryParse(v);
+      if (ms != null) {
+        return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toLocal();
+      }
     }
-    return LastMessage(
-      text: json['text'] as String? ?? '',
-      senderId: json['senderId'] as String? ?? '',
-      // Use 'createdAt' from the Message model in the backend
-      timestamp: DateTime.parse(
-          json['createdAt'] as String? ?? DateTime.now().toIso8601String()),
-    );
+    return DateTime.now();
   }
 
-  // Your existing fromMap factory
-  factory LastMessage.fromMap(Map<String, dynamic>? map) {
-    if (map == null) {
-      return LastMessage(
-        text: 'No messages yet.',
-        senderId: '',
-        timestamp: DateTime.now(),
-      );
-    }
-    return LastMessage(
-      text: map['text'] ?? '',
-      senderId: map['senderId'] ?? '',
-      timestamp: (map['timestamp'] as Timestamp? ?? Timestamp.now()).toDate(),
+  static Message? _messageFromLegacyLast({
+    required Map<String, dynamic>? lastMessageMap,
+    required String chatId,
+    required String otherParticipantId,
+  }) {
+    if (lastMessageMap == null) return null;
+
+    final createdAt = _parseDateFlexible(
+      lastMessageMap['createdAt'] ??
+          lastMessageMap['timestamp'] ??
+          lastMessageMap['time'],
+    );
+
+    return Message(
+      id: (lastMessageMap['_id'] ??
+              lastMessageMap['id'] ??
+              'legacy_${createdAt.millisecondsSinceEpoch}')
+          .toString(),
+      chatId: chatId,
+      senderId: lastMessageMap['senderId']?.toString() ?? '',
+      recipientId:
+          lastMessageMap['recipientId']?.toString() ?? otherParticipantId,
+      text: lastMessageMap['text']?.toString() ?? '',
+      createdAt: createdAt,
+      status: lastMessageMap['status']?.toString() ?? 'sent',
     );
   }
 }

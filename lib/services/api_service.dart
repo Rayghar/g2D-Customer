@@ -82,13 +82,54 @@ class ApiService {
     );
   }
 
-  Future<List<Message>> getChatHistory(String chatId) async {
+  Future<List<Message>> getChatHistory(String chatId, {int limit = 50}) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated.');
+
+    final url = '$baseUrl/chat/$chatId/history?limit=$limit';
+    debugPrint('[ApiService] getChatHistory -> $url');
+
     try {
-      final response = await _dio.get('/chat/$chatId/history');
-      final List<dynamic> messagesJson = response.data;
-      return messagesJson.map((json) => Message.fromJson(json)).toList();
-    } on DioException catch (e) {
-      throw Exception('Failed to fetch chat history: ${e.message}');
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+
+      // Log everything so we can see the real server output if it fails
+      debugPrint('[ApiService] getChatHistory status=${resp.statusCode}');
+      debugPrint('[ApiService] getChatHistory body=${resp.body}');
+
+      // ✅ Accept both shapes: `[{...}]` or `{ "messages": [{...}] }`
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body);
+        final List list = (decoded is List)
+            ? decoded
+            : (decoded['messages'] as List? ?? const []);
+        return list
+            .whereType<Map<String, dynamic>>()
+            .map((e) => Message.fromJson(e))
+            .toList();
+      }
+
+      // ✅ If the server replies 404 for “no history”, do NOT throw, just return []
+      if (resp.statusCode == 404) {
+        return <Message>[];
+      }
+
+      // Other errors: surface server message if present
+      final decoded = (resp.body.isNotEmpty) ? jsonDecode(resp.body) : null;
+      final serverMsg = (decoded is Map && decoded['error'] != null)
+          ? decoded['error'].toString()
+          : 'Failed to load chat history (HTTP ${resp.statusCode})';
+      throw Exception(serverMsg);
+    } on SocketException {
+      throw Exception('Network error. Please check your connection.');
+    } catch (e) {
+      debugPrint('[ApiService] getChatHistory error: $e');
+      rethrow;
     }
   }
 
@@ -197,20 +238,22 @@ class ApiService {
     required String orderId,
     required String recipientId,
   }) async {
-    try {
-      // ✅ This now correctly calls your main backend, not the old Firebase Function
-      final response = await _dio.post(
-        '/chat/initiate',
-        data: {
-          'orderId': orderId,
-          'recipientId': recipientId,
-        },
-      );
-      return response.data;
-    } on DioException catch (e) {
-      throw Exception(
-          'Failed to initiate chat: ${e.response?.data['message'] ?? e.message}');
-    }
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated.');
+
+    final url = '$baseUrl/chat/initiate';
+    final r = await http.post(
+      Uri.parse(url),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'orderId': orderId, 'recipientId': recipientId}),
+    );
+
+    final body = jsonDecode(r.body);
+    if (r.statusCode == 200) return (body as Map).cast<String, dynamic>();
+    throw Exception(body['error'] ?? 'Cannot initiate chat session');
   }
 
   /*Future<Map<String, dynamic>> initiateChatSession({
@@ -2438,42 +2481,33 @@ class ApiService {
     }
   }
 
+  // 2) Customer threads
   Future<List<ChatThreadModel>> getChatThreads() async {
     final token = await _getToken();
-    if (token == null) {
-      print('[ApiService] getChatThreads: Not authenticated.');
-      throw Exception('Not authenticated.');
-    }
+    if (token == null) throw Exception('Not authenticated.');
 
-    final String apiUrl = '$baseUrl/chat/my-threads';
-    print('[ApiService] Getting chat threads from $apiUrl');
+    final url = '$baseUrl/chat/my-threads';
+    debugPrint('ApiService: getChatThreads -> $url');
 
     try {
-      final response = await http.get(
-        Uri.parse(apiUrl),
+      final r = await http.get(
+        Uri.parse(url),
         headers: {'Authorization': 'Bearer $token'},
       );
-      final responseBody = jsonDecode(response.body);
-      print(
-          '[ApiService] getChatThreads Response Status: ${response.statusCode}, Body: $responseBody');
+      final body = jsonDecode(r.body);
 
-      if (response.statusCode == 200) {
-        print('[ApiService] Chat threads fetched successfully.');
-        final List<dynamic> threadsJson = responseBody as List<dynamic>? ?? [];
-        return threadsJson
-            .map((json) =>
-                ChatThreadModel.fromJson(json as Map<String, dynamic>))
+      if (r.statusCode == 200) {
+        final list = (body as List?) ?? [];
+        return list
+            .whereType<Map<String, dynamic>>()
+            .map((j) => ChatThreadModel.fromJson(j))
             .toList();
-      } else {
-        final errorMessage = responseBody['error'] ?? 'Failed to load messages';
-        print('[ApiService] getChatThreads failed. Error: $errorMessage');
-        throw Exception(errorMessage);
       }
+      throw Exception(body['error'] ?? 'Failed to load threads');
     } on SocketException {
-      print('[ApiService] Network error fetching chat threads.');
       throw Exception('Network error. Please check your connection.');
     } catch (e) {
-      print('[ApiService] Error fetching chat threads: ${e.toString()}');
+      debugPrint('ApiService: Error fetching chat threads: $e');
       rethrow;
     }
   }

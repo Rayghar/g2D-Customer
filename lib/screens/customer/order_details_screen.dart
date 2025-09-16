@@ -963,6 +963,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                         if (mounted) {
                           Navigator.of(context, rootNavigator: true)
                               .pushNamed(ChatScreen.routeName, arguments: {
+                            'orderId': chatId, // keep for router compatibility
                             'chatId': chatId,
                             'currentUserId': widget.customerId,
                             'recipientId': driver.id,

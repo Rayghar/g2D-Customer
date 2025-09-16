@@ -379,25 +379,54 @@ class MyApp extends StatelessWidget {
                 settings, "Missing customerId for EditProfileScreen");
 
           case ChatScreen.routeName:
-            if (args != null &&
-                args.containsKey('orderId') &&
-                args.containsKey('currentUserId') &&
-                args.containsKey('recipientId') &&
-                args.containsKey('recipientName')) {
+            {
+              final args = settings.arguments as Map<String, dynamic>?;
+
+              if (args == null) {
+                return _buildErrorRoute(
+                    settings, 'Missing arguments for ChatScreen');
+              }
+
+              // Accept either 'orderId' or 'chatId'
+              final String? chatId =
+                  (args['orderId'] ?? args['chatId'])?.toString();
+              final String? currentUserId = args['currentUserId']?.toString();
+              final String? recipientId = args['recipientId']?.toString();
+              final String? recipientName = args['recipientName']?.toString();
+              final String? recipientPhotoUrl =
+                  args['recipientPhotoUrl']?.toString();
+              final String? recipientPhoneNumber =
+                  args['recipientPhoneNumber']?.toString();
+
+              // Validate the required four fields
+              if (chatId == null ||
+                  chatId.isEmpty ||
+                  currentUserId == null ||
+                  currentUserId.isEmpty ||
+                  recipientId == null ||
+                  recipientId.isEmpty ||
+                  recipientName == null ||
+                  recipientName.isEmpty) {
+                return _buildErrorRoute(
+                  settings,
+                  'Missing required args for ChatScreen. '
+                  'Expected orderId/chatId, currentUserId, recipientId, recipientName. '
+                  'Got: $args',
+                );
+              }
+
               return MaterialPageRoute(
                 builder: (_) => ChatScreen(
-                  chatId: args['orderId'],
-                  currentUserId: args['currentUserId'] as String,
-                  recipientId: args['recipientId'] as String,
-                  recipientName: args['recipientName'] as String,
-                  recipientPhotoUrl: args['recipientPhotoUrl'] as String?,
-                  recipientPhoneNumber: args['recipientPhoneNumber'] as String?,
+                  chatId: chatId,
+                  currentUserId: currentUserId,
+                  recipientId: recipientId,
+                  recipientName: recipientName,
+                  recipientPhotoUrl: recipientPhotoUrl,
+                  recipientPhoneNumber: recipientPhoneNumber,
                 ),
                 settings: settings,
               );
             }
-            return _buildErrorRoute(
-                settings, "Missing arguments for ChatScreen");
 
           case LocationHistoryScreen.routeName:
             if (args != null &&

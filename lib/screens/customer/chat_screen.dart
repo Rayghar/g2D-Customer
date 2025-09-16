@@ -1,6 +1,4 @@
-// File: lib/screens/customer/chat_screen.dart
-// *** UPDATED & FIXED FILE ***
-
+// lib/screens/customer/chat_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -10,16 +8,20 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../services/api_service.dart';
-import '../../services/socket_service.dart'; // ✅ Import SocketService
-import '../../models/message.dart'; // ✅ Import your new Message model
+import '../../services/socket_service.dart';
+import '../../models/message.dart';
 import '../../widgets/input.dart';
 
 class ChatScreen extends StatefulWidget {
   static const String routeName = '/chat';
 
-  // These parameters are passed in during navigation
-  final String chatId; // This is the unique ID for the chat (e.g., the orderId)
+  /// Room id (== order UUID)
+  final String chatId;
+
+  /// Current user (customer) id
   final String currentUserId;
+
+  /// Counterpart user id (driver) – UI only; server will validate recipient
   final String recipientId;
   final String recipientName;
   final String? recipientPhotoUrl;
@@ -40,129 +42,213 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
-  final TextEditingController _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  final ApiService _apiService = ApiService();
-  final SocketService _socketService = SocketService();
+  final _msgCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+  final _api = ApiService();
+  late final SocketService _socket;
 
   final List<Message> _messages = [];
-  bool _isLoadingHistory = true;
-  bool _isSending = false;
+  bool _loading = true;
+  bool _sending = false;
+  bool _refreshing = false;
 
-  late AnimationController _entryAnimController;
-  late Animation<double> _fadeAnimation;
+  late final AnimationController _entryAnim;
+  late final Animation<double> _fade;
 
   @override
   void initState() {
     super.initState();
-    _entryAnimController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 300));
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(parent: _entryAnimController, curve: Curves.easeIn));
+    _entryAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _fade = CurvedAnimation(parent: _entryAnim, curve: Curves.easeIn);
 
-    _initializeChat();
-  }
-
-  void _initializeChat() {
-    _loadHistory();
-    _connectAndListen();
-  }
-
-  // Fetches previous messages via a standard API call
-  Future<void> _loadHistory() async {
-    try {
-      final history = await _apiService.getChatHistory(widget.chatId);
-      if (mounted) {
-        setState(() {
-          _messages.addAll(history);
-          _isLoadingHistory = false;
-        });
-        _scrollToBottom();
-      }
-    } catch (e) {
-      print("Error loading message history: $e");
-      if (mounted) {
-        setState(() => _isLoadingHistory = false);
-        _showFeedbackSnackbar("Error loading message history.", context,
-            isError: true);
-      }
-    }
-  }
-
-  // Connects to the socket server and listens for new messages
-  void _connectAndListen() {
-    _socketService.connect();
-    _socketService.joinRoom(widget.chatId);
-
-    _socketService.listenForMessage((data) {
-      if (mounted) {
-        final newMessage = Message.fromJson(data);
-        // Add message only if it's not already in the list (to avoid duplicates from optimistic update)
-        if (!_messages.any((msg) => msg.id == newMessage.id)) {
-          setState(() {
-            _messages.add(newMessage);
-          });
-        }
-        _scrollToBottom(isNewMessage: true);
-      }
+    // defer so Provider is available
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _socket = Provider.of<SocketService>(context, listen: false);
+      await _loadHistory();
+      _connectAndListen();
+      // Mark as read after we've joined/loaded
+      _socket.markRead(widget.chatId);
     });
   }
 
-  // Sends a new message via a socket event
+  // ---------- Networking ----------
+
+  Future<void> _loadHistory() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+    try {
+      final history = await _api.getChatHistory(widget.chatId);
+      if (!mounted) return;
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(history);
+        _loading = false;
+      });
+      _entryAnim.forward();
+      _scrollToBottom();
+    } catch (e) {
+      debugPrint(
+          '[ChatScreen] _loadHistory error: $e'); // 👈 see the real reason
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _snack('Error loading message history.', isError: true);
+    }
+  }
+
+  void _connectAndListen() {
+    _socket.connect();
+    _socket.joinRoom(widget.chatId);
+
+    // New incoming messages
+    _socket.listenForMessage((data) {
+      if (!mounted) return;
+      final incoming = Message.fromJson(data);
+
+      // Reconcile optimistic bubble sent by me (same text)
+      final idx = _messages.lastIndexWhere((m) =>
+          m.id.startsWith('temp_') &&
+          m.senderId == widget.currentUserId &&
+          m.text == incoming.text);
+
+      setState(() {
+        if (idx != -1) {
+          _messages[idx] = incoming;
+        } else if (!_messages.any((m) => m.id == incoming.id)) {
+          _messages.add(incoming);
+        }
+      });
+      _scrollToBottom(isNew: true);
+
+      // Mark as read if it's not from me
+      if (incoming.senderId != widget.currentUserId) {
+        _socket.markRead(widget.chatId);
+      }
+    });
+
+    // Server ack -> replace temp id with real id
+    _socket.onAck((ack) {
+      final String? tempId = ack?['tempId']?.toString();
+      final String? realId = ack?['messageId']?.toString();
+      if (tempId == null || realId == null) return;
+
+      final i = _messages.indexWhere((m) => m.id == tempId);
+      if (i != -1) {
+        final m = _messages[i];
+        setState(() {
+          _messages[i] = _cloned(m, id: realId);
+        });
+      }
+    });
+
+    // Status updates (delivered/read)
+    _socket.onStatus((payload) {
+      final id = payload?['messageId']?.toString();
+      final status = payload?['status']?.toString();
+      if (id == null || status == null) return;
+
+      final i = _messages.indexWhere((m) => m.id == id);
+      if (i != -1) {
+        final m = _messages[i];
+        setState(() => _messages[i] = _cloned(m, status: status));
+      }
+    });
+
+    // Entire chat marked read
+    _socket.onChatRead((payload) {
+      final chatId = payload?['chatId']?.toString();
+      if (chatId != widget.chatId) return;
+      setState(() {
+        for (var i = 0; i < _messages.length; i++) {
+          final m = _messages[i];
+          final mine = m.senderId == widget.currentUserId;
+          final needsUpdate =
+              m.status == null || m.status == 'sent' || m.status == 'delivered';
+          if (mine && needsUpdate) {
+            _messages[i] = _cloned(m, status: 'read');
+          }
+        }
+      });
+    });
+
+    // Surface socket errors
+    _socket.onErrorEvt((err) {
+      final msg = (err is Map && err['message'] != null)
+          ? err['message'].toString()
+          : 'Chat error';
+      _snack(msg, isError: true);
+    });
+  }
+
+  // Send message (optimistic)
   void _sendMessage() {
-    final text = _messageController.text.trim();
-    if (text.isEmpty || _isSending) return;
+    final text = _msgCtrl.text.trim();
+    if (text.isEmpty || _sending) return;
 
     HapticFeedback.mediumImpact();
-    setState(() => _isSending = true);
+    setState(() => _sending = true);
 
-    // Optimistically add the message to the UI for a snappy feel
-    final optimisticMessage = Message(
-      id: DateTime.now().millisecondsSinceEpoch.toString(), // Temporary ID
+    final tempId = 'temp_${DateTime.now().microsecondsSinceEpoch}';
+    final optimistic = Message(
+      id: tempId,
       chatId: widget.chatId,
       senderId: widget.currentUserId,
       recipientId: widget.recipientId,
       text: text,
-      createdAt: DateTime.now(),
+      status: 'sent',
+      createdAt: DateTime.now().toUtc(),
     );
+
     setState(() {
-      _messages.add(optimisticMessage);
-      _messageController.clear();
+      _messages.add(optimistic);
+      _msgCtrl.clear();
     });
+    _scrollToBottom(isNew: true);
 
-    _scrollToBottom(isNewMessage: true);
+    _socket.sendMessage(
+      chatId: widget.chatId,
+      recipientId: widget.recipientId,
+      text: text,
+      tempId: tempId,
+    );
 
-    // Send the message to the server
-    _socketService.sendMessage(widget.chatId, widget.recipientId, text);
-
-    // The server will save it and broadcast it back. The 'listenForMessage'
-    // handler will receive the final version with the real ID from the database.
-
-    // For simplicity, we don't show a "sending failed" state here,
-    // but you could add logic to handle errors from the socket.
-    if (mounted) setState(() => _isSending = false);
+    if (mounted) setState(() => _sending = false);
   }
 
-  void _scrollToBottom({bool isNewMessage = false}) {
-    if (_scrollController.hasClients) {
-      Future.delayed(Duration(milliseconds: isNewMessage ? 150 : 50), () {
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutCubic,
-          );
-        }
-      });
-    }
+  // ---------- UI helpers ----------
+
+  Message _cloned(Message m, {String? id, String? status}) {
+    return Message(
+      id: id ?? m.id,
+      chatId: m.chatId,
+      senderId: m.senderId,
+      recipientId: m.recipientId,
+      text: m.text,
+      createdAt: m.createdAt,
+      status: status ?? m.status,
+    );
   }
 
-  void _showFeedbackSnackbar(String message, BuildContext ctx,
-      {ThemeProvider? themeProvider, bool isError = false}) {
-    final tp = themeProvider ?? Provider.of<ThemeProvider>(ctx, listen: false);
-    ScaffoldMessenger.of(ctx).showSnackBar(
+  void _scrollToBottom({bool isNew = false}) {
+    if (!_scrollCtrl.hasClients) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollCtrl.hasClients) return;
+      _scrollCtrl.animateTo(
+        _scrollCtrl.position.maxScrollExtent,
+        duration: Duration(milliseconds: isNew ? 300 : 150),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  void _snack(String msg, {bool isError = false}) {
+    final tp = Provider.of<ThemeProvider>(context, listen: false);
+    ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
+        content: Text(msg, style: GoogleFonts.inter(color: Colors.white)),
         backgroundColor:
             isError ? tp.errorColor : tp.successColor.withOpacity(0.95),
         behavior: SnackBarBehavior.floating,
@@ -173,50 +259,50 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  Future<void> _makePhoneCall(
-      String? phoneNumber, ThemeProvider themeProvider) async {
-    if (phoneNumber == null || phoneNumber.isEmpty) {
-      _showFeedbackSnackbar('Phone number not available.', context,
-          themeProvider: themeProvider, isError: true);
+  Future<void> _call(String? phone, ThemeProvider theme) async {
+    if (phone == null || phone.isEmpty) {
+      _snack('Phone number not available.', isError: true);
       return;
     }
     HapticFeedback.mediumImpact();
-    final Uri launchUri = Uri(scheme: 'tel', path: phoneNumber);
-    if (await canLaunchUrl(launchUri)) {
-      await launchUrl(launchUri);
-    } else {
-      if (mounted) {
-        _showFeedbackSnackbar(
-            'Could not launch phone dialer for $phoneNumber', context,
-            themeProvider: themeProvider, isError: true);
-      }
+    final uri = Uri(scheme: 'tel', path: phone);
+    if (!await canLaunchUrl(uri) || !await launchUrl(uri)) {
+      _snack('Could not launch phone dialer for $phone', isError: true);
     }
+  }
+
+  Future<void> _refresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    await _loadHistory();
+    if (mounted) setState(() => _refreshing = false);
   }
 
   @override
   void dispose() {
-    _messageController.dispose();
-    _scrollController.dispose();
-    _socketService.dispose();
-    _entryAnimController.dispose();
+    _msgCtrl.dispose();
+    _scrollCtrl.dispose();
+    _entryAnim.dispose();
+    // keep socket alive app-wide, but remove listeners for this screen
+    //_socket.removeAllListeners();
     super.dispose();
   }
 
-  // The entire build method and its helpers remain unchanged from here on.
-  // Omitting for brevity.
+  // ---------- BUILD ----------
+
   @override
   Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
+    final theme = Provider.of<ThemeProvider>(context);
 
     return Scaffold(
-      backgroundColor: themeProvider.appSecondaryBackground,
+      backgroundColor: theme.appSecondaryBackground,
       appBar: AppBar(
-        backgroundColor: themeProvider.cardBackground,
-        elevation: 1.0,
-        shadowColor: themeProvider.cardShadowColorGlobal.withOpacity(0.3),
+        backgroundColor: theme.cardBackground,
+        elevation: 1,
+        shadowColor: theme.cardShadowColorGlobal.withOpacity(0.3),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded,
-              color: themeProvider.primaryText),
+          icon:
+              Icon(Icons.arrow_back_ios_new_rounded, color: theme.primaryText),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Row(
@@ -226,156 +312,165 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               CircleAvatar(
                 radius: 18,
                 backgroundImage: NetworkImage(widget.recipientPhotoUrl!),
-                backgroundColor: themeProvider.appSecondaryBackground,
+                backgroundColor: theme.appSecondaryBackground,
               )
             else
               CircleAvatar(
                 radius: 18,
-                backgroundColor: themeProvider.gas2doorPrimaryBlueLightVer,
+                backgroundColor: theme.gas2doorPrimaryBlueLightVer,
                 child: Text(
-                    widget.recipientName.isNotEmpty
-                        ? widget.recipientName[0].toUpperCase()
-                        : '?',
-                    style: GoogleFonts.inter(
-                        color: themeProvider.infoColorOnDarkBgs,
-                        fontWeight: FontWeight.bold)),
+                  widget.recipientName.isNotEmpty
+                      ? widget.recipientName[0].toUpperCase()
+                      : '?',
+                  style: GoogleFonts.inter(
+                    color: theme.infoColorOnDarkBgs,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 widget.recipientName,
                 style: GoogleFonts.inter(
-                    color: themeProvider.primaryText,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 17),
+                  color: theme.primaryText,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 17,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            if (widget.recipientPhoneNumber != null &&
+                widget.recipientPhoneNumber!.isNotEmpty)
+              IconButton(
+                icon:
+                    Icon(Icons.call_outlined, color: theme.gas2doorPrimaryBlue),
+                onPressed: () => _call(widget.recipientPhoneNumber, theme),
+                tooltip: "Call ${widget.recipientName}",
+              ),
           ],
         ),
-        actions: [
-          if (widget.recipientPhoneNumber != null &&
-              widget.recipientPhoneNumber!.isNotEmpty)
-            IconButton(
-              icon: Icon(Icons.call_outlined,
-                  color: themeProvider.gas2doorPrimaryBlue),
-              onPressed: () =>
-                  _makePhoneCall(widget.recipientPhoneNumber, themeProvider),
-              tooltip: "Call ${widget.recipientName}",
-            ),
-        ],
       ),
       body: Column(
         children: [
           Expanded(
-            child: _isLoadingHistory
+            child: _loading
                 ? Center(
                     child: CircularProgressIndicator(
-                        color: themeProvider.gas2doorPrimaryBlue))
-                : _messages.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20.0),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.chat_bubble_outline_rounded,
-                                  size: 60,
-                                  color: themeProvider.secondaryText
-                                      .withOpacity(0.5)),
-                              const SizedBox(height: 16),
-                              Text('No messages yet.',
-                                  style: GoogleFonts.inter(
-                                      color: themeProvider.secondaryText,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500)),
-                              Text('Start the conversation!',
-                                  style: GoogleFonts.inter(
-                                      color: themeProvider.tertiaryText,
-                                      fontSize: 14)),
-                            ],
+                        color: theme.gas2doorPrimaryBlue),
+                  )
+                : RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: _messages.isEmpty
+                        ? _empty(theme)
+                        : FadeTransition(
+                            opacity: _fade,
+                            child: ListView.builder(
+                              controller: _scrollCtrl,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 12),
+                              itemCount: _messages.length,
+                              itemBuilder: (context, i) {
+                                final m = _messages[i];
+                                final isMe = m.senderId == widget.currentUserId;
+                                return _bubble(m, isMe, theme);
+                              },
+                            ),
                           ),
-                        ),
-                      )
-                    : FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10.0, vertical: 12.0),
-                          itemCount: _messages.length,
-                          itemBuilder: (context, index) {
-                            final message = _messages[index];
-                            final bool isMe =
-                                message.senderId == widget.currentUserId;
-                            return _buildChatBubble(
-                                message, isMe, themeProvider);
-                          },
-                        ),
-                      ),
+                  ),
           ),
-          _buildMessageInputField(themeProvider),
+          _input(theme),
         ],
       ),
     );
   }
 
-  Widget _buildChatBubble(
-      Message message, bool isMe, ThemeProvider themeProvider) {
-    final alignment = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
-    final bubbleColor =
-        isMe ? themeProvider.gas2doorPrimaryBlue : themeProvider.cardBackground;
-    final textColor =
-        isMe ? themeProvider.infoColorOnDarkBgs : themeProvider.primaryText;
-    final timestampColor = isMe
-        ? themeProvider.infoColorOnDarkBgs.withOpacity(0.8)
-        : themeProvider.tertiaryText;
-    final bubbleRadius = Radius.circular(themeProvider.cardBorderRadiusValue);
+  Widget _empty(ThemeProvider theme) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.chat_bubble_outline_rounded,
+                size: 60, color: theme.secondaryText.withOpacity(0.5)),
+            const SizedBox(height: 16),
+            Text('No messages yet.',
+                style: GoogleFonts.inter(
+                    color: theme.secondaryText,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500)),
+            Text('Start the conversation!',
+                style:
+                    GoogleFonts.inter(color: theme.tertiaryText, fontSize: 14)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bubble(Message m, bool isMe, ThemeProvider theme) {
+    final align = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
+    final bubbleColor = isMe ? theme.gas2doorPrimaryBlue : theme.cardBackground;
+    final textColor = isMe ? theme.infoColorOnDarkBgs : theme.primaryText;
+    final timeColor =
+        isMe ? theme.infoColorOnDarkBgs.withOpacity(0.8) : theme.tertiaryText;
+    final r = Radius.circular(theme.cardBorderRadiusValue);
+
+    Widget? receiptIcon() {
+      if (!isMe) return null;
+      switch (m.status) {
+        case 'read':
+          return const Icon(Icons.done_all, size: 14);
+        case 'delivered':
+          return const Icon(Icons.done_all, size: 14);
+        default:
+          return const Icon(Icons.check, size: 14);
+      }
+    }
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 5.0),
+      margin: const EdgeInsets.symmetric(vertical: 5),
       child: Column(
-        crossAxisAlignment: alignment,
+        crossAxisAlignment: align,
         children: [
           Container(
             constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75),
+              maxWidth: MediaQuery.of(context).size.width * 0.75,
+            ),
             decoration: BoxDecoration(
-                color: bubbleColor,
-                borderRadius: BorderRadius.only(
-                  topLeft: bubbleRadius,
-                  topRight: bubbleRadius,
-                  bottomLeft: isMe ? bubbleRadius : const Radius.circular(4),
-                  bottomRight: isMe ? const Radius.circular(4) : bubbleRadius,
+              color: bubbleColor,
+              borderRadius: BorderRadius.only(
+                topLeft: r,
+                topRight: r,
+                bottomLeft: isMe ? r : const Radius.circular(4),
+                bottomRight: isMe ? const Radius.circular(4) : r,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.cardShadowColorGlobal.withOpacity(0.15),
+                  blurRadius: 3,
+                  offset: const Offset(1, 1),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color:
-                        themeProvider.cardShadowColorGlobal.withOpacity(0.15),
-                    blurRadius: 3,
-                    offset: const Offset(1, 1),
-                  )
-                ]),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
+              ],
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Column(
               crossAxisAlignment:
                   isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
-                Text(
-                  message.text,
-                  style: GoogleFonts.inter(
-                      color: textColor, fontSize: 15, height: 1.35),
-                ),
-                const SizedBox(height: 5.0),
+                Text(m.text,
+                    style: GoogleFonts.inter(
+                        color: textColor, fontSize: 15, height: 1.35)),
+                const SizedBox(height: 5),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      DateFormat('hh:mm a').format(message.createdAt.toLocal()),
-                      style: GoogleFonts.inter(
-                          color: timestampColor, fontSize: 11),
+                      DateFormat('hh:mm a').format(m.createdAt.toLocal()),
+                      style: GoogleFonts.inter(color: timeColor, fontSize: 11),
                     ),
+                    finalReceipt(timeColor, receiptIcon()),
                   ],
                 ),
               ],
@@ -386,61 +481,77 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildMessageInputField(ThemeProvider themeProvider) {
+  Widget finalReceipt(Color timeColor, Widget? icon) {
+    if (icon == null) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(width: 6),
+        IconTheme.merge(
+          data: IconThemeData(color: timeColor, size: 13),
+          child: icon,
+        ),
+      ],
+    );
+  }
+
+  Widget _input(ThemeProvider theme) {
     return Container(
       decoration: BoxDecoration(
-        color: themeProvider.cardBackground,
+        color: theme.cardBackground,
         boxShadow: [
           BoxShadow(
             offset: const Offset(0, -2),
             blurRadius: 5,
-            color: themeProvider.cardShadowColorGlobal.withOpacity(0.08),
+            color: theme.cardShadowColorGlobal.withOpacity(0.08),
           ),
         ],
       ),
       padding: EdgeInsets.fromLTRB(
-          12.0, 10.0, 12.0, MediaQuery.of(context).padding.bottom + 10.0),
+        12,
+        10,
+        12,
+        MediaQuery.of(context).padding.bottom + 10,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
             child: CustomInput(
-              controller: _messageController,
-              hintText: 'Type a message...',
+              controller: _msgCtrl,
+              hintText: 'Type a message…',
               keyboardType: TextInputType.multiline,
               maxLines: 5,
               minLines: 1,
               textInputAction: TextInputAction.newline,
-              // To make CustomInput more compact for chat, you might need to adjust its internal contentPadding
-              // or allow contentPadding to be passed as a parameter to CustomInput.
-              // For now, it will use CustomInput's default padding.
             ),
           ),
-          const SizedBox(width: 8), // Reduced space
-          // --- CORRECTED Send Button using IconButton ---
+          const SizedBox(width: 8),
           Material(
-            color: themeProvider.gas2doorPrimaryBlue,
-            borderRadius: BorderRadius.circular(25), // Circular shape
-            elevation: 2.0, // Subtle elevation
+            color: theme.gas2doorPrimaryBlue,
+            borderRadius: BorderRadius.circular(25),
+            elevation: 2,
             child: InkWell(
-              onTap: _isSending ? null : _sendMessage,
+              onTap: _sending ? null : _sendMessage,
               borderRadius: BorderRadius.circular(25),
-              splashColor:
-                  themeProvider.gas2doorPrimaryBlueLightVer.withOpacity(0.5),
+              splashColor: theme.gas2doorPrimaryBlueLightVer.withOpacity(0.5),
               highlightColor:
-                  themeProvider.gas2doorPrimaryBlueLightVer.withOpacity(0.3),
+                  theme.gas2doorPrimaryBlueLightVer.withOpacity(0.3),
               child: SizedBox(
                 width: 50,
                 height: 50,
                 child: Center(
-                  child: _isSending
+                  child: _sending
                       ? const SizedBox(
                           width: 22,
                           height: 22,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2.5, color: Colors.white))
-                      : Icon(Icons.send_rounded,
-                          color: themeProvider.infoColorOnDarkBgs, size: 24),
+                            strokeWidth: 2.5,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.send_rounded,
+                          color: Colors.white, size: 24),
                 ),
               ),
             ),

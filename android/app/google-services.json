@@ -198,11 +198,27 @@
       },
       "oauth_client": [
         {
+          "client_id": "108927420628-2hemvgijddhq25hg9b8cbb056skaqtk6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "gas2door.ng.customer",
+            "certificate_hash": "58c4d6af7b3e8fc8419e4de8ada9dd6d1337c935"
+          }
+        },
+        {
           "client_id": "108927420628-89ftjjae9e4oe08alppqvr8k2tm9eolo.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "gas2door.ng.customer",
             "certificate_hash": "e4a4f5c355dd53dc5f30601fba13f49d2fbcc3f8"
+          }
+        },
+        {
+          "client_id": "108927420628-a2sgc0va1r7v9gbncllbo1aa3kpnt3ln.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "gas2door.ng.customer",
+            "certificate_hash": "da3fb07372f0bf1a4d789a982d6d612f730e4072"
           }
         },
         {
