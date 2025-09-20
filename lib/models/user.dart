@@ -23,6 +23,7 @@ class User {
   final String? gatewayCustomerId; // Added for payment gateway customer ID
   final double? latitude; // Added for location (if stored with user)
   final double? longitude; // Added for location (if stored with user)
+  final String? referredByCode; // <<< ADD THIS LINE
   final bool isFirstTimeCustomer; // << NEW >>
 
   User({
@@ -44,6 +45,7 @@ class User {
     this.gatewayCustomerId, // Initialize here
     this.latitude, // Initialize here
     this.longitude, // Initialize here
+    this.referredByCode, // <<< ADD THIS LINE
     this.isFirstTimeCustomer = false, // << NEW >>
   });
 
@@ -74,6 +76,7 @@ class User {
           json['gatewayCustomerId'] as String?, // Parse new field
       latitude: (json['latitude'] as num?)?.toDouble(), // Parse new field
       longitude: (json['longitude'] as num?)?.toDouble(), // Parse new field
+      referredByCode: json['referredByCode'] as String?, // <<< ADD THIS LINE
       isFirstTimeCustomer:
           json['isFirstTimeCustomer'] as bool? ?? false, // << NEW >>
     );

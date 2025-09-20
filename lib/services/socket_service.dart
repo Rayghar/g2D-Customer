@@ -70,21 +70,33 @@ class SocketService with ChangeNotifier {
   // ----- Room mgmt -----
   void joinRoom(String chatId) {
     if (!isConnected) return;
-    _socket?.emit('join_room', chatId);
+    _socket?.emit('join_room', chatId); // <-- server expects raw string
     debugPrint('[SocketService] join_room -> $chatId');
   }
 
-  // Mark every message in the room as read on the server
+  /// Mark every message in the room as read on the server.
+  /// IMPORTANT: server listens as socket.on('mark_read', (chatId) => ...)
+  /// so we must send the plain chatId string (NOT an object).
   void markRead(String chatId) {
     if (!isConnected) return;
-    _socket?.emit('mark_read', {'chatId': chatId});
+    _socket?.emit('mark_read', chatId); // <-- FIX: send raw string
     debugPrint('[SocketService] mark_read -> $chatId');
+  }
+
+  /// Optionally tell server a specific message got delivered on this device
+  void markDelivered({required String chatId, required String messageId}) {
+    if (!isConnected) return;
+    _socket?.emit('message_delivered', {
+      'chatId': chatId,
+      'messageId': messageId,
+    });
+    debugPrint('[SocketService] message_delivered -> $chatId / $messageId');
   }
 
   // ----- Send -----
   void sendMessage({
     required String chatId,
-    required String recipientId,
+    required String recipientId, // server may ignore; safe to include
     required String text,
     String? tempId,
   }) {
@@ -122,6 +134,17 @@ class SocketService with ChangeNotifier {
   void onChatRead(void Function(dynamic) handler) {
     _socket?.off('chat_read');
     _socket?.on('chat_read', handler);
+  }
+
+  /// Badge updates for thread list
+  void onThreadUnread(void Function(dynamic) handler) {
+    _socket?.off('thread_unread');
+    _socket?.on('thread_unread', handler);
+  }
+
+  void onThreadRead(void Function(dynamic) handler) {
+    _socket?.off('thread_read');
+    _socket?.on('thread_read', handler);
   }
 
   // Back-compat (your code used this name in a few places)

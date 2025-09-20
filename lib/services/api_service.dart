@@ -3303,40 +3303,6 @@ class ApiService {
     }
   }
 
-  // Add this function. If it already exists, replace it.
-  Future<void> registerFcmToken(String token) async {
-    final authToken = await _getToken();
-    if (authToken == null) {
-      print('[ApiService] registerFcmToken: User not authenticated. Skipping.');
-      return;
-    }
-
-    // CORRECTED: URL and HTTP Method
-    //final String apiUrl = '$baseUrl/users/fcm-token';
-    final String apiUrl = '$_nodeBackendUrl/users/me/fcm-token';
-
-    try {
-      final response = await http.put(
-        // Use PUT
-        Uri.parse(apiUrl),
-        headers: {
-          'Authorization': 'Bearer $authToken',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'fcmToken': token}),
-      );
-
-      if (response.statusCode == 200) {
-        print('[ApiService] FCM token registered successfully.');
-      } else {
-        print(
-            '[ApiService] Failed to register FCM token. Status: ${response.statusCode}, Body: ${response.body}');
-      }
-    } catch (e) {
-      print('[ApiService] Error registering FCM token: $e');
-    }
-  }
-
   Future<String> getAgoraToken(String channelName) async {
     final token = await _getToken();
     if (token == null) {
@@ -3596,6 +3562,89 @@ class ApiService {
     } catch (e) {
       print('[ApiService] Error deleting payment method: ${e.toString()}');
       rethrow;
+    }
+  }
+
+  // ===== FCM registration =====
+
+  /// Register (or refresh) this device's FCM token with the backend.
+  /// POST /api/v1/fcm/register   { token: "<device_fcm_token>" }
+  Future<void> registerFcmToken(String deviceFcmToken) async {
+    final jwt = await _getToken();
+    if (jwt == null) {
+      throw Exception('Not authenticated.');
+    }
+
+    final uri = Uri.parse('$baseUrl/fcm/register');
+    try {
+      final res = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $jwt',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'token': deviceFcmToken}),
+      );
+
+      if (res.statusCode != 200) {
+        // Try to surface backend error message if present
+        String msg = 'Failed to register FCM token';
+        try {
+          final body = jsonDecode(res.body);
+          if (body is Map && body['error'] != null) {
+            msg = body['error'].toString();
+          }
+        } catch (_) {}
+        throw Exception(msg);
+      }
+
+      if (kDebugMode) {
+        print('[ApiService] registerFcmToken OK');
+      }
+    } on SocketException {
+      throw Exception('Network error while registering FCM token.');
+    }
+  }
+
+  /// Unregister this device's FCM token (e.g., on logout or token rotation).
+  /// POST /api/v1/fcm/unregister   { token: "<device_fcm_token>" }
+  Future<void> unregisterFcmToken(String deviceFcmToken) async {
+    final jwt = await _getToken();
+    if (jwt == null) {
+      // If user is already logged out, just return silently.
+      if (kDebugMode) {
+        print('[ApiService] unregisterFcmToken skipped: no JWT');
+      }
+      return;
+    }
+
+    final uri = Uri.parse('$baseUrl/fcm/unregister');
+    try {
+      final res = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $jwt',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'token': deviceFcmToken}),
+      );
+
+      if (res.statusCode != 200) {
+        String msg = 'Failed to unregister FCM token';
+        try {
+          final body = jsonDecode(res.body);
+          if (body is Map && body['error'] != null) {
+            msg = body['error'].toString();
+          }
+        } catch (_) {}
+        throw Exception(msg);
+      }
+
+      if (kDebugMode) {
+        print('[ApiService] unregisterFcmToken OK');
+      }
+    } on SocketException {
+      throw Exception('Network error while unregistering FCM token.');
     }
   }
 
