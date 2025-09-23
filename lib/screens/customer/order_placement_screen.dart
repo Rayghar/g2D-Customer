@@ -19,8 +19,6 @@ import '../../models/user.dart' as app_user;
 import '../../models/system_config_model.dart';
 import '../../models/place_order_response_model.dart';
 import '../../models/order.dart' as app_order_model;
-import '../../models/referral_model.dart' as app_order_model;
-
 import './order_details_screen.dart'; // <-- ADD THIS LINE
 import '../../providers/order_provider.dart';
 
@@ -632,11 +630,17 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
     // Your existing logic for per-cylinder surcharges is preserved here.
     final int totalQuantity =
         _orderItems.fold(0, (sum, item) => sum + item.quantity);
-    const double perAdditionalCylinderSurchargeKobo = 1500.0;
 
+    // 2. If there's more than one cylinder, calculate and add the surcharge.
     if (totalQuantity > 1) {
-      totalDeliveryFeeKobo +=
-          (totalQuantity - 1) * perAdditionalCylinderSurchargeKobo;
+      // Define the same percentage as the backend (e.g., 50%).
+      const double surchargePercentage = 0.90;
+
+      // Calculate the surcharge based on the BASE delivery fee (variable 'baseFee').
+      final double surchargePerItemKobo = baseFee * surchargePercentage;
+
+      // Add the total surcharge for all *additional* cylinders.
+      totalDeliveryFeeKobo += (totalQuantity - 1) * surchargePerItemKobo;
     }
 
     // Return the final fee in kobo.
@@ -880,11 +884,9 @@ class _OrderPlacementScreenState extends State<OrderPlacementScreen>
       'useWalletBalance': _useWalletBalance,
       if (_promoCodeController.text.trim().isNotEmpty)
         'promoCodeApplied': _promoCodeController.text.trim().toUpperCase(),
-      if (_currentUserProfile?.referredByCode != null &&
-          _currentUserProfile!.referredByCode!.isNotEmpty)
-        'referralCode': _currentUserProfile!.referredByCode
-      else if (_referralCodeController.text.trim().isNotEmpty)
+      if (_referralCodeController.text.trim().isNotEmpty)
         'referralCode': _referralCodeController.text.trim().toUpperCase(),
+
       // Add the selected payment method to the payload if it's a first time customer
       if (_currentUserProfile?.isFirstTimeCustomer == true)
         'paymentMethod':

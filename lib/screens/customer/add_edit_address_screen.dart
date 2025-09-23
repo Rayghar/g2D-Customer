@@ -63,10 +63,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
   final ApiService _apiService = ApiService();
   String? _googleApiKey;
 
-  // <<< added: guard + focus node to prevent cursor jump when we set text programmatically
-  bool _isProgrammaticStreetUpdate = false;
-  final FocusNode _streetFocus = FocusNode();
-
   @override
   void initState() {
     super.initState();
@@ -113,7 +109,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
     _postalCodeController.dispose();
     _countryController.dispose();
     _deliveryInstructionsController.dispose();
-    _streetFocus.dispose(); // <<< added
     super.dispose();
   }
 
@@ -123,19 +118,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
         (c) => c.types.any((type) => types.contains(type)),
         orElse: () => AddressComponent(longName: '', types: []));
     return component.longName;
-  }
-
-  // <<< added: helper for safe programmatic text set (preserves caret, avoids feedback loops)
-  void _setStreetProgrammatically(String newText) {
-    _isProgrammaticStreetUpdate = true;
-    _streetController.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: newText.length),
-      composing: TextRange.empty,
-    );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _isProgrammaticStreetUpdate = false;
-    });
   }
 
   Future<void> _populateAddressFields(Prediction prediction) async {
@@ -173,15 +155,8 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
       String country = _safeGetComponent(components, ["country"]);
       String postalCode = _safeGetComponent(components, ["postal_code"]);
 
-      // NOTE: We do NOT reset _streetController here if itemClick already set it.
-      // If Google details provide a better street than prediction.description, do this instead:
-      final candidateStreet = '$streetNumber $route'.trim();
-
       setState(() {
-        if (candidateStreet.isNotEmpty &&
-            candidateStreet != _streetController.text) {
-          _setStreetProgrammatically(candidateStreet); // <<< added (guarded)
-        }
+        _streetController.text = '$streetNumber $route'.trim();
         _cityController.text = city;
         _stateController.text = state;
         _countryController.text = country;
@@ -231,12 +206,10 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         _showFeedbackSnackbar(
-          'Failed to save address: ${e.toString().replaceFirst("Exception: ", "")}',
-          isError: true,
-        );
-      }
+            'Failed to save address: ${e.toString().replaceFirst("Exception: ", "")}',
+            isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -245,13 +218,10 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
   void _showFeedbackSnackbar(String message, {bool isError = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
         backgroundColor:
-            isError ? themeProvider.errorColor : themeProvider.successColor,
-      ),
-    );
+            isError ? themeProvider.errorColor : themeProvider.successColor));
   }
 
   @override
@@ -381,8 +351,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
             GooglePlaceAutoCompleteTextField(
               textEditingController: _streetController,
               googleAPIKey: _googleApiKey ?? '',
-              // <<< added: focus + decoration unchanged
-              focusNode: _streetFocus,
               inputDecoration: InputDecoration(
                 labelText: "Search Street Address*",
                 prefixIcon:
@@ -393,20 +361,14 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
                     borderSide: BorderSide(
                         color: themeProvider.gas2doorPrimaryBlue, width: 2)),
               ),
-              // <<< changed: use guarded setter to avoid cursor jump
               itemClick: (Prediction prediction) {
-                final desc = prediction.description ?? '';
-                if (desc.isNotEmpty) {
-                  _setStreetProgrammatically(desc);
-                }
+                _streetController.text = prediction.description ?? '';
+                _streetController.selection = TextSelection.fromPosition(
+                    TextPosition(offset: prediction.description?.length ?? 0));
                 _populateAddressFields(prediction);
               },
-              // (Optional) avoid heavy rebuilds while typing:
-              // debounceTime: 300,
               textStyle: GoogleFonts.inter(color: themeProvider.primaryText),
               countries: const ["ng"],
-              // IMPORTANT: do NOT mutate controller.text inside onChanged; the Google widget handles it.
-              // onChanged: (val) { if (_isProgrammaticStreetUpdate) return; },
             ),
             const SizedBox(height: 16),
             CustomInput(
