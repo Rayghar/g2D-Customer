@@ -3312,8 +3312,8 @@ class ApiService {
     }
 
     // CORRECTED: URL and HTTP Method
-    //final String apiUrl = '$baseUrl/users/fcm-token';
-    final String apiUrl = '$_nodeBackendUrl/users/me/fcm-token';
+    final String apiUrl = '$baseUrl/fcm/token';
+    //final String apiUrl = '$_nodeBackendUrl/users/me/fcm-token';
 
     try {
       final response = await http.put(
@@ -3532,6 +3532,48 @@ class ApiService {
           responseBody['error'] ?? 'Failed to fetch payment configuration.';
       print('[ApiService] adminGetPaymentConfig failed. Error: $errorMessage');
       throw Exception('Failed to fetch payment configuration.');
+    }
+  }
+
+  /// Unregister this device's FCM token (e.g., on logout or token rotation).
+  /// POST /api/v1/fcm/unregister   { token: "<device_fcm_token>" }
+  Future<void> unregisterFcmToken(String deviceFcmToken) async {
+    final jwt = await _getToken();
+    if (jwt == null) {
+      // If user is already logged out, just return silently.
+      if (kDebugMode) {
+        print('[ApiService] unregisterFcmToken skipped: no JWT');
+      }
+      return;
+    }
+
+    final uri = Uri.parse('$baseUrl/fcm/unregister');
+    try {
+      final res = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $jwt',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'token': deviceFcmToken}),
+      );
+
+      if (res.statusCode != 200) {
+        String msg = 'Failed to unregister FCM token';
+        try {
+          final body = jsonDecode(res.body);
+          if (body is Map && body['error'] != null) {
+            msg = body['error'].toString();
+          }
+        } catch (_) {}
+        throw Exception(msg);
+      }
+
+      if (kDebugMode) {
+        print('[ApiService] unregisterFcmToken OK');
+      }
+    } on SocketException {
+      throw Exception('Network error while unregistering FCM token.');
     }
   }
 

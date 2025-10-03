@@ -1,5 +1,5 @@
 // File: lib/screens/customer/customer_dashboard_screen.dart
-// ADVISORY: This is the complete, final version aligned with the new theme.
+// ADVISORY: The structure, routes and logic are unchanged. Only theming was updated.
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,7 +21,7 @@ import './deals_screen.dart';
 import './profile_screen.dart';
 import './notification_screen.dart';
 import './address_list_screen.dart';
-import '../../widgets/curve_painter.dart'; // ADDED: Import the new CurvePainter file
+import '../../widgets/curve_painter.dart'; // (kept import; painter remains commented as before)
 
 class CustomerDashboardShellData {
   final String customerId;
@@ -75,18 +75,17 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
 
     // Listen for foreground FCM messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      // (kept original print)
+      // ignore: avoid_print
       print('Foreground message received: ${message.notification?.title}');
       if (message.notification != null && mounted) {
-        // Show a SnackBar to alert the user
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(message.notification!.title ?? 'New Notification'),
             action: SnackBarAction(
               label: 'View',
               onPressed: () {
-                // TODO: Add logic to navigate to the relevant screen,
-                // for example, the order details screen, using the
-                // orderId from message.data
+                // TODO: navigate as needed using data payload
               },
             ),
           ),
@@ -283,7 +282,27 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final String appLogoPath = 'assets/images/PrimeJet_Logo.png';
+
+    // Derived colors (safe fallbacks if ThemeProvider doesn't expose some tokens)
+    final Color bg = themeProvider.appPrimaryBackground;
+    final Color appBarGlass = (isDark
+        ? Colors.black.withOpacity(0.20)
+        : Colors.white.withOpacity(0.40));
+    final Color navGlass = (isDark
+        ? Colors.black.withOpacity(0.20)
+        : Colors.white.withOpacity(0.40));
+    final Color primaryText = themeProvider.primaryText;
+    final Color mutedText = (isDark ? Colors.white70 : Colors.black54);
+    final Color shadowColor = (isDark
+        ? Colors.black.withOpacity(0.6)
+        : Colors.black.withOpacity(0.1));
+    final Color overlayCircle = (isDark
+        ? Colors.white.withOpacity(0.10)
+        : Colors.white.withOpacity(0.20));
+    final Color overlayIcon = (isDark ? Colors.white70 : Colors.white);
 
     const IconData homeIcon = Icons.home_work_outlined;
     const IconData homeActiveIcon = Icons.home_work_rounded;
@@ -297,7 +316,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
 
     if (_isLoadingShellData && _shellData == null) {
       return Scaffold(
-        backgroundColor: themeProvider.appPrimaryBackground,
+        backgroundColor: bg,
         body: Center(
             child: CircularProgressIndicator(
                 color: themeProvider.gas2doorPrimaryBlue)),
@@ -305,7 +324,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
     }
     if (_shellErrorMessage != null && _shellData == null) {
       return Scaffold(
-        backgroundColor: themeProvider.appPrimaryBackground,
+        backgroundColor: bg,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(20.0),
@@ -317,8 +336,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                 const SizedBox(height: 16),
                 Text(_shellErrorMessage!,
                     textAlign: TextAlign.center,
-                    style: GoogleFonts.inter(
-                        color: themeProvider.primaryText, fontSize: 16)),
+                    style: GoogleFonts.inter(color: primaryText, fontSize: 16)),
                 const SizedBox(height: 20),
                 CustomButton(
                     text: "Retry",
@@ -348,7 +366,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
         Text(
           _appDisplayName,
           style: GoogleFonts.inter(
-            color: themeProvider.primaryText,
+            color: primaryText,
             fontWeight: FontWeight.bold,
             fontSize: 20,
           ),
@@ -357,12 +375,13 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
     );
 
     return Scaffold(
-      backgroundColor: Colors.grey.shade200, // MODIFIED: New background color
+      // REPLACED: fixed light gray with theme background
+      backgroundColor: bg,
       appBar: AppBar(
-        // MODIFIED: Updated app bar style
-        backgroundColor: Colors.white.withOpacity(0.4),
+        // Glassy app bar that adapts to theme
+        backgroundColor: appBarGlass,
         elevation: 0,
-        shadowColor: Colors.black.withOpacity(0.1),
+        shadowColor: shadowColor,
         automaticallyImplyLeading: false,
         title: appBarTitleWidget,
         actions: <Widget>[
@@ -370,8 +389,12 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
             alignment: Alignment.center,
             children: <Widget>[
               IconButton(
-                icon: Icon(notificationIcon,
-                    color: Colors.black54, size: 26.0), // MODIFIED: Icon color
+                icon: Icon(
+                  notificationIcon,
+                  // REPLACED: hardcoded black54 with theme-aware muted
+                  color: mutedText,
+                  size: 26.0,
+                ),
                 onPressed: () {
                   HapticFeedback.lightImpact();
                   Navigator.of(context, rootNavigator: true)
@@ -390,8 +413,10 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                       color: themeProvider.errorColor,
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: Colors.white,
-                          width: 1.0), // MODIFIED: Border color
+                        // REPLACED: always white with theme surface for dark mode
+                        color: isDark ? Colors.black : Colors.white,
+                        width: 1.0,
+                      ),
                     ),
                   ),
                 )
@@ -401,10 +426,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
         ],
       ),
       body: Stack(
-        // ADDED: Stack to handle the new background layer
         children: [
+          // Subtle decorative gradient that adapts to theme
           Positioned(
-            // ADDED: Gradient background layer
             top: -MediaQuery.of(context).size.height * 0.3,
             left: -MediaQuery.of(context).size.width * 0.1,
             child: Container(
@@ -412,10 +436,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
               height: MediaQuery.of(context).size.height * 0.8,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [
-                    Colors.blue.shade300.withOpacity(0.7),
-                    Colors.red.shade300.withOpacity(0.7),
-                  ],
+                  colors: isDark
+                      ? [
+                          // cooler + dimmer in dark
+                          Colors.blueGrey.shade800.withOpacity(0.50),
+                          Colors.deepPurple.shade700.withOpacity(0.45),
+                        ]
+                      : [
+                          Colors.blue.shade300.withOpacity(0.70),
+                          Colors.red.shade300.withOpacity(0.70),
+                        ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   stops: const [0.3, 0.7],
@@ -426,13 +456,13 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                 child: CustomPaint(
                   size: Size(MediaQuery.of(context).size.width * 1.2,
                       MediaQuery.of(context).size.height * 0.8),
-                  //painter: CurvePainter(),
+                  // painter: CurvePainter(),
                 ),
               ),
             ),
           ),
+          // Background icons with theme-aware overlays
           Positioned(
-            // ADDED: Gas station icon on the background
             top: MediaQuery.of(context).size.height * 0.15,
             left: MediaQuery.of(context).size.width * 0.15,
             child: Opacity(
@@ -441,15 +471,14 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                 padding: const EdgeInsets.all(15),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.2),
+                  color: overlayCircle,
                 ),
                 child: Icon(Icons.local_gas_station_outlined,
-                    size: 30, color: Colors.white),
+                    size: 30, color: overlayIcon),
               ),
             ),
           ),
           Positioned(
-            // ADDED: Shipping icon on the background
             top: MediaQuery.of(context).size.height * 0.4,
             left: MediaQuery.of(context).size.width * 0.4,
             child: Opacity(
@@ -458,15 +487,14 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                 padding: const EdgeInsets.all(15),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.2),
+                  color: overlayCircle,
                 ),
                 child: Icon(Icons.local_shipping_outlined,
-                    size: 30, color: Colors.white),
+                    size: 30, color: overlayIcon),
               ),
             ),
           ),
           Positioned(
-            // ADDED: Location icon on the background
             top: MediaQuery.of(context).size.height * 0.65,
             left: MediaQuery.of(context).size.width * 0.7,
             child: Opacity(
@@ -475,14 +503,14 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                 padding: const EdgeInsets.all(15),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.2),
+                  color: overlayCircle,
                 ),
                 child: Icon(Icons.location_on_outlined,
-                    size: 30, color: Colors.white),
+                    size: 30, color: overlayIcon),
               ),
             ),
           ),
-          // MODIFIED: IndexedStack is now the top layer
+          // Content
           IndexedStack(
             index: _selectedIndex,
             children: _screenOptions,
@@ -490,37 +518,37 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
-        // MODIFIED: Updated bottom navigation bar style
-        items: <BottomNavigationBarItem>[
-          const BottomNavigationBarItem(
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(
               icon: Icon(homeIcon),
               activeIcon: Icon(homeActiveIcon),
               label: 'Home'),
-          const BottomNavigationBarItem(
+          BottomNavigationBarItem(
               icon: Icon(ordersIcon),
               activeIcon: Icon(ordersActiveIcon),
               label: 'Orders'),
-          const BottomNavigationBarItem(
+          BottomNavigationBarItem(
               icon: Icon(dealsIcon),
               activeIcon: Icon(dealsActiveIcon),
               label: 'Deals'),
-          const BottomNavigationBarItem(
+          BottomNavigationBarItem(
               icon: Icon(profileIcon),
               activeIcon: Icon(profileActiveIcon),
               label: 'Profile'),
         ],
         currentIndex: _selectedIndex,
         selectedItemColor: themeProvider.gas2doorPrimaryBlue,
-        unselectedItemColor: Colors.black54, // MODIFIED: Color for visibility
+        // REPLACED: hardcoded black54 with theme-aware muted
+        unselectedItemColor: mutedText,
         selectedLabelStyle:
             GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 12.0),
         unselectedLabelStyle: GoogleFonts.inter(fontSize: 11.5),
         showUnselectedLabels: true,
         onTap: _onItemTapped,
         type: BottomNavigationBarType.fixed,
-        backgroundColor:
-            Colors.white.withOpacity(0.4), // MODIFIED: Glassy effect
-        elevation: 0, // MODIFIED: Removed elevation
+        // REPLACED: glass color to adapt to dark/light
+        backgroundColor: navGlass,
+        elevation: 0,
         landscapeLayout: BottomNavigationBarLandscapeLayout.centered,
       ),
     );
