@@ -1,6 +1,5 @@
 // File: lib/screens/customer/home_screen.dart
-// ADVISORY: This version adds the Order ID to recent orders and the delivery address to the active order card.
-// UPDATE: Implemented periodic polling for active order status and dynamic customer stats.
+// UPDATE: Applied fix for "setState() or markNeedsBuild() called during build" error.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -17,13 +16,13 @@ import '../../widgets/card.dart';
 import '../../models/address_model.dart';
 import '../../models/deal_model.dart';
 import '../../models/order.dart' as app_order;
-import '../../models/customer_stats_model.dart'; // NEW: Import CustomerStatsModel
+import '../../models/customer_stats_model.dart';
 import '../../services/api_service.dart';
 import './order_placement_screen.dart';
 import './order_details_screen.dart';
 import './order_summary_screen.dart';
 import './promotion_details_screen.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // NEW: Import Firebase Messaging
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../../providers/order_provider.dart';
 import './payment_screen.dart';
 
@@ -84,10 +83,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final PageController _promotionPageController = PageController();
   int _currentPromotionPage = 0;
   Timer? _promotionTimer;
-  //Timer? _activeOrderPollingTimer; // NEW: Timer for active order polling
 
   List<PromotionItem> _promotionItems = [];
-  CustomerStatsModel? _customerStats; // NEW: Customer stats data
+  CustomerStatsModel? _customerStats;
   String? _errorMessage;
   bool _isLoading = true;
 
@@ -122,23 +120,28 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       _logger.info(
           'Foreground FCM message received on HomeScreen: ${message.data}');
-      // Check if the notification is an order update
       if (message.data['type'] == 'ORDER_STATUS_UPDATE' && mounted) {
-        // Refresh all data to get the latest order status
         _loadAllHomeScreenData(isRefresh: true);
       }
     });
 
-    if (widget.customerIdFromShell?.isNotEmpty ?? false) {
-      _loadAllHomeScreenData();
-    } else {
-      setState(() => _isLoading = false);
-      _logger.info('Customer ID not available, skipping initial data load.');
-      Sentry.addBreadcrumb(Breadcrumb(
-          category: 'data_loading',
-          message: 'Customer ID missing, initial data load skipped',
-          level: SentryLevel.info));
-    }
+    // ✅ FIX: Defer the initial data load until after the first frame is rendered.
+    // This prevents the "setState() or markNeedsBuild() called during build" error.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        if (widget.customerIdFromShell?.isNotEmpty ?? false) {
+          _loadAllHomeScreenData();
+        } else {
+          setState(() => _isLoading = false);
+          _logger
+              .info('Customer ID not available, skipping initial data load.');
+          Sentry.addBreadcrumb(Breadcrumb(
+              category: 'data_loading',
+              message: 'Customer ID missing, initial data load skipped',
+              level: SentryLevel.info));
+        }
+      }
+    });
   }
 
   @override
@@ -161,8 +164,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _entryAnimController.dispose();
     _promotionPageController.dispose();
     _promotionTimer?.cancel();
-    //_activeOrderPollingTimer
-    //?.cancel(); // NEW: Cancel active order polling timer
     _logger.info('HomeScreen disposed.');
     Sentry.addBreadcrumb(Breadcrumb(
         category: 'lifecycle',
@@ -200,11 +201,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         level: SentryLevel.info));
 
     try {
-      // 1. Ask the OrderProvider to fetch the order data first.
       await Provider.of<OrderProvider>(context, listen: false)
           .fetchHomeScreenData();
 
-      // 2. Then, fetch the other non-order data like before.
       final results = await Future.wait([
         _apiService.getActivePromotions(),
         _apiService.getCustomerStats(widget.customerIdFromShell!),
@@ -212,7 +211,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
       if (!mounted) return;
 
-      // 3. The process function now only handles non-order data.
       _processApiResponse(results);
     } catch (e, st) {
       _logger.severe("Failed to load home screen data: $e", e, st);
@@ -327,59 +325,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  // NEW: Method to start polling for active order status
-  /*void _startActiveOrderPolling() {
-    _activeOrderPollingTimer?.cancel(); // Cancel any existing timer
-    if (_activeOrder == null ||
-            _activeOrder!.status ==
-                'Delivered' || // FIX: Check against high-level statuses
-            _activeOrder!.status
-                .contains('Canceled') || // FIX: Check for cancellation
-            _activeOrder!.status == 'Customer Unavailable' ||
-            _activeOrder!.status == 'Issue Reported' ||
-            _activeOrder!.status ==
-                'Payment Failed' // Any other terminal status
-        ) {
-      _logger.info(
-          'No active order or order in terminal state, not starting active order polling.');
-      return;
-    }
-
-    _logger.info(
-        'Starting active order polling for order ID: ${_activeOrder!.id}');
-    _activeOrderPollingTimer =
-        Timer.periodic(const Duration(seconds: 15), (timer) async {
-      // Poll every 15 seconds
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      try {
-        final fetchedOrder =
-            await _apiService.getOrderDetails(_activeOrder!.id);
-        if (mounted) {
-          setState(() {
-            _activeOrder = fetchedOrder;
-          });
-          // If the order has reached a terminal status, stop polling
-          if (_activeOrder!.status == 'Delivered' ||
-              _activeOrder!.status.contains('Canceled') ||
-              _activeOrder!.status == 'Customer Unavailable' ||
-              _activeOrder!.status == 'Issue Reported' ||
-              _activeOrder!.status == 'Payment Failed') {
-            _logger.info(
-                'Active order ${_activeOrder!.id} reached terminal status: ${_activeOrder!.status}. Stopping polling.');
-            timer.cancel();
-          }
-        }
-      } catch (e) {
-        _logger.warning(
-            'Error during active order polling for ${_activeOrder!.id}: $e');
-        // Continue polling on error, but perhaps with a backoff strategy in a real app
-      }
-    });
-  }*/
-
   void _showFeedbackSnackbar(String message, {bool isError = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
@@ -446,8 +391,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'prefilledPromoCode': prefilledPromoCode,
         'isRefill': isRefill,
         'refillCylinderSize': refillCylinderSize,
-        'preselectedCylinderIdFromDeal':
-            preselectedCylinderIdFromDeal, // Pass this argument
+        'preselectedCylinderIdFromDeal': preselectedCylinderIdFromDeal,
       },
     ).then((value) {
       if (value == true) {
@@ -547,14 +491,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         color: themeProvider.gas2doorPrimaryBlue,
         backgroundColor: themeProvider.cardBackground,
         child: Consumer<OrderProvider>(
-          // 1. Wrap the body with a Consumer
           builder: (context, orderProvider, child) {
-            // 2. Get the order-related data from the provider
             final activeOrder = orderProvider.activeOrder;
             final recentOrders = orderProvider.recentOrders;
             final bool hasActiveOrderData = activeOrder != null;
 
-            // 3. Your existing UI and variables for other data remain the same
             final String ordersActionCardTitle =
                 hasActiveOrderData ? 'Track Active Order' : 'My Orders';
             final IconData ordersActionCardIcon = hasActiveOrderData
@@ -569,13 +510,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               }
             };
 
-            // 4. The rest of your build method uses these variables
             return SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildAddressDisplayWidget(themeProvider),
-                  if (_isLoading) // Use the local _isLoading for overall page load
+                  if (_isLoading)
                     Padding(
                         padding: const EdgeInsets.symmetric(vertical: 150.0),
                         child: Center(
@@ -926,7 +866,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // MODIFIED: Active order card now includes the delivery address.
   Widget _buildActiveOrderCard(
       ThemeProvider themeProvider, app_order.Order activeOrder) {
     return CustomCard(
@@ -1129,8 +1068,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // In lib/screens/customer/home_screen.dart
-
   Widget _buildRecentOrderItemCard(
       {required app_order.Order order, required ThemeProvider themeProvider}) {
     bool isCompleted = order.status == 'Delivered';
@@ -1145,7 +1082,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           _logger.info('Recent order item tapped for order ID: ${order.id}');
 
           if (order.status == 'Verifying Payment') {
-            // If payment is being verified, always go to the verification screen.
             Navigator.of(context, rootNavigator: true).pushNamed(
               OrderSummaryScreen.routeName,
               arguments: {
@@ -1156,12 +1092,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               },
             );
           } else if (order.status == 'Pending Payment') {
-            // ======================= FIX APPLIED HERE =======================
             if (order.paymentMethod == 'payOnPickup') {
-              // POA orders go to details screen for the "Pay Now" button.
               _navigateToOrderDetails(order.id);
             } else {
-              // Regular online orders go to the PaymentScreen to try paying again.
               if (order.customer == null) {
                 _showFeedbackSnackbar(
                     "Cannot proceed to payment: User details missing.",
@@ -1178,9 +1111,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 },
               );
             }
-            // ================================================================
           } else {
-            // For all other statuses, go to the details screen.
             _navigateToOrderDetails(order.id);
           }
         },
@@ -1282,7 +1213,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // FIX: Update _buildPerformanceStats to use CustomerStatsModel
   Widget _buildPerformanceStats(
       ThemeProvider themeProvider, CustomerStatsModel? stats) {
     final int totalOrders = stats?.totalOrders ?? 0;
@@ -1328,7 +1258,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _logger.info('Navigating to OrderDetailsScreen for order ID: $orderId');
 
     if (widget.customerIdFromShell != null) {
-      // FIX: Use .then() to refresh data after returning from the sub-screen
       Navigator.of(context).pushNamed(
         OrderDetailsScreen.routeName,
         arguments: {

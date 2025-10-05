@@ -1,6 +1,4 @@
 // File: lib/screens/customer/notification_screen.dart
-// ADVISORY: This version fixes the build error by correctly processing the API response.
-// UPDATE: Updated getNotifications to handle both List and Map responses for robustness.
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -19,48 +17,12 @@ import '../../models/notification.dart' as app_notification_model;
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
 
+// ❌ THIS INTERNAL SERVICE CLASS IS REMOVED TO SIMPLIFY AND FIX THE ERROR
+/*
 class IntegratedNotificationService {
-  final ApiService _apiService = ApiService();
-  final AuthService _authService = AuthService();
-
-  // UPDATED: Handles both if API returns full Map or directly the List of notifications
-  Future<List<app_notification_model.NotificationModel>>
-      getNotifications() async {
-    String? userId = await _authService.getUserId();
-    if (userId == null) {
-      throw Exception("User not authenticated. Cannot fetch notifications.");
-    }
-
-    final dynamic response = await _apiService.getNotifications();
-
-    final List<dynamic> notificationData;
-    if (response is List) {
-      notificationData = response;
-    } else if (response is Map<String, dynamic> &&
-        response.containsKey('notifications')) {
-      notificationData = response['notifications'] as List<dynamic>? ?? [];
-    } else {
-      throw Exception("Unexpected API response format for notifications.");
-    }
-
-    return notificationData
-        .map((data) => app_notification_model.NotificationModel.fromJson(
-            data as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<void> markAsRead(String notificationId) async {
-    await _apiService.markNotificationAsRead(notificationId);
-  }
-
-  Future<void> markAllAsRead() async {
-    await _apiService.markAllNotificationsAsRead();
-  }
-
-  Future<void> clearAllNotifications() async {
-    await _apiService.clearAllNotifications();
-  }
+  // ...
 }
+*/
 
 class NotificationScreen extends StatefulWidget {
   static const String routeName = '/notifications';
@@ -78,8 +40,9 @@ class _NotificationScreenState extends State<NotificationScreen>
   String? _currentUserId;
 
   late AnimationController _listAnimationController;
-  final IntegratedNotificationService _notificationService =
-      IntegratedNotificationService();
+
+  // ✅ USE APISERVICE DIRECTLY
+  final ApiService _apiService = ApiService();
   final AuthService _authService = AuthService();
 
   @override
@@ -88,6 +51,10 @@ class _NotificationScreenState extends State<NotificationScreen>
     _listAnimationController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
     _loadCurrentUserAndFetchNotifications();
+
+    // ✅ MARK ALL NOTIFICATIONS AS READ WHEN THE SCREEN IS OPENED
+    // This is a "fire-and-forget" call. It will also clear the unread bubble.
+    _apiService.markAllNotificationsAsRead();
   }
 
   @override
@@ -131,8 +98,8 @@ class _NotificationScreenState extends State<NotificationScreen>
     }
 
     try {
-      final fetchedNotifications =
-          await _notificationService.getNotifications();
+      // ✅ CALL APISERVICE DIRECTLY
+      final fetchedNotifications = await _apiService.getNotifications();
       if (mounted) {
         setState(() {
           _notifications = fetchedNotifications;
@@ -166,7 +133,8 @@ class _NotificationScreenState extends State<NotificationScreen>
       setState(() => _notifications[index].isRead = true);
 
       try {
-        await _notificationService.markAsRead(notificationId);
+        // ✅ CALL APISERVICE DIRECTLY
+        await _apiService.markNotificationAsRead(notificationId);
       } catch (e) {
         if (mounted) {
           setState(() => _notifications[index].isRead = originalReadStatus);
@@ -196,7 +164,9 @@ class _NotificationScreenState extends State<NotificationScreen>
         notification.data?['promotionId']?.toString() ?? '';
 
     if ((notification.type?.toLowerCase() == 'order_update' ||
-            notification.type?.toLowerCase() == 'payment_success') &&
+            notification.type?.toLowerCase() == 'payment_success' ||
+            notification.type?.toLowerCase() ==
+                'new_message') && // Handle chat notifications
         orderIdFromData.isNotEmpty) {
       Navigator.of(context, rootNavigator: true).pushNamed(
         OrderDetailsScreen.routeName,
@@ -241,7 +211,8 @@ class _NotificationScreenState extends State<NotificationScreen>
     });
 
     try {
-      await _notificationService.markAllAsRead();
+      // ✅ CALL APISERVICE DIRECTLY
+      await _apiService.markAllNotificationsAsRead();
       if (mounted) {
         _showFeedbackSnackbar("All notifications marked as read.",
             isError: false);
@@ -267,7 +238,8 @@ class _NotificationScreenState extends State<NotificationScreen>
     });
 
     try {
-      await _notificationService.clearAllNotifications();
+      // ✅ CALL APISERVICE DIRECTLY
+      await _apiService.clearAllNotifications();
       if (mounted) {
         _showFeedbackSnackbar("All notifications cleared.", isError: false);
       }

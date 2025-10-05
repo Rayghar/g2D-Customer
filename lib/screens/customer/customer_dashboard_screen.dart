@@ -1,13 +1,14 @@
 // File: lib/screens/customer/customer_dashboard_screen.dart
-// ADVISORY: The structure, routes and logic are unchanged. Only theming was updated.
+// UPDATE: Fixed the notification bubble to use the live unread count from NotificationProvider.
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
-import 'package:firebase_messaging/firebase_messaging.dart'; // Added this import
-import '../../services/fcm_service.dart'; // Make sure you have this import
+import 'package:firebase_messaging/firebase_messaging.dart';
+import '../../services/fcm_service.dart';
+import '../../providers/notification_provider.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../models/address_model.dart';
@@ -21,12 +22,14 @@ import './deals_screen.dart';
 import './profile_screen.dart';
 import './notification_screen.dart';
 import './address_list_screen.dart';
-import '../../widgets/curve_painter.dart'; // (kept import; painter remains commented as before)
+import '../../widgets/curve_painter.dart';
 
 class CustomerDashboardShellData {
   final String customerId;
   final String customerFirstName;
   final AddressModel? currentDeliveryAddress;
+  // This property is no longer used for the notification bubble,
+  // but is kept to avoid breaking changes in other parts of the code that might use it.
   final bool hasUnreadNotifications;
 
   CustomerDashboardShellData({
@@ -47,7 +50,7 @@ class CustomerDashboardScreen extends StatefulWidget {
 }
 
 class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   int _selectedIndex = 0;
 
   final List<GlobalKey<NavigatorState>> _navigatorKeys = [
@@ -70,12 +73,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
   void initState() {
     super.initState();
     _screenOptions = _buildScreenOptions(null);
-    FcmService().initializeFirebaseMessaging(context);
+    //FcmService().initializeFirebaseMessaging(context);
     _fetchShellData();
 
-    // Listen for foreground FCM messages
+    WidgetsBinding.instance.addObserver(this);
+    // Fetch the unread count when the dashboard first loads
+    Provider.of<NotificationProvider>(context, listen: false)
+        .fetchUnreadCount();
+
+    /*// Listen for foreground FCM messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      // (kept original print)
       // ignore: avoid_print
       print('Foreground message received: ${message.notification?.title}');
       if (message.notification != null && mounted) {
@@ -91,11 +98,23 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
           ),
         );
       }
-    });
+    });*/
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // When the app is resumed from the background, refresh the notification count
+    if (state == AppLifecycleState.resumed) {
+      print("[App Lifecycle] App resumed, fetching unread notification count.");
+      Provider.of<NotificationProvider>(context, listen: false)
+          .fetchUnreadCount();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -111,7 +130,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
       String? customerId = await _authService.getUserId();
       app_user.User? userProfile;
       AddressModel? defaultAddress;
-      bool hasNotifications = false;
+      bool hasNotifications = false; // This remains decoupled.
 
       if (customerId != null && customerId.isNotEmpty) {
         userProfile = await _authService.getCurrentUserProfile();
@@ -286,7 +305,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
     final isDark = theme.brightness == Brightness.dark;
     final String appLogoPath = 'assets/images/PrimeJet_Logo.png';
 
-    // Derived colors (safe fallbacks if ThemeProvider doesn't expose some tokens)
+    // ✅ STEP 1: Get the NotificationProvider here so the widget listens for changes.
+    final notificationProvider = Provider.of<NotificationProvider>(context);
+
     final Color bg = themeProvider.appPrimaryBackground;
     final Color appBarGlass = (isDark
         ? Colors.black.withOpacity(0.20)
@@ -375,10 +396,8 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
     );
 
     return Scaffold(
-      // REPLACED: fixed light gray with theme background
       backgroundColor: bg,
       appBar: AppBar(
-        // Glassy app bar that adapts to theme
         backgroundColor: appBarGlass,
         elevation: 0,
         shadowColor: shadowColor,
@@ -391,7 +410,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
               IconButton(
                 icon: Icon(
                   notificationIcon,
-                  // REPLACED: hardcoded black54 with theme-aware muted
                   color: mutedText,
                   size: 26.0,
                 ),
@@ -402,7 +420,8 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                 },
                 tooltip: "Notifications",
               ),
-              if (_shellData?.hasUnreadNotifications ?? false)
+              // ✅ STEP 2: Change the condition to use the provider's live unreadCount.
+              if (notificationProvider.unreadCount > 0)
                 Positioned(
                   right: 8.0,
                   top: 10.0,
@@ -413,7 +432,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                       color: themeProvider.errorColor,
                       shape: BoxShape.circle,
                       border: Border.all(
-                        // REPLACED: always white with theme surface for dark mode
                         color: isDark ? Colors.black : Colors.white,
                         width: 1.0,
                       ),
@@ -427,7 +445,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
       ),
       body: Stack(
         children: [
-          // Subtle decorative gradient that adapts to theme
           Positioned(
             top: -MediaQuery.of(context).size.height * 0.3,
             left: -MediaQuery.of(context).size.width * 0.1,
@@ -438,7 +455,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                 gradient: LinearGradient(
                   colors: isDark
                       ? [
-                          // cooler + dimmer in dark
                           Colors.blueGrey.shade800.withOpacity(0.50),
                           Colors.deepPurple.shade700.withOpacity(0.45),
                         ]
@@ -456,12 +472,10 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
                 child: CustomPaint(
                   size: Size(MediaQuery.of(context).size.width * 1.2,
                       MediaQuery.of(context).size.height * 0.8),
-                  // painter: CurvePainter(),
                 ),
               ),
             ),
           ),
-          // Background icons with theme-aware overlays
           Positioned(
             top: MediaQuery.of(context).size.height * 0.15,
             left: MediaQuery.of(context).size.width * 0.15,
@@ -510,7 +524,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
               ),
             ),
           ),
-          // Content
           IndexedStack(
             index: _selectedIndex,
             children: _screenOptions,
@@ -538,7 +551,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
         ],
         currentIndex: _selectedIndex,
         selectedItemColor: themeProvider.gas2doorPrimaryBlue,
-        // REPLACED: hardcoded black54 with theme-aware muted
         unselectedItemColor: mutedText,
         selectedLabelStyle:
             GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 12.0),
@@ -546,7 +558,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
         showUnselectedLabels: true,
         onTap: _onItemTapped,
         type: BottomNavigationBarType.fixed,
-        // REPLACED: glass color to adapt to dark/light
         backgroundColor: navGlass,
         elevation: 0,
         landscapeLayout: BottomNavigationBarLandscapeLayout.centered,

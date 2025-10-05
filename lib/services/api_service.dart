@@ -36,6 +36,7 @@ import '../models/wallet_transaction.dart';
 import '../models/admin/admin_referral_summary_model.dart';
 import '../models/payment_method_model.dart';
 import '../models/message.dart'; // You will need to create this simple model
+import '../models/notification.dart'; // Ensure you have this model
 
 import '../models/customer_stats_model.dart'; // NEW: Import CustomerStatsModel
 
@@ -299,6 +300,58 @@ class ApiService {
       rethrow;
     }
   }*/
+
+  // ✅ ADD THIS FUNCTION
+  Future<List<NotificationModel>> getNotifications() async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Not authenticated.');
+
+    final String apiUrl = '$baseUrl/notifications';
+    final response = await http
+        .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
+
+    if (response.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(response.body);
+      return data.map((json) => NotificationModel.fromJson(json)).toList();
+    } else {
+      throw Exception('Failed to load notifications');
+    }
+  }
+
+  // ✅ ADD THIS FUNCTION
+  Future<void> markAllNotificationsAsRead() async {
+    final token = await _getToken();
+    if (token == null) return;
+
+    final String apiUrl = '$baseUrl/notifications/mark-all-read';
+    try {
+      await http
+          .post(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
+      print('[ApiService] Marked all notifications as read.');
+    } catch (e) {
+      print('[ApiService] Could not mark notifications as read: $e');
+    }
+  }
+
+  // ✅ ADD THIS FUNCTION
+  Future<int> getUnreadNotificationCount() async {
+    final token = await _getToken();
+    if (token == null) return 0;
+
+    final String apiUrl = '$baseUrl/notifications/unread-count';
+    try {
+      final response = await http
+          .get(Uri.parse(apiUrl), headers: {'Authorization': 'Bearer $token'});
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['unreadCount'] as int;
+      }
+      return 0;
+    } catch (e) {
+      print('[ApiService] Could not get unread count: $e');
+      return 0;
+    }
+  }
 
   Future<void> markOrderAsVerifying(String orderId) async {
     final token = await _getToken();
@@ -2856,7 +2909,33 @@ class ApiService {
     }
   }
 
-  Future<List<NotificationModel>> getNotifications() async {
+  Future<void> markNotificationAsRead(String notificationId) async {
+    final token = await _getToken();
+    if (token == null) {
+      print('[ApiService] markNotificationAsRead: Not authenticated.');
+      return;
+    }
+    // Assumes your backend has a route like POST /api/v1/notifications/:id/read
+    final String apiUrl = '$baseUrl/notifications/$notificationId/read';
+    print(
+        '[ApiService] Marking notification $notificationId as read via $apiUrl');
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      print(
+          '[ApiService] markNotificationAsRead Response Status: ${response.statusCode}, Body: ${response.body}');
+      if (response.statusCode == 200) {
+        print('[ApiService] Notification marked as read successfully.');
+      }
+    } catch (e) {
+      print(
+          '[ApiService] Could not mark notification $notificationId as read: $e');
+    }
+  }
+
+  /*//Future<List<NotificationModel>> getNotifications() async {
     final token = await _getToken();
     if (token == null) {
       print('[ApiService] getNotifications: Not authenticated.');
@@ -2897,9 +2976,9 @@ class ApiService {
       print('[ApiService] Error fetching notifications: ${e.toString()}');
       rethrow;
     }
-  }
+  }*/
 
-  Future<void> markNotificationAsRead(String notificationId) async {
+  /*Future<void> markNotificationAsRead(String notificationId) async {
     final token = await _getToken();
     if (token == null) {
       print('[ApiService] markNotificationAsRead: Not authenticated.');
@@ -2925,9 +3004,9 @@ class ApiService {
       print(
           '[ApiService] Could not mark notification $notificationId as read: $e');
     }
-  }
+  }*/
 
-  Future<void> markAllNotificationsAsRead() async {
+  /*Future<void> markAllNotificationsAsRead() async {
     final token = await _getToken();
     if (token == null) {
       print('[ApiService] markAllNotificationsAsRead: Not authenticated.');
@@ -2951,7 +3030,7 @@ class ApiService {
     } catch (e) {
       print('[ApiService] Could not mark all notifications as read: $e');
     }
-  }
+  }*/
 
   Future<void> clearAllNotifications() async {
     final token = await _getToken();
@@ -3303,7 +3382,6 @@ class ApiService {
     }
   }
 
-  // Add this function. If it already exists, replace it.
   Future<void> registerFcmToken(String token) async {
     final authToken = await _getToken();
     if (authToken == null) {
@@ -3311,19 +3389,20 @@ class ApiService {
       return;
     }
 
-    // CORRECTED: URL and HTTP Method
-    final String apiUrl = '$baseUrl/fcm/token';
-    //final String apiUrl = '$_nodeBackendUrl/users/me/fcm-token';
+    // ✅ FIX: Change the path from '/fcm/token' to '/fcm/register'
+    // ✅ FIX: Change the method from http.put to http.post
+    final String apiUrl = '$baseUrl/fcm/register';
 
     try {
-      final response = await http.put(
-        // Use PUT
+      final response = await http.post(
+        // <-- Changed from http.put
         Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $authToken',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'fcmToken': token}),
+        // ✅ FIX: The backend expects a field named 'token', not 'fcmToken'
+        body: jsonEncode({'token': token}),
       );
 
       if (response.statusCode == 200) {

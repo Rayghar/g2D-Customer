@@ -9,6 +9,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // ADDED
 import 'firebase_options.dart'; // Keep this import
+import 'package:provider/provider.dart';
+import './providers/notification_provider.dart';
 
 // Screen imports
 import 'screens/auth/complete_profile_screen.dart';
@@ -112,6 +114,7 @@ Future<void> main() async {
             ChangeNotifierProvider(
                 create: (_) =>
                     SocketService()), // ✅ NEW: Add SocketService provider
+            ChangeNotifierProvider(create: (_) => NotificationProvider()),
           ],
           child: const MyApp(),
         ),
