@@ -44,6 +44,7 @@ dependencies:
   flutter_easyloading: ^3.0.3
   monnify_payment_sdk: ^1.0.5
   sentry_flutter: ^9.5.0
+  font_awesome_flutter: ^10.7.0
 
 
 

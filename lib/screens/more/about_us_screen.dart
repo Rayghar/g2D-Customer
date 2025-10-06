@@ -213,7 +213,7 @@ class _AboutUsScreenState extends State<AboutUsScreen>
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '$appName is a cooking gas delivery platform service by $companyName. It enables customers to order cooking gas, track deliveries, communicate with drivers, provide feedback, manage profiles, and receive notifications. Drivers manage orders, share locations, and interact with customers, while admins oversee operations, orders, and users.',
+                          '$appName is a cooking gas delivery platform service. It enables customers to order cooking gas, track deliveries, communicate with drivers, provide feedback, manage profiles, and receive notifications. Drivers manage orders, share locations, and interact with customers, while admins oversee operations, orders, and users.',
                           textAlign: TextAlign.justify,
                           style: GoogleFonts.inter(
                               fontSize: 14,
@@ -282,17 +282,17 @@ class _AboutUsScreenState extends State<AboutUsScreen>
                         _buildContactRow(Icons.email_outlined,
                             'support@gas2door.com', themeProvider,
                             onTap: () => _launchURL(
-                                'mailto:support@gas2door.com', themeProvider)),
+                                'mailto:primejetgas@gmail.com', themeProvider)),
                         const SizedBox(height: 8),
                         _buildContactRow(Icons.phone_outlined,
-                            '+234 800 GAS2DOOR', themeProvider,
+                            '+234 705 161 0832', themeProvider,
                             onTap: () => _launchURL(
-                                'tel:+23480042723667', themeProvider)),
+                                'tel:+2347051610832', themeProvider)),
                         const SizedBox(height: 8),
                         _buildContactRow(Icons.language_rounded,
                             'www.gas2door.com', themeProvider,
                             onTap: () => _launchURL(
-                                'https://www.gas2door.com', themeProvider)),
+                                'https://www.gas2door.ng', themeProvider)),
                       ],
                     ),
                   ),

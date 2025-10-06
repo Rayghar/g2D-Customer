@@ -5,23 +5,22 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart'; // For HapticFeedback
 import 'package:url_launcher/url_launcher.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../widgets/card.dart'; // Your CustomCard
 import '../../widgets/input.dart'; // For search bar
 
-// Model for FAQ item
+// Model for FAQ item - REMOVED 'isExpanded' as it's no longer needed
 class FaqItem {
   final String id;
   final String question;
   final String answer;
-  bool isExpanded;
 
   FaqItem({
     required this.id,
     required this.question,
     required this.answer,
-    this.isExpanded = false,
   });
 }
 
@@ -81,7 +80,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen>
     _entryAnimController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 700));
     _sectionSlideAnimations = List.generate(
-      3, // Number of main sections (Search+FAQ, Contact, Report)
+      2, // Number of main sections (FAQ, Contact)
       (index) =>
           Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
         CurvedAnimation(
@@ -137,13 +136,37 @@ class _HelpSupportScreenState extends State<HelpSupportScreen>
     }
   }
 
-  Future<void> _launchEmail(
-      String emailAddress, ThemeProvider themeProvider) async {
+  Future<void> _launchWhatsApp(
+      String phoneNumber, ThemeProvider themeProvider) async {
     HapticFeedback.lightImpact();
+    final String whatsappUrl =
+        "https://wa.me/$phoneNumber"; // Includes country code
+    final Uri launchUri = Uri.parse(whatsappUrl);
+
+    if (await canLaunchUrl(launchUri)) {
+      await launchUrl(launchUri, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        _showFeedbackSnackbar(
+            'Could not open WhatsApp. Make sure it is installed.',
+            context,
+            themeProvider,
+            isError: true);
+      }
+    }
+  }
+
+  Future<void> _launchEmail(String emailAddress, ThemeProvider themeProvider,
+      {bool isReport = false}) async {
+    HapticFeedback.lightImpact();
+    final String subject = isReport
+        ? 'Gas2Door App - Issue Report'
+        : 'Gas2Door App Support Request';
+
     final Uri launchUri = Uri(
         scheme: 'mailto',
         path: emailAddress,
-        queryParameters: {'subject': 'Gas2Door App Support Request'});
+        queryParameters: {'subject': subject});
     if (await canLaunchUrl(launchUri)) {
       await launchUrl(launchUri);
     } else {
@@ -219,24 +242,23 @@ class _HelpSupportScreenState extends State<HelpSupportScreen>
                           ),
                           const SizedBox(height: 12),
                           CustomInput(
-                            // Search Bar
                             controller: _searchController,
                             hintText: 'Search FAQs...',
                             prefixIcon: Icons.search_rounded,
                             textInputAction: TextInputAction.search,
-                            onChanged: (_) =>
-                                _filterFaqs(), // Filter as user types
+                            onChanged: (_) => _filterFaqs(),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 24),
                           if (_filteredFaqs.isEmpty &&
                               _searchController.text.isNotEmpty)
                             Padding(
                               padding:
                                   const EdgeInsets.symmetric(vertical: 20.0),
                               child: Center(
-                                  child: Text("No FAQs match your search.",
-                                      style: GoogleFonts.inter(
-                                          color: themeProvider.secondaryText))),
+                                child: Text("No FAQs match your search.",
+                                    style: GoogleFonts.inter(
+                                        color: themeProvider.secondaryText)),
+                              ),
                             )
                           else if (_filteredFaqs.isEmpty &&
                               _searchController.text.isEmpty)
@@ -244,60 +266,24 @@ class _HelpSupportScreenState extends State<HelpSupportScreen>
                               padding:
                                   const EdgeInsets.symmetric(vertical: 20.0),
                               child: Center(
-                                  child: Text(
-                                      "No FAQs available at the moment.",
-                                      style: GoogleFonts.inter(
-                                          color: themeProvider.secondaryText))),
+                                child: Text("No FAQs available at the moment.",
+                                    style: GoogleFonts.inter(
+                                        color: themeProvider.secondaryText)),
+                              ),
                             )
                           else
-                            ExpansionPanelList(
-                              elevation: 1,
-                              expandedHeaderPadding:
-                                  const EdgeInsets.symmetric(vertical: 8.0),
-                              dividerColor:
-                                  themeProvider.tertiaryText.withOpacity(0.2),
-                              expansionCallback: (int index, bool isExpanded) {
-                                setState(() {
-                                  _filteredFaqs[index].isExpanded = !isExpanded;
-                                });
-                              },
-                              animationDuration:
-                                  const Duration(milliseconds: 300),
+                            // ### CHANGED SECTION ###
+                            // Replaced the ExpansionPanelList with a simple Column
+                            // to display questions and answers directly.
+                            Column(
                               children: _filteredFaqs
-                                  .map<ExpansionPanel>((FaqItem item) {
-                                return ExpansionPanel(
-                                  canTapOnHeader: true,
-                                  backgroundColor: themeProvider.cardBackground,
-                                  headerBuilder:
-                                      (BuildContext context, bool isExpanded) {
-                                    return ListTile(
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 16, vertical: 4),
-                                      title: Text(item.question,
-                                          style: GoogleFonts.inter(
-                                              fontWeight: FontWeight.w500,
-                                              color: themeProvider.primaryText,
-                                              fontSize: 15)),
-                                    );
-                                  },
-                                  body: Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                        16, 0, 16, 16),
-                                    child: Text(item.answer,
-                                        style: GoogleFonts.inter(
-                                            color: themeProvider.secondaryText,
-                                            height: 1.4,
-                                            fontSize: 14)),
-                                  ),
-                                  isExpanded: item.isExpanded,
-                                );
-                              }).toList(),
+                                  .map((item) =>
+                                      _buildFaqItem(item, themeProvider))
+                                  .toList(),
                             ),
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 24),
                     SlideTransition(
                       position: _sectionSlideAnimations[1],
@@ -311,7 +297,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen>
                               padding: const EdgeInsets.fromLTRB(
                                   16.0, 16.0, 16.0, 8.0),
                               child: Text(
-                                'CONTACT US',
+                                'NEED MORE HELP?',
                                 style: GoogleFonts.inter(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
@@ -321,48 +307,46 @@ class _HelpSupportScreenState extends State<HelpSupportScreen>
                               ),
                             ),
                             _buildContactListTile(
-                              icon: Icons.email_outlined,
-                              title: 'Email Support',
-                              subtitle:
-                                  'support@gas2door.com', // Replace with actual
+                              iconWidget: FaIcon(FontAwesomeIcons.whatsapp,
+                                  color: Color(0xFF25D366), size: 26),
+                              title: 'Chat with Us',
+                              subtitle: 'Open a chat on WhatsApp',
                               themeProvider: themeProvider,
-                              onTap: () => _launchEmail(
-                                  'support@gas2door.com', themeProvider),
+                              onTap: () => _launchWhatsApp(
+                                  '2347051610832', themeProvider),
                             ),
                             _buildDivider(themeProvider),
                             _buildContactListTile(
-                              icon: Icons.phone_outlined,
+                              iconData: Icons.report_problem_outlined,
+                              title: 'Report an Issue',
+                              subtitle: 'Let us know about a problem',
+                              themeProvider: themeProvider,
+                              onTap: () => _launchEmail(
+                                  'primejetgas@gmail.com', themeProvider,
+                                  isReport: true),
+                            ),
+                            _buildDivider(themeProvider),
+                            _buildContactListTile(
+                              iconData: Icons.phone_outlined,
                               title: 'Call Us',
-                              subtitle:
-                                  '+234 800 GAS2DOOR', // Replace with actual
+                              subtitle: '+234 705 161 0832',
                               themeProvider: themeProvider,
                               onTap: () => _launchCaller(
-                                  '+23480042723667', themeProvider),
+                                  '+2347051610832', themeProvider),
                             ),
-                            // _buildDivider(themeProvider),
-                            // _buildContactListTile(
-                            //   icon: Icons.chat_bubble_outline_rounded,
-                            //   title: 'Live Chat',
-                            //   subtitle: 'Chat with a support agent',
-                            //   themeProvider: themeProvider,
-                            //   onTap: () => _showFeedbackSnackbar("Live Chat (Coming Soon)", context, themeProvider, isError: true),
-                            // ),
+                            _buildDivider(themeProvider),
+                            _buildContactListTile(
+                              iconData: Icons.email_outlined,
+                              title: 'Email Support',
+                              subtitle: 'support@gas2door.com',
+                              themeProvider: themeProvider,
+                              onTap: () => _launchEmail(
+                                  'primejetgas@gmail.com', themeProvider),
+                            ),
                           ],
                         ),
                       ),
                     ),
-
-                    const SizedBox(height: 24),
-                    // SlideTransition(
-                    //   position: _sectionSlideAnimations[2],
-                    //   child: CustomButton(
-                    //     text: 'Report an Issue',
-                    //     onPressed: () => _showFeedbackSnackbar("Report Issue (Not Implemented)", context, themeProvider, isError: true),
-                    //     color: themeProvider.gas2doorPrimaryBlueLightVer,
-                    //     icon: Icon(Icons.report_problem_outlined, color: themeProvider.infoColorOnDarkBgs),
-                    //     height: 50,
-                    //   ),
-                    // ),
                     const SizedBox(height: 20),
                   ],
                 ),
@@ -371,8 +355,43 @@ class _HelpSupportScreenState extends State<HelpSupportScreen>
     );
   }
 
+  // NEW HELPER WIDGET for displaying a single FAQ item
+  Widget _buildFaqItem(FaqItem item, ThemeProvider themeProvider) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            item.question,
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.w600, // Bolder question
+              color: themeProvider.primaryText,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            item.answer,
+            style: GoogleFonts.inter(
+              color: themeProvider.secondaryText,
+              height: 1.4,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Divider(
+            color: themeProvider.tertiaryText.withOpacity(0.1),
+            thickness: 1,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildContactListTile({
-    required IconData icon,
+    IconData? iconData,
+    Widget? iconWidget,
     required String title,
     required String subtitle,
     VoidCallback? onTap,
@@ -381,7 +400,8 @@ class _HelpSupportScreenState extends State<HelpSupportScreen>
     return ListTile(
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-      leading: Icon(icon, color: themeProvider.gas2doorPrimaryBlue, size: 26),
+      leading: iconWidget ??
+          Icon(iconData, color: themeProvider.gas2doorPrimaryBlue, size: 26),
       title: Text(title,
           style: GoogleFonts.inter(
               fontSize: 16,
