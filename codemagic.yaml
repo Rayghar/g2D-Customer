@@ -1,0 +1,25 @@
+workflows:
+  ios-build:  # Your workflow name
+    name: iOS Build
+    instance_type: mac_mini_m1  # Or your instance
+    max_build_duration: 60
+    scripts:
+      - name: Get Flutter dependencies  # Post-clone: Run early
+        script: |
+          flutter pub get  # ✅ Key fix: Resolves SPM properly
+      - name: Clean and install pods  # Pre-build: Regenerate workspace
+        script: |
+          flutter clean
+          cd ios
+          rm -rf Pods Podfile.lock ~/Library/Developer/Xcode/DerivedData
+          pod deintegrate || true  # Ignore if not installed
+          pod install --repo-update
+          cd ..
+      - name: Build iOS
+        script: |
+          flutter build ios --release --no-codesign
+    artifacts:
+      - ios/Runner.ipa  # Or your IPA path
+      - build/ios/archive/Runner.xcarchive/**/*
+    publishing:
+      # Your App Store Connect config (if auto-upload)
