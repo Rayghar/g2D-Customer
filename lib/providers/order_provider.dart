@@ -41,6 +41,33 @@ class OrderProvider with ChangeNotifier {
 
   // --- METHODS ---
 
+  // ===== FIX: Add method to handle WebSocket data START =====
+  /// Efficiently updates the state with fresh data from a WebSocket event.
+  void updateOrderDataFromSocket(Map<String, dynamic> orderData) {
+    try {
+      final updatedOrder = app_order.Order.fromJson(orderData);
+
+      // Update the main order map, which is used by the OrderDetailsScreen
+      _orders[updatedOrder.id] = updatedOrder;
+
+      // Also, update the order if it exists in the home screen lists
+      if (_activeOrder?.id == updatedOrder.id) {
+        _activeOrder = updatedOrder;
+      }
+      final recentIndex =
+          _recentOrders.indexWhere((o) => o.id == updatedOrder.id);
+      if (recentIndex != -1) {
+        _recentOrders[recentIndex] = updatedOrder;
+      }
+
+      // Notify all listening widgets to rebuild with the new data
+      notifyListeners();
+    } catch (e) {
+      print("Error parsing order data from socket: $e");
+    }
+  }
+  // ===== FIX: Add method to handle WebSocket data END =====
+
   Future<void> fetchHomeScreenData() async {
     _isLoadingHomeScreen = true;
     notifyListeners();

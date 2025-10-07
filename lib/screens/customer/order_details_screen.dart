@@ -23,6 +23,9 @@ import '../../services/api_service.dart';
 import '../../models/order.dart' as app_order;
 import './payment_screen.dart'; // Added to support Pay Now button
 import '../../providers/order_provider.dart'; // Added to support Pay Now button
+// ===== FIX: Import SocketService for real-time updates START =====
+import '../../services/socket_service.dart';
+// ===== FIX: Import SocketService for real-time updates END =====
 
 // Initialize a logger for this file
 final _logger = Logger('OrderDetailsScreen');
@@ -50,6 +53,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   late AnimationController _entryAnimController;
   final ApiService _apiService = ApiService();
 
+  // ===== FIX: Add SocketService variable START =====
+  SocketService? _socketService;
+  // ===== FIX: Add SocketService variable END =====
+
   @override
   void initState() {
     super.initState();
@@ -71,13 +78,42 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
         vsync: this, duration: const Duration(milliseconds: 600));
 
     // Ask the provider to fetch the data as soon as the screen loads.
-    // 'listen: false' is important here because we're in initState.
     Future.microtask(() => Provider.of<OrderProvider>(context, listen: false)
         .fetchOrderDetails(widget.orderId));
+
+    // ===== FIX: Setup WebSocket listener for real-time updates START =====
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _socketService = Provider.of<SocketService>(context, listen: false);
+      _socketService?.onEvent('order_update', _handleSocketOrderUpdate);
+    });
+    // ===== FIX: Setup WebSocket listener for real-time updates END =====
   }
+
+  // ===== FIX: Add handler for incoming socket data START =====
+  void _handleSocketOrderUpdate(dynamic data) {
+    if (!mounted || data == null) return;
+
+    // The backend sends the full order object.
+    // Check if the update is for the order we are currently viewing.
+    if (data is Map<String, dynamic> && data['id'] == widget.orderId) {
+      _logger
+          .info('[SOCKET] Received live update for order ${widget.orderId}.');
+
+      final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+
+      // Update the provider's state directly with the new data from the socket.
+      // This is much faster than making another HTTP request.
+      // NOTE: You must add the `updateOrderDataFromSocket` method to your OrderProvider.
+      orderProvider.updateOrderDataFromSocket(data);
+    }
+  }
+  // ===== FIX: Add handler for incoming socket data END =====
 
   @override
   void dispose() {
+    // ===== FIX: Clean up the socket listener START =====
+    _socketService?.offEvent('order_update');
+    // ===== FIX: Clean up the socket listener END =====
     _entryAnimController.dispose();
     _logger.info(
         'OrderDetailsScreen disposed for order ID: ${widget.orderId}'); // Log info

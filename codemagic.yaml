@@ -1,25 +1,31 @@
 workflows:
-  ios-build:  # Your workflow name
-    name: iOS Build
-    instance_type: mac_mini_m1  # Or your instance
-    max_build_duration: 60
+  ios-build:  # Name your iOS workflow
+    name: iOS Build and Deploy
+    environment:
+      flutter: stable  # Locks to your current Flutter (no upgrade)
+      groups:
+        - app_store_connect_api  # For App Store upload (add keys in dashboard)
+      vars:
+        BUNDLE_ID: "ng.gas2door.customer"  # Your app's bundle ID
     scripts:
-      - name: Get Flutter dependencies  # Post-clone: Run early
+      - name: Install Flutter dependencies
         script: |
-          flutter pub get  # ✅ Key fix: Resolves SPM properly
-      - name: Clean and install pods  # Pre-build: Regenerate workspace
+          flutter pub get  # Resolves packages and SPM (fixes scheme)
+      - name: Clean iOS and install pods
         script: |
           flutter clean
           cd ios
-          rm -rf Pods Podfile.lock ~/Library/Developer/Xcode/DerivedData
-          pod deintegrate || true  # Ignore if not installed
-          pod install --repo-update
+          rm -rf Pods Podfile.lock ~/Library/Developer/Xcode/DerivedData || true
+          pod deintegrate || true
+          pod install --repo-update  # Runs on Mac CI – generates Runner scheme
           cd ..
-      - name: Build iOS
+      - name: Build IPA
         script: |
-          flutter build ios --release --no-codesign
+          flutter build ipa --release  # Builds with scheme; auto-codesigns if keys set
     artifacts:
-      - ios/Runner.ipa  # Or your IPA path
-      - build/ios/archive/Runner.xcarchive/**/*
+      - build/ios/ipa/*.ipa  # IPA file
+      - ios/Runner.xcarchive/**/*
     publishing:
-      # Your App Store Connect config (if auto-upload)
+      app_store_connect:  # Auto-upload to App Store Connect
+        api_key: $APP_STORE_CONNECT_API_KEY_PATH  # Upload cert path (set in dashboard)
+        skip_build_profiles: true
