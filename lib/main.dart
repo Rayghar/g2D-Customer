@@ -383,49 +383,40 @@ class MyApp extends StatelessWidget {
 
           case ChatScreen.routeName:
             {
-              final args = settings.arguments as Map<String, dynamic>?;
-
               if (args == null) {
                 return _buildErrorRoute(
                     settings, 'Missing arguments for ChatScreen');
               }
 
-              // Accept either 'orderId' or 'chatId'
               final String? chatId =
                   (args['orderId'] ?? args['chatId'])?.toString();
               final String? currentUserId = args['currentUserId']?.toString();
               final String? recipientId = args['recipientId']?.toString();
               final String? recipientName = args['recipientName']?.toString();
-              final String? recipientPhotoUrl =
-                  args['recipientPhotoUrl']?.toString();
-              final String? recipientPhoneNumber =
-                  args['recipientPhoneNumber']?.toString();
 
-              // Validate the required four fields
+              // Validate that all REQUIRED fields are not null before proceeding
               if (chatId == null ||
-                  chatId.isEmpty ||
                   currentUserId == null ||
-                  currentUserId.isEmpty ||
                   recipientId == null ||
-                  recipientId.isEmpty ||
-                  recipientName == null ||
-                  recipientName.isEmpty) {
+                  recipientName == null) {
                 return _buildErrorRoute(
                   settings,
-                  'Missing required args for ChatScreen. '
-                  'Expected orderId/chatId, currentUserId, recipientId, recipientName. '
-                  'Got: $args',
+                  'Missing required arguments for ChatScreen. '
+                  'Expected: chatId, currentUserId, recipientId, recipientName. '
+                  'Received: $args',
                 );
               }
 
+              // Now we can safely create the screen because we know the required args are non-null
               return MaterialPageRoute(
                 builder: (_) => ChatScreen(
-                  chatId: chatId,
-                  currentUserId: currentUserId,
-                  recipientId: recipientId,
-                  recipientName: recipientName,
-                  recipientPhotoUrl: recipientPhotoUrl,
-                  recipientPhoneNumber: recipientPhoneNumber,
+                  chatId: chatId, // Guaranteed non-null
+                  currentUserId: currentUserId, // Guaranteed non-null
+                  recipientId: recipientId, // Guaranteed non-null
+                  recipientName: recipientName, // Guaranteed non-null
+                  recipientPhotoUrl: args['recipientPhotoUrl']?.toString(),
+                  recipientPhoneNumber:
+                      args['recipientPhoneNumber']?.toString(),
                 ),
                 settings: settings,
               );

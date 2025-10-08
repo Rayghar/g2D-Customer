@@ -2547,18 +2547,33 @@ class ApiService {
         Uri.parse(url),
         headers: {'Authorization': 'Bearer $token'},
       );
-      final body = jsonDecode(r.body);
 
       if (r.statusCode == 200) {
-        final list = (body as List?) ?? [];
-        return list
-            .whereType<Map<String, dynamic>>()
-            .map((j) => ChatThreadModel.fromJson(j))
-            .toList();
+        final List<dynamic> body = jsonDecode(r.body);
+
+        // ===== FIX: Safely parse the response with fallbacks to prevent crashes =====
+        return body
+            .map((json) {
+              final data = json as Map<String, dynamic>;
+              // By providing default empty strings, we prevent "type 'Null' is not a subtype of type 'String'"
+              return ChatThreadModel(
+                chatId: data['chatId'] as String? ?? '',
+                recipientId: data['recipientId'] as String? ?? '',
+                recipientName: data['recipientName'] as String?,
+                recipientPhoneNumber: data['recipientPhoneNumber'] as String?,
+                orderStatus: data['orderStatus'] as String?,
+                stopNumber: data['stopNumber'] as int?,
+                lastMessage: data['lastMessage'] != null
+                    ? Message.fromJson(
+                        data['lastMessage'] as Map<String, dynamic>)
+                    : null,
+                unreadCount: data['unreadCount'] as int? ?? 0,
+              );
+            })
+            .where((thread) => thread.chatId.isNotEmpty)
+            .toList(); // Filter out invalid threads
       }
-      throw Exception(body['error'] ?? 'Failed to load threads');
-    } on SocketException {
-      throw Exception('Network error. Please check your connection.');
+      throw Exception('Failed to load threads (Code: ${r.statusCode})');
     } catch (e) {
       debugPrint('ApiService: Error fetching chat threads: $e');
       rethrow;
