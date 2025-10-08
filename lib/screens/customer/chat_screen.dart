@@ -53,11 +53,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final socket = context.read<SocketService>();
     await socket.joinChat(widget.chatId);
 
-    // Always fetch history to ensure up-to-date (e.g., for offline misses)
+    await _refreshMessages();
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+      socket.markRead(widget.chatId);
+    }
+  }
+
+  Future<void> _refreshMessages() async {
     try {
       final history = await _api.getChatHistory(widget.chatId);
       if (mounted) {
-        socket.seedHistory(widget.chatId, history);
+        context.read<SocketService>().seedHistory(widget.chatId, history);
         _scrollToBottom();
       }
     } catch (e) {
@@ -66,11 +74,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Failed to load message history.")));
       }
-    }
-
-    if (mounted) {
-      setState(() => _isLoading = false);
-      socket.markRead(widget.chatId);
     }
   }
 
@@ -144,12 +147,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ? const Center(child: CircularProgressIndicator())
                 : messages.isEmpty
                     ? const _EmptyState()
-                    : ListView.builder(
-                        controller: _scrollCtrl,
-                        padding: const EdgeInsets.all(8.0),
-                        itemCount: messages.length,
-                        itemBuilder: (ctx, i) =>
-                            _buildMessageBubble(messages[i], theme),
+                    : RefreshIndicator(
+                        onRefresh: _refreshMessages,
+                        child: ListView.builder(
+                          controller: _scrollCtrl,
+                          padding: const EdgeInsets.all(8.0),
+                          itemCount: messages.length,
+                          itemBuilder: (ctx, i) =>
+                              _buildMessageBubble(messages[i], theme),
+                        ),
                       ),
           ),
           _InputBar(controller: _msgCtrl, onSend: _onSend),
