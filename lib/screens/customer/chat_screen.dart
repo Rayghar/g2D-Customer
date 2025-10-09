@@ -53,6 +53,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final socket = context.read<SocketService>();
     await socket.joinChat(widget.chatId);
 
+    // Always fetch history to sync any missed messages (fix for stale cache)
     await _refreshMessages();
 
     if (mounted) {
@@ -65,7 +66,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final history = await _api.getChatHistory(widget.chatId);
       if (mounted) {
-        context.read<SocketService>().seedHistory(widget.chatId, history);
+        final socket = context.read<SocketService>();
+        socket.seedHistory(widget.chatId, history);
         _scrollToBottom();
       }
     } catch (e) {
@@ -114,30 +116,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _callRecipient() async {
-    if (widget.recipientPhoneNumber == null) return;
+    if (widget.recipientPhoneNumber == null ||
+        widget.recipientPhoneNumber!.isEmpty) return;
     final url = Uri.parse('tel:${widget.recipientPhoneNumber}');
     if (await canLaunchUrl(url)) {
       await launchUrl(url);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not launch phone dialer.')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeProvider>();
-    final socket = context.watch<SocketService>();
-    final messages = socket.messagesFor(widget.chatId);
+    final messages = context.select<SocketService, List<Message>>(
+      (svc) => svc.messagesFor(widget.chatId),
+    );
 
     return Scaffold(
+      backgroundColor:
+          theme.appSecondaryBackground, // Enhancement: Secondary bg for depth
       appBar: AppBar(
         title: Text(widget.recipientName,
             style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
         backgroundColor: theme.appPrimaryBackground,
         elevation: 0,
+        leading: IconButton(
+          // Enhancement: Custom back
+          icon:
+              Icon(Icons.arrow_back_ios_new_rounded, color: theme.primaryText),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         actions: [
-          IconButton(
-            icon: Icon(Icons.phone_rounded, color: theme.gas2doorPrimaryBlue),
-            onPressed: _callRecipient,
-          ),
+          if (widget.recipientPhoneNumber != null &&
+              widget.recipientPhoneNumber!
+                  .isNotEmpty) // Enhancement: Conditional call
+            IconButton(
+              icon: Icon(Icons.phone_rounded, color: theme.gas2doorPrimaryBlue),
+              onPressed: _callRecipient,
+            ),
         ],
       ),
       body: Column(
@@ -171,11 +189,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4.0),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width *
+                0.75), // Enhancement: Max width
         decoration: BoxDecoration(
           color: isMine
               ? theme.gas2doorPrimaryBlue
               : theme.cardBackground.withOpacity(0.8),
           borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            // Enhancement: Shadow
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment:
@@ -229,7 +258,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         color = Colors.lightBlueAccent;
         break;
       default:
-        icon = Icons.check_rounded;
+        icon = Icons.access_time_rounded;
     }
     return Icon(icon, size: 16, color: color);
   }

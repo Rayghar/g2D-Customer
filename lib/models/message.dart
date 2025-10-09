@@ -55,65 +55,44 @@ class Message {
   /// - numeric string (epoch ms)
   /// - Mongo Extended JSON:
   ///     {"$date":{"$numberLong":"1757896273881"}} or
-  ///     {"$date": 1757896273881} or {"$date": "2025-01-01T00:00:00Z"}
-  /// - Firestore-like {seconds:..., nanoseconds:...} (just in case)
-  static DateTime _parseDate(dynamic v) {
-    DateTime _fallback() => DateTime.now().toUtc();
+  ///     {"$date": 1757896273881} or {"$date": "2025-01-01T0..."}
+  static DateTime _parseDate(dynamic raw) {
+    if (raw == null) return DateTime.now().toUtc();
 
-    if (v == null) return _fallback();
+    if (raw is DateTime) return raw.toUtc();
+    if (raw is int)
+      return DateTime.fromMillisecondsSinceEpoch(raw, isUtc: true);
 
-    if (v is DateTime) return v.toUtc();
-
-    if (v is int) {
-      return DateTime.fromMillisecondsSinceEpoch(v, isUtc: true);
-    }
-
-    if (v is String) {
-      // numeric ms as string?
-      final asInt = int.tryParse(v);
-      if (asInt != null) {
-        return DateTime.fromMillisecondsSinceEpoch(asInt, isUtc: true);
-      }
-      // ISO
-      final iso = DateTime.tryParse(v);
-      if (iso != null) return iso.toUtc();
-      return _fallback();
-    }
-
-    if (v is Map) {
-      // Mongo Extended JSON
-      if (v.containsKey(r'$date')) {
-        final inner = v[r'$date'];
-        if (inner is Map && inner.containsKey(r'$numberLong')) {
-          final ms = int.tryParse(inner[r'$numberLong'].toString());
-          if (ms != null) {
+    String? s;
+    if (raw is String) {
+      s = raw;
+    } else if (raw is Map) {
+      final inner = raw[r'$date'];
+      if (inner is int)
+        return DateTime.fromMillisecondsSinceEpoch(inner, isUtc: true);
+      if (inner is String) s = inner;
+      if (inner is Map && inner.containsKey(r'$numberLong')) {
+        final v = inner[r'$numberLong'];
+        if (v is String) {
+          final ms = int.tryParse(v);
+          if (ms != null)
             return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
-          }
-        } else if (inner is int) {
-          return DateTime.fromMillisecondsSinceEpoch(inner, isUtc: true);
-        } else if (inner is String) {
-          final ms = int.tryParse(inner);
-          if (ms != null) {
-            return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
-          }
-          final iso = DateTime.tryParse(inner);
-          if (iso != null) return iso.toUtc();
         }
       }
-
-      // Firestore-like structure
-      final sec = v['seconds'];
-      final ns = v['nanoseconds'];
-      if (sec is int) {
-        final ms = (sec * 1000) + ((ns is int) ? (ns ~/ 1e6) : 0);
-        return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
-      }
     }
 
-    return _fallback();
+    if (s != null && s.isNotEmpty) {
+      final ms = int.tryParse(s);
+      if (ms != null)
+        return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+      try {
+        return DateTime.parse(s).toUtc();
+      } catch (_) {}
+    }
+
+    return DateTime.now().toUtc();
   }
 
-  /// Factory from any backend/socket map
   factory Message.fromJson(Map<String, dynamic> json) {
     return Message(
       id: _parseId(json),

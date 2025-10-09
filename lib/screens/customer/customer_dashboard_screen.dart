@@ -23,6 +23,8 @@ import './profile_screen.dart';
 import './notification_screen.dart';
 import './address_list_screen.dart';
 import '../../widgets/curve_painter.dart';
+import '../../services/socket_service.dart'; // Import for SocketService
+import '../../models/chat_thread_model.dart'; // Import for ChatThreadModel
 
 class CustomerDashboardShellData {
   final String customerId;
@@ -176,6 +178,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
           _isLoadingShellData = false;
         });
       }
+
+      // Fix: Load and join all chat rooms after shell data is fetched
+      await _loadAndJoinChats();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -184,6 +189,21 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen>
           _isLoadingShellData = false;
         });
       }
+    }
+  }
+
+  Future<void> _loadAndJoinChats() async {
+    try {
+      final threads =
+          await _apiService.getChatThreads(); // Fetch all chat threads
+      final socket = context.read<SocketService>();
+      for (var thread in threads) {
+        await socket
+            .joinChat(thread.chatId); // Join each chat room for live updates
+      }
+    } catch (e) {
+      debugPrint("[CustomerDashboard] Failed to load and join chats: $e");
+      // Optionally show a snackbar or log, but don't block UI
     }
   }
 
