@@ -1,140 +1,215 @@
 // lib/services/socket_service.dart
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 import './auth_service.dart';
+import '../models/message.dart';
+import '../models/user.dart' as app_user;
 
 class SocketService with ChangeNotifier {
   IO.Socket? _socket;
   final AuthService _auth = AuthService();
 
-  // Your Render host (no trailing slash)
   static const String _socketUrl = 'https://primejet-backend.onrender.com';
+
+  final Map<String, List<Message>> _messagesByChat = {};
+  final Set<String> _joinedChats = {};
 
   bool get isConnected => _socket?.connected == true;
 
-  Future<void> connect() async {
+  List<Message> messagesFor(String chatId) =>
+      List.unmodifiable(_messagesByChat[chatId] ?? const []);
+
+  Future<void> _ensureSocket() async {
+    if (_socket != null && _socket!.connected) return;
+    if (_socket != null && _socket!.disconnected) {
+      _socket!.connect();
+      return;
+    }
+
     final token = await _auth.getToken();
     if (token == null) {
       debugPrint('[SocketService] No auth token; cannot connect.');
       return;
     }
 
-    // If we already have a connected socket, keep it.
-    if (_socket != null && _socket!.connected) return;
-
-    // Dispose stale instance (important if user re-logs in)
-    if (_socket != null) {
-      try {
-        _socket!.dispose();
-      } catch (_) {}
-      _socket = null;
-    }
-
     _socket = IO.io(
       _socketUrl,
-      <String, dynamic>{
-        'transports': ['websocket'],
-        'autoConnect': false, // we will call .connect() manually
-        'auth': {'token': token}, // backend reads this
-        'reconnection': true,
-        'reconnectionAttempts': 50,
-        'reconnectionDelay': 1000,
-        'timeout': 20000,
-      },
+      IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .disableAutoConnect()
+          .setPath('/socket.io')
+          .setAuth({'token': token})
+          .enableReconnection()
+          .setReconnectionDelay(500)
+          .setReconnectionDelayMax(5000)
+          .setTimeout(20000)
+          .build(),
     );
 
-    // Core lifecycle logs
-    _socket!.onConnect((_) {
-      debugPrint('[SocketService] Connected: ${_socket?.id}');
+    _socket!.on('connect', (_) {
+      debugPrint('[SocketService] Connected: ${_socket!.id}');
+      notifyListeners();
+      for (final chatId in _joinedChats) {
+        _socket!.emit('join_room', chatId);
+      }
+    });
+    _socket!.on('disconnect', (_) {
+      debugPrint('[SocketService] Disconnected');
       notifyListeners();
     });
-    _socket!.onDisconnect((_) {
-      debugPrint('[SocketService] Disconnected.');
-      notifyListeners();
-    });
-    _socket!.onConnectError((err) {
-      debugPrint('[SocketService] ConnectError: $err');
-    });
-    _socket!.onError((err) {
-      debugPrint('[SocketService] Error: $err');
-    });
-    _socket!.onReconnect((_) {
-      debugPrint('[SocketService] Reconnected: ${_socket?.id}');
+    _socket!.on('connect_error',
+        (e) => debugPrint('[SocketService] Connect error: $e'));
+    _socket!.on('error', (e) => debugPrint('[SocketService] Error: $e'));
+    _socket!.on('reconnect', (attempt) {
+      debugPrint('[SocketService] Reconnected after $attempt attempts');
       notifyListeners();
     });
 
-    _socket!.connect();
+    // --- Chat Listeners ---
+    _socket!.off('receive_message');
+    _socket!.on('receive_message', (data) {
+      final msg = Message.fromJson(data);
+      final list = _messagesByChat[msg.chatId] ?? <Message>[];
+
+      // If we already have this id, skip
+      if (list.any((m) => m.id == msg.id)) return;
+
+      // If this is our own message and the temp bubble still exists,
+      // replace it instead of adding a second bubble.
+      final tempIdx = list.indexWhere((m) =>
+          m.senderId == msg.senderId &&
+          m.id.startsWith('temp_') &&
+          m.text == msg.text);
+      if (tempIdx != -1) {
+        list[tempIdx] = msg;
+      } else {
+        list.add(msg);
+      }
+
+      _messagesByChat[msg.chatId] = list
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      notifyListeners();
+    });
+    _socket!.off('message_ack');
+    _socket!.on('message_ack', (data) {
+      final serverId = data['serverId'];
+      final tempId = data['tempId'];
+      var changed = false;
+      for (final entry in _messagesByChat.entries) {
+        final list = entry.value;
+        for (int i = 0; i < list.length; i++) {
+          if (list[i].id == tempId) {
+            list[i] = list[i].copyWith(id: serverId, status: 'sent');
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (changed) notifyListeners();
+    });
+    _socket!.off('message_delivered');
+    _socket!.on('message_delivered', (data) {
+      final id = data['id'];
+      var changed = false;
+      for (final entry in _messagesByChat.entries) {
+        final list = entry.value;
+        for (int i = 0; i < list.length; i++) {
+          if (list[i].id == id && list[i].status == 'sent') {
+            list[i] = list[i].copyWith(status: 'delivered');
+            changed = true;
+          }
+        }
+      }
+      if (changed) notifyListeners();
+    });
+    _socket!.off('chat_read');
+    _socket!.on('chat_read', (data) {
+      final chatId = data['chatId'];
+      final list = _messagesByChat[chatId] ?? const <Message>[];
+      var changed = false;
+      for (int i = 0; i < list.length; i++) {
+        if (list[i].status != 'read') {
+          list[i] = list[i].copyWith(status: 'read');
+          changed = true;
+        }
+      }
+      if (changed) notifyListeners();
+    });
   }
 
-  // ----- Room mgmt -----
-  void joinRoom(String chatId) {
-    if (!isConnected) return;
-    _socket?.emit('join_room', chatId);
-    debugPrint('[SocketService] join_room -> $chatId');
+  Future<void> connect() async {
+    await _ensureSocket();
+    if (!_socket!.connected) {
+      _socket!.connect();
+    }
   }
 
-  // Mark every message in the room as read on the server
-  void markRead(String chatId) {
-    if (!isConnected) return;
-    _socket?.emit('mark_read', {'chatId': chatId});
-    debugPrint('[SocketService] mark_read -> $chatId');
+  Future<void> joinChat(String? chatId) async {
+    if (chatId == null || chatId.isEmpty) return; // Add null/empty check
+    await connect();
+    _socket!.emit('join_room', chatId);
+    _joinedChats.add(chatId);
   }
 
-  // ----- Send -----
+  void seedHistory(String chatId, List<Message> history) {
+    final list = _messagesByChat[chatId] ?? <Message>[];
+    final existing = {for (final m in list) m.id: true};
+    for (final m in history) {
+      if (!existing.containsKey(m.id)) list.add(m);
+    }
+    _messagesByChat[chatId] = list
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    notifyListeners();
+  }
+
   void sendMessage({
     required String chatId,
-    required String recipientId,
     required String text,
-    String? tempId,
+    required String senderId,
+    String? recipientId,
   }) {
-    if (!isConnected) return;
+    if (text.trim().isEmpty) return; // Removed !isConnected to allow buffering
+
+    final tempId = 'temp_${DateTime.now().microsecondsSinceEpoch}';
+    final optimistic = Message(
+      id: tempId,
+      chatId: chatId,
+      senderId: senderId,
+      recipientId: recipientId ?? '', // Ensure recipientId is not null
+      text: text.trim(),
+      status: 'sending',
+      createdAt: DateTime.now(),
+    );
+
+    final list = _messagesByChat[chatId] ?? <Message>[];
+    list.add(optimistic);
+    _messagesByChat[chatId] = list;
+    notifyListeners();
+
     _socket?.emit('send_message', {
+      // Emit always; socket.io buffers if disconnected
       'chatId': chatId,
       'recipientId': recipientId,
-      'text': text,
-      if (tempId != null) 'tempId': tempId,
+      'text': text.trim(),
+      'tempId': tempId,
     });
   }
 
-  // ----- Listen helpers (typed names) -----
-  void onReceive(void Function(dynamic) handler) {
-    // Avoid duplicates on hot reload/rebuild
-    _socket?.off('receive_message');
-    _socket?.on('receive_message', handler);
+  void markRead(String chatId) {
+    _socket?.emit('mark_read', {'chatId': chatId});
   }
 
-  void onAck(void Function(dynamic) handler) {
-    _socket?.off('message_ack');
-    _socket?.on('message_ack', handler);
-  }
-
-  void onErrorEvt(void Function(dynamic) handler) {
-    _socket?.off('message_error');
-    _socket?.on('message_error', handler);
-  }
-
-  void onStatus(void Function(dynamic) handler) {
-    _socket?.off('message_status');
-    _socket?.on('message_status', handler);
-  }
-
-  void onChatRead(void Function(dynamic) handler) {
-    _socket?.off('chat_read');
-    _socket?.on('chat_read', handler);
-  }
-
-  // Back-compat (your code used this name in a few places)
-  void listenForMessage(Function(dynamic) handler) => onReceive(handler);
-
-  // Generic event attach (handy in experiments)
+  // PRESERVED for other real-time features like order status updates
   void onEvent(String event, void Function(dynamic) handler) {
     _socket?.off(event);
     _socket?.on(event, handler);
   }
 
-  // Generic off
-  void offEvent(String event) => _socket?.off(event);
+  void offEvent(String event) {
+    _socket?.off(event);
+  }
 
   @override
   void dispose() {
