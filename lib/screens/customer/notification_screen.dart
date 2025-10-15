@@ -16,6 +16,7 @@ import '../../models/deal_model.dart';
 import '../../models/notification.dart' as app_notification_model;
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
+import '../../providers/notification_provider.dart'; // ✨ ADD THIS IMPORT
 
 // ❌ THIS INTERNAL SERVICE CLASS IS REMOVED TO SIMPLIFY AND FIX THE ERROR
 /*
@@ -51,6 +52,8 @@ class _NotificationScreenState extends State<NotificationScreen>
     _listAnimationController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
     _loadCurrentUserAndFetchNotifications();
+
+    Provider.of<NotificationProvider>(context, listen: false).clearCount();
 
     // ✅ MARK ALL NOTIFICATIONS AS READ WHEN THE SCREEN IS OPENED
     // This is a "fire-and-forget" call. It will also clear the unread bubble.
@@ -279,6 +282,7 @@ class _NotificationScreenState extends State<NotificationScreen>
         return Icons.check_circle_outline_rounded;
       case 'promotion':
         return Icons.local_offer_outlined;
+
       case 'system_alert':
         return Icons.warning_amber_rounded;
       case 'new_run':
