@@ -21,6 +21,9 @@ jobs:
       - name: Flutter deps
         run: flutter pub get
 
+      - name: Flutter clean
+        run: flutter clean  # Cleans build artifacts and regenerates if needed
+
       - name: Ensure iOS project exists
         run: flutter create --org com.primejet --platforms=ios .
 
