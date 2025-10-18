@@ -7,9 +7,9 @@
 	<key>CFBundleDisplayName</key>
 	<string>Primejet Mobile</string>
 	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
+	<string>$Gas2Door</string>
 	<key>CFBundleIdentifier</key>
-	<string>$(com.primejet.gas2door)</string>
+	<string>$com.primejet.gas2door</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>

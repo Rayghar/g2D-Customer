@@ -32,6 +32,12 @@ jobs:
         run: |
           sed -i '' "s/DEVELOPMENT_TEAM = [A-Z0-9]*/DEVELOPMENT_TEAM = ${TEAM_ID}/g" ios/Runner.xcodeproj/project.pbxproj
 
+      - name: Set Manual Signing and Profile
+        run: |
+          sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = .*/PROVISIONING_PROFILE_SPECIFIER = \"\"/g" ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' "s/PROVISIONING_PROFILE = .*/PROVISIONING_PROFILE = \"profile.mobileprovision\"/g" ios/Runner.xcodeproj/project.pbxproj
+
       - name: Install fastlane
         run: gem install fastlane --no-document
 
@@ -47,6 +53,7 @@ jobs:
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          security find-identity -v -p codesigning build.keychain  # Debug: List signing identities
 
       - name: Install provisioning profile
         env:
@@ -54,7 +61,11 @@ jobs:
         run: |
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           echo "$MOBILEPROVISION_BASE64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
-      
+
+      - name: Pod install
+        working-directory: ios
+        run: pod install
+
       - name: Build IPA (Release)
         run: flutter build ipa --release --verbose
 
