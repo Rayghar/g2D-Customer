@@ -55,10 +55,6 @@ jobs:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           echo "$MOBILEPROVISION_BASE64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
       
-      - name: Pod install
-        working-directory: ios
-        run: pod install
-
       - name: Build IPA (Release)
         run: flutter build ipa --release --verbose
 
