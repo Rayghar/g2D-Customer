@@ -22,7 +22,7 @@ jobs:
         run: flutter pub get
 
       - name: Ensure iOS project exists
-        run: flutter create --platforms=ios .
+        run: flutter create --org com.primejet --platforms=ios .
 
       - name: Force iOS 13 in Podfile
         run: |
