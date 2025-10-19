@@ -29,7 +29,7 @@ jobs:
 
       - name: Force iOS 13 in Podfile
         run: |
-          ruby -e "f='ios/Podfile'; c=File.read(f); c=c.gsub(/platform :ios, .*/, \"platform :ios, '15.0'\"); File.write(f,c)"
+          ruby -e "f='ios/Podfile'; c=File.read(f); c=c.gsub(/platform :ios, .*/, \"platform :ios, '13.0'\"); File.write(f,c)"
 
       - name: Set DEVELOPMENT_TEAM in Xcode project
         run: |
@@ -39,13 +39,8 @@ jobs:
         run: |
           sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" ios/Runner.xcodeproj/project.pbxproj
           sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = .*/PROVISIONING_PROFILE_SPECIFIER = \"\"/g" ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' "s/PROVISIONING_PROFILE = .*/PROVISIONING_PROFILE = \"profile.mobileprovision\"/g" ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' "s/CODE_SIGN_IDENTITY = \"iPhone Developer\"/CODE_SIGN_IDENTITY = \"iPhone Distribution\"/g" ios/Runner.xcodeproj/project.pbxproj
 
-      - name: Update Deployment Target to 15.0
-        run: |
-          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = 13.0/IPHONEOS_DEPLOYMENT_TARGET = 15.0/g" ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = 12.0/IPHONEOS_DEPLOYMENT_TARGET = 15.0/g" ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = 9.0/IPHONEOS_DEPLOYMENT_TARGET = 15.0/g" ios/Runner.xcodeproj/project.pbxproj
       - name: Install fastlane
         run: gem install fastlane --no-document
 
@@ -69,10 +64,13 @@ jobs:
         run: |
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           echo "$MOBILEPROVISION_BASE64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
-      
-      - name: Pod repo update
-        working-directory: ios
-        run: pod repo update
+
+      - name: Extract Profile UUID and Set in Project
+        run: |
+          PROFILE_PATH="~/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin <<< $(security cms -D -i $PROFILE_PATH))
+          echo "Extracted UUID: $PROFILE_UUID"
+          sed -i '' "s/PROVISIONING_PROFILE = .*/PROVISIONING_PROFILE = \"$PROFILE_UUID\"/g" ios/Runner.xcodeproj/project.pbxproj
 
       - name: Pod install
         working-directory: ios
