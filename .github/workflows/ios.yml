@@ -105,14 +105,67 @@ jobs:
           perl -0777 -pe 's/(PRODUCT_BUNDLE_IDENTIFIER = com\.primejet\.gas2door;)/$1\n\t\t\t\tDEVELOPMENT_TEAM = '"$TEAM_ID"';/g' \
             ios/Runner.xcodeproj/project.pbxproj > /tmp/p.pbxproj && mv /tmp/p.pbxproj ios/Runner.xcodeproj/project.pbxproj
 
-      - name: Extract provisioning profile metadata
+      - name: Write and parse provisioning profile safely
         shell: bash
         run: |
-          PP="$HOME/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
-          PROFILE_NAME=$(security cms -D -i "$PP" | /usr/libexec/PlistBuddy -c 'Print :Name' /dev/stdin)
-          PROFILE_UUID=$(security cms -D -i "$PP" | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
+          set -euo pipefail
+
+          PP_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PP_DIR"
+
+          # 1) Write the .mobileprovision robustly (handle both BSD and GNU base64)
+          # Use printf (not echo) to avoid extra newline issues.
+          if printf '%s' "$MOBILEPROVISION_BASE64" | base64 -D > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then
+            :
+          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 --decode > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then
+            :
+          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 -d > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then
+            :
+          else
+            echo "Failed to base64-decode MOBILEPROVISION_BASE64" >&2
+            exit 1
+          fi
+
+          # 2) Sanity-check the file
+          if [ ! -s "$PP_DIR/profile.mobileprovision" ]; then
+            echo "Provisioning profile not written or empty. Check your MOBILEPROVISION_BASE64 secret." >&2
+            ls -l "$PP_DIR" || true
+            exit 1
+          fi
+
+          PP="$PP_DIR/profile.mobileprovision"
+
+          # 3) Try to decode CMS to a plist; if that fails, maybe it's already a plist
+          if /usr/bin/security cms -D -i "$PP" -o /tmp/profile.plist 2>/dev/null; then
+            :
+          else
+            # If it's already a plist, just copy it
+            cp "$PP" /tmp/profile.plist
+          fi
+
+          # 4) Confirm we have a plist with content
+          if [ ! -s /tmp/profile.plist ]; then
+            echo "Could not decode profile. Is the file a valid .mobileprovision?" >&2
+            file "$PP" || true
+            exit 1
+          fi
+
+          # 5) Extract useful fields
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' /tmp/profile.plist 2>/dev/null || true)
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profile.plist 2>/dev/null || true)
+
+          if [ -z "${PROFILE_NAME:-}" ] || [ -z "${PROFILE_UUID:-}" ]; then
+            echo "Profile plist missing Name/UUID; dumping a summary for debugging:" >&2
+            /usr/bin/plutil -p /tmp/profile.plist || true
+            exit 1
+          fi
+
           echo "PROFILE_NAME=$PROFILE_NAME" >> $GITHUB_ENV
           echo "PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
+
+          echo "Resolved profile:"
+          echo "  Name: $PROFILE_NAME"
+          echo "  UUID: $PROFILE_UUID"
 
       - name: Inject signing into Release.xcconfig (idempotent)
         shell: bash
