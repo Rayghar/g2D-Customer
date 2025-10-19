@@ -67,7 +67,7 @@ jobs:
 
       - name: Extract Profile UUID and Set in Project
         run: |
-          PROFILE_PATH="~/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
+          PROFILE_PATH="~/Library/MobileDevice/Provisioning_Profiles/profile.mobileprovision"
           PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin <<< $(security cms -D -i $PROFILE_PATH))
           echo "Extracted UUID: $PROFILE_UUID"
           sed -i '' "s/PROVISIONING_PROFILE = .*/PROVISIONING_PROFILE = \"$PROFILE_UUID\"/g" ios/Runner.xcodeproj/project.pbxproj
