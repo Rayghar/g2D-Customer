@@ -24,6 +24,9 @@ jobs:
       - name: Flutter clean
         run: flutter clean  # Cleans build artifacts and regenerates if needed
 
+      - name: Ensure iOS project exists
+        run: flutter create --org com.primejet --platforms=ios .
+
       - name: Force iOS 15 in Podfile
         run: |
           ruby -e "f='ios/Podfile'; c=File.read(f); c=c.gsub(/platform :ios, .*/, \"platform :ios, '15.0'\"); File.write(f,c)"
@@ -61,7 +64,55 @@ jobs:
         run: |
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           echo "$MOBILEPROVISION_BASE64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+      
+      - name: Extract Provisioning Profile metadata
+        shell: bash
+        run: |
+          PP="$HOME/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
+          # Extract Name and UUID
+          PROFILE_NAME=$(security cms -D -i "$PP" | /usr/libexec/PlistBuddy -c 'Print :Name' /dev/stdin)
+          PROFILE_UUID=$(security cms -D -i "$PP" | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
 
+          echo "PROFILE_NAME=$PROFILE_NAME" >> $GITHUB_ENV
+          echo "PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
+
+      - name: Ensure Release.xcconfig includes CocoaPods and inject signing
+        shell: bash
+        run: |
+          XCCONFIG="ios/Flutter/Release.xcconfig"
+
+          # 1) Fix the malformed CocoaPods include (remove any '#include?' and ensure '#include' is present)
+          sed -i '' 's/^#include\? "#include /g' "$XCCONFIG" || true
+          # If the correct include line is missing, append it
+          grep -q 'Pods-Runner.release.xcconfig' "$XCCONFIG" || \
+            echo '#include "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$XCCONFIG"
+
+          # 2) Remove any previous injected lines to keep idempotency
+          sed -i '' '/\/\*\*\* Signing injected by CI \*\*\*\//,$d' "$XCCONFIG"
+
+          # 3) Append fresh signing block using envs
+          {
+            echo ''
+            echo '/*** Signing injected by CI ***/'
+            echo 'PRODUCT_BUNDLE_IDENTIFIER = com.primejet.gas2door'
+            echo 'CODE_SIGN_STYLE = Manual'
+            echo 'CODE_SIGN_IDENTITY = Apple Distribution'
+            # Prefer SPECIFIER by name (works well with modern profiles).
+            echo "PROVISIONING_PROFILE_SPECIFIER = ${PROFILE_NAME}"
+            echo "DEVELOPMENT_TEAM = ${TEAM_ID}"
+          } >> "$XCCONFIG"
+
+      - name: Force Manual signing in project (fallback)
+        shell: bash
+        run: |
+          # Flip any Automatic to Manual (if present). Safe to run even if already Manual.
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g' ios/Runner.xcodeproj/project.pbxproj
+
+          # If DEVELOPMENT_TEAM keys don't exist (your case), add them to each build config.
+          # Insert right after PRODUCT_BUNDLE_IDENTIFIER lines for the Runner target.
+          # This keeps the change surgical and idempotent.
+          perl -0777 -pe 's/(PRODUCT_BUNDLE_IDENTIFIER = com\.primejet\.gas2door;)/$1\n\t\t\t\tDEVELOPMENT_TEAM = '"$TEAM_ID"';/g' \
+            ios/Runner.xcodeproj/project.pbxproj > /tmp/p.pbxproj && mv /tmp/p.pbxproj ios/Runner.xcodeproj/project.pbxproj
 
       - name: Pod install
         working-directory: ios

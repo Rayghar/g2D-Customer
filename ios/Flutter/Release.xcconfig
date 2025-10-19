@@ -1,2 +1,11 @@
 #include "Generated.xcconfig"
-#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
+#include "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
+
+/*** Signing injected by CI ***/
+PRODUCT_BUNDLE_IDENTIFIER = com.primejet.gas2door
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = Apple Distribution
+// If you prefer UUID style, use PROVISIONING_PROFILE instead of SPECIFIER
+// PROVISIONING_PROFILE = <PROFILE_UUID>
+PROVISIONING_PROFILE_SPECIFIER = <PROFILE_NAME>
+DEVELOPMENT_TEAM = <YOUR_TEAM_ID>
