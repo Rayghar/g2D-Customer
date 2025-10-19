@@ -105,6 +105,39 @@ jobs:
           perl -0777 -pe 's/(PRODUCT_BUNDLE_IDENTIFIER = com\.primejet\.gas2door;)/$1\n\t\t\t\tDEVELOPMENT_TEAM = '"$TEAM_ID"';/g' \
             ios/Runner.xcodeproj/project.pbxproj > /tmp/p.pbxproj && mv /tmp/p.pbxproj ios/Runner.xcodeproj/project.pbxproj
 
+      - name: Extract provisioning profile metadata
+        shell: bash
+        run: |
+          PP="$HOME/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
+          PROFILE_NAME=$(security cms -D -i "$PP" | /usr/libexec/PlistBuddy -c 'Print :Name' /dev/stdin)
+          PROFILE_UUID=$(security cms -D -i "$PP" | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
+          echo "PROFILE_NAME=$PROFILE_NAME" >> $GITHUB_ENV
+          echo "PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
+
+      - name: Inject signing into Release.xcconfig (idempotent)
+        shell: bash
+        run: |
+          XCCONFIG="ios/Flutter/Release.xcconfig"
+
+          # 1) Ensure the CocoaPods include is correct
+          sed -i '' 's/#include\? /#include /g' "$XCCONFIG" || true
+          grep -q 'Pods-Runner.release.xcconfig' "$XCCONFIG" || \
+            echo '#include "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$XCCONFIG"
+
+          # 2) Remove any previous injected block
+          sed -i '' '/^\/\/ --- Signing injected by CI ---/,$d' "$XCCONFIG" || true
+
+          # 3) Append fresh, concrete values (use SPECIFIER by name; UUID also works)
+          {
+            echo '// --- Signing injected by CI ---'
+            echo 'PRODUCT_BUNDLE_IDENTIFIER = com.primejet.gas2door'
+            echo 'CODE_SIGN_STYLE = Manual'
+            echo 'CODE_SIGN_IDENTITY = Apple Distribution'
+            echo "PROVISIONING_PROFILE_SPECIFIER = ${PROFILE_NAME}"
+            echo "DEVELOPMENT_TEAM = ${TEAM_ID}"
+          } >> "$XCCONFIG"
+
+      
       - name: Pod install
         working-directory: ios
         run: pod install
