@@ -29,9 +29,6 @@ jobs:
       - name: Flutter clean
         run: flutter clean  # Cleans build artifacts and regenerates if needed
 
-      - name: Ensure iOS project exists
-        run: flutter create --org com.primejet --platforms=ios .
-
       - name: Force iOS 15 in Podfile
         run: |
           ruby -e "f='ios/Podfile'; c=File.read(f); c=c.gsub(/platform :ios, .*/, \"platform :ios, '15.0'\"); File.write(f,c)"
@@ -44,7 +41,7 @@ jobs:
         run: |
           sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" ios/Runner.xcodeproj/project.pbxproj
           sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = .*/PROVISIONING_PROFILE_SPECIFIER = \"\"/g" ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' "s/CODE_SIGN_IDENTITY = \"iPhone Developer\"/CODE_SIGN_IDENTITY = \"iPhone Distribution\"/g" ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' "s/CODE_SIGN_IDENTITY = \"iPhone Developer\"/CODE_SIGN_IDENTITY = \"Apple Distribution\"/g" ios/Runner.xcodeproj/project.pbxproj
 
       - name: Install fastlane
         run: gem install fastlane --no-document
@@ -71,32 +68,35 @@ jobs:
           echo "$MOBILEPROVISION_BASE64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
       
 
-
-      - name: Ensure Release.xcconfig includes CocoaPods and inject signing
+      - name: Inject signing into Release.xcconfig (safe, idempotent)
         shell: bash
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          set -euo pipefail
           XCCONFIG="ios/Flutter/Release.xcconfig"
 
-          # 1) Fix the malformed CocoaPods include (remove any '#include?' and ensure '#include' is present)
-          sed -i '' 's/^#include\? "#include /g' "$XCCONFIG" || true
-          # If the correct include line is missing, append it
+          # Ensure CocoaPods include exists once
           grep -q 'Pods-Runner.release.xcconfig' "$XCCONFIG" || \
             echo '#include "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$XCCONFIG"
 
-          # 2) Remove any previous injected lines to keep idempotency
-          sed -i '' '/\/\*\*\* Signing injected by CI \*\*\*\//,$d' "$XCCONFIG"
+          # Remove any prior injected block (our marker only)
+          sed -i '' '/^\/\/ --- Signing injected by CI ---/,$d' "$XCCONFIG" || true
 
-          # 3) Append fresh signing block using envs
+          # Append fresh values (shell expands PROFILE_NAME & TEAM_ID here)
           {
-            echo ''
-            echo '/*** Signing injected by CI ***/'
+            echo '// --- Signing injected by CI ---'
             echo 'PRODUCT_BUNDLE_IDENTIFIER = com.primejet.gas2door'
             echo 'CODE_SIGN_STYLE = Manual'
             echo 'CODE_SIGN_IDENTITY = Apple Distribution'
-            # Prefer SPECIFIER by name (works well with modern profiles).
             echo "PROVISIONING_PROFILE_SPECIFIER = ${PROFILE_NAME}"
             echo "DEVELOPMENT_TEAM = ${TEAM_ID}"
           } >> "$XCCONFIG"
+
+          echo "Final $XCCONFIG:"
+          cat "$XCCONFIG"
+
+          
 
       - name: Force Manual signing in project (fallback)
         shell: bash
