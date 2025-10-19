@@ -9,6 +9,11 @@ jobs:
     env:
       BUNDLE_ID: com.primejet.gas2door  # Set your bundle ID
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      P12_BASE64: ${{ secrets.P12_BASE64 }}
+      P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+      MOBILEPROVISION_BASE64: ${{ secrets.MOBILEPROVISION_BASE64 }}
+      
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
