@@ -24,9 +24,6 @@ jobs:
       - name: Flutter clean
         run: flutter clean  # Cleans build artifacts and regenerates if needed
 
-      - name: Ensure iOS project exists
-        run: flutter create --org com.primejet --platforms=ios .
-
       - name: Force iOS 15 in Podfile
         run: |
           ruby -e "f='ios/Podfile'; c=File.read(f); c=c.gsub(/platform :ios, .*/, \"platform :ios, '15.0'\"); File.write(f,c)"
