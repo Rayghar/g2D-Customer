@@ -227,8 +227,36 @@ jobs:
         working-directory: ios
         run: |
           set -euxo pipefail
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -showBuildSettings > ../build-logs/xcodebuild_showBuildSettings.txt
 
+          echo "=== List schemes in workspace ==="
+          xcodebuild -list -workspace Runner.xcworkspace || true
+
+          echo "=== Show available destinations for Runner ==="
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -showdestinations || true
+
+          echo "=== Write build settings (primary: workspace) ==="
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -showBuildSettings \
+            > ../build-logs/xcodebuild_showBuildSettings.txt || true
+
+          # Fallback to project if workspace query failed to write anything
+          if [ ! -s ../build-logs/xcodebuild_showBuildSettings.txt ]; then
+            echo "Primary showBuildSettings produced no output; trying project as fallback..."
+            xcodebuild \
+              -project Runner.xcodeproj \
+              -scheme Runner \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -showBuildSettings \
+              > ../build-logs/xcodebuild_showBuildSettings.txt || true
+          fi
+
+          echo "Wrote: ../build-logs/xcodebuild_showBuildSettings.txt (size: $(wc -c < ../build-logs/xcodebuild_showBuildSettings.txt) bytes)"
+      
       - name: Build IPA (Release, verbose)
         run: |
           set -euxo pipefail
