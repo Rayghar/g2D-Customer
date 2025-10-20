@@ -39,7 +39,33 @@ target 'Runner' do
 end
 
 post_install do |installer|
-  installer.pods_project.targets.each do |target|
-    flutter_additional_ios_build_settings(target)
+  # Targets that require the experimental Swift feature for `public import`
+  iq_pods = %w[
+    IQTextInputViewNotification
+    IQKeyboardCore
+    IQKeyboardNotification
+    IQKeyboardToolbar
+    IQKeyboardToolbarManager
+    IQKeyboardReturnManager
+    IQTextView
+  ]
+
+  installer.pods_project.targets.each do |t|
+    # Keep Flutter/Xcode defaults
+    flutter_additional_ios_build_settings(t)
+
+    t.build_configurations.each do |config|
+      # 1) Silence Xcode 15 warnings by bumping any low pod targets to >= 12.0
+      min = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+      if min && Gem::Version.new(min) < Gem::Version.new('12.0')
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+      end
+
+      # 2) Enable AccessLevelOnImport only for the IQKeyboard* pods that need it
+      if iq_pods.include?(t.name)
+        existing = config.build_settings['OTHER_SWIFT_FLAGS'] || '$(inherited)'
+        config.build_settings['OTHER_SWIFT_FLAGS'] = "#{existing} -enable-experimental-feature AccessLevelOnImport"
+      end
+    end
   end
 end
