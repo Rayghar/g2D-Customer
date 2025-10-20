@@ -1,4 +1,4 @@
-# Uncomment this line to define a global platform for your project
+# Global iOS platform for the project
 platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
@@ -39,32 +39,25 @@ target 'Runner' do
 end
 
 post_install do |installer|
-  # Targets that require the experimental Swift feature for `public import`
-  iq_pods = %w[
-    IQTextInputViewNotification
-    IQKeyboardCore
-    IQKeyboardNotification
-    IQKeyboardToolbar
-    IQKeyboardToolbarManager
-    IQKeyboardReturnManager
-    IQTextView
-  ]
-
   installer.pods_project.targets.each do |t|
-    # Keep Flutter/Xcode defaults
+    # Keep Flutter/Xcode defaults first, then layer our settings so they "win"
     flutter_additional_ios_build_settings(t)
 
     t.build_configurations.each do |config|
-      # 1) Silence Xcode 15 warnings by bumping any low pod targets to >= 12.0
-      min = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
-      if min && Gem::Version.new(min) < Gem::Version.new('12.0')
-        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
-      end
+      # 1) Align all pods to iOS 15.0 to avoid Xcode 15 warnings & mismatches
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
 
-      # 2) Enable AccessLevelOnImport only for the IQKeyboard* pods that need it
-      if iq_pods.include?(t.name)
-        existing = config.build_settings['OTHER_SWIFT_FLAGS'] || '$(inherited)'
-        config.build_settings['OTHER_SWIFT_FLAGS'] = "#{existing} -enable-experimental-feature AccessLevelOnImport"
+      # 2) Enable Swift parser support for `public import` across all pods
+      #    (required by IQKeyboard* with Xcode 15.4 / Swift 5.10)
+      existing = config.build_settings['OTHER_SWIFT_FLAGS']
+      if existing.nil? || existing.empty?
+        config.build_settings['OTHER_SWIFT_FLAGS'] = '$(inherited) -enable-experimental-feature AccessLevelOnImport'
+      else
+        flags = existing.is_a?(Array) ? existing : existing.to_s.split(' ')
+        unless flags.include?('-enable-experimental-feature') && flags.include?('AccessLevelOnImport')
+          flags += ['-enable-experimental-feature', 'AccessLevelOnImport']
+        end
+        config.build_settings['OTHER_SWIFT_FLAGS'] = flags.join(' ')
       end
     end
   end
