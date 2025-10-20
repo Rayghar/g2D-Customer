@@ -17,7 +17,7 @@ def flutter_root
   end
 
   File.foreach(generated_xcode_build_settings_path) do |line|
-    matches = line.match /FLUTTER_ROOT\=(.*)/
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
     return matches[1].strip if matches
   end
   raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
@@ -31,10 +31,8 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
-  # Install Flutter + plugin pods (lets FlutterFire pick Firebase 11.x it requires)
+  # Install Flutter + plugin pods (let FlutterFire pick Firebase 11.x as required)
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-
-  # ⛔️ DO NOT PIN FIREBASE HERE — removing all < 11.0 constraints fixes your conflict
 
   target 'RunnerTests' do
     inherit! :search_paths
@@ -42,13 +40,33 @@ target 'Runner' do
 end
 
 post_install do |installer|
+  # Pods that need the Swift experimental feature for 'public import'
+  iq_pods = %w[
+    IQTextInputViewNotification
+    IQKeyboardCore
+    IQKeyboardNotification
+    IQKeyboardToolbar
+    IQKeyboardToolbarManager
+    IQKeyboardReturnManager
+    IQTextView
+  ]
+
   installer.pods_project.targets.each do |t|
-    # Keep Flutter/Xcode defaults first
+    # Keep Flutter defaults
     flutter_additional_ios_build_settings(t)
 
     t.build_configurations.each do |config|
-      # Align all pods to iOS 15.0 (silences old min-target warnings on Xcode 16)
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      # Raise too-low min targets to 12.0 (silences warnings, satisfies Firebase 11.x)
+      min = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+      if min && Gem::Version.new(min) < Gem::Version.new('12.0')
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+      end
+
+      # Enable AccessLevelOnImport only for the IQ* pods
+      if iq_pods.include?(t.name)
+        existing = config.build_settings['OTHER_SWIFT_FLAGS'] || '$(inherited)'
+        config.build_settings['OTHER_SWIFT_FLAGS'] = "#{existing} -enable-experimental-feature AccessLevelOnImport"
+      end
     end
   end
 end

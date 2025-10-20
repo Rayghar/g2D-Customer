@@ -7,7 +7,7 @@ on:
 
 jobs:
   ios:
-    runs-on: macos-15   # <-- REQUIRED for Xcode 16.1 with iOS 18.1 SDK
+    runs-on: macos-15   # REQUIRED for Xcode 16.1 with iOS 18.1 SDK
 
     env:
       BUNDLE_ID: com.primejet.gas2door
@@ -25,6 +25,17 @@ jobs:
         with:
           xcode-version: '16.1'
 
+      - name: Pin DEVELOPER_DIR (safety)
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_16.1.app" >> $GITHUB_ENV
+
+      - name: Verify iOS SDK installation
+        run: |
+          set -euxo pipefail
+          xcodebuild -showsdks
+          SDKDIR="/Applications/Xcode_16.1.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs"
+          test -d "$SDKDIR" || { echo "FATAL: $SDKDIR missing"; exit 1; }
+          ls -1 "$SDKDIR"
+
       - name: Print runner & toolchain versions
         run: |
           set -euxo pipefail
@@ -34,6 +45,8 @@ jobs:
           swift --version
           ruby -v
           gem env home
+          python3 --version || true
+          node -v || true
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -61,6 +74,11 @@ jobs:
           sudo gem install cocoapods --no-document
           pod --version
           pod repo update
+
+      - name: Force iOS 15 in Podfile (idempotent)
+        run: |
+          set -euxo pipefail
+          ruby -e "f='ios/Podfile'; if File.exist?(f); c=File.read(f); c=c.gsub(/platform :ios, .*/, \"platform :ios, '15.0'\"); File.write(f,c); else; puts 'WARN: ios/Podfile not found'; end"
 
       - name: Stamp DEVELOPMENT_TEAM and manual signing in Xcode project
         run: |
@@ -92,9 +110,9 @@ jobs:
           security list-keychains -s build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          # Keep the keychain unlocked for a while to avoid random codesign prompts
+          # Keep unlocked for 6 hours to avoid prompts
           security set-keychain-settings -lut 21600 build.keychain
-          # Let codesign/xcodebuild read the key without UI prompts
+          # Let codesign/xcodebuild access keys without UI
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
           security find-identity -v -p codesigning build.keychain || true
 
@@ -108,7 +126,7 @@ jobs:
           PP_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
           mkdir -p "$PP_DIR"
           if printf '%s' "$MOBILEPROVISION_BASE64" | base64 -D > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then :
-          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 --decode > "$PP_DIR/profile.mobileprovision" 2>/devnull; then :
+          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 --decode > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then :
           elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 -d > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then :
           else
             echo "Failed to base64-decode MOBILEPROVISION_BASE64" >&2; exit 1
@@ -206,7 +224,7 @@ jobs:
       - name: Build IPA (Release, verbose)
         run: |
           set -euxo pipefail
-          # Tell Flutter to use our ExportOptions.plist so it doesn't try to infer dev signing
+          # Force app-store export with our ExportOptions so Flutter doesn't try dev signing
           flutter build ipa --release --export-options-plist=ios/ExportOptions.plist --verbose || BUILD_FAILED=1
 
           # Capture xcresult issues if Flutter/Xcode failed
