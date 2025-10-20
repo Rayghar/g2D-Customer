@@ -31,17 +31,10 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
-  # Install Flutter + plugin pods
+  # Install Flutter + plugin pods (lets FlutterFire pick Firebase 11.x it requires)
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 
-  # --- Force Swift-5–compatible Firebase (avoid Swift 6-only 'sending' keyword) ---
-  # Pin only the Firebase pods you actually use; adjust if your app uses more/less.
-  pod 'FirebaseCore',          '< 11.0'
-  pod 'FirebaseAuth',          '< 11.0'
-  pod 'FirebaseFirestore',     '< 11.0'
-  pod 'FirebaseMessaging',     '< 11.0'
-  pod 'FirebaseInstallations', '< 11.0'
-  pod 'FirebaseSharedSwift',   '< 11.0'  # guard the Swift-6 module introduced in 11.x
+  # ⛔️ DO NOT PIN FIREBASE HERE — removing all < 11.0 constraints fixes your conflict
 
   target 'RunnerTests' do
     inherit! :search_paths
@@ -49,30 +42,13 @@ target 'Runner' do
 end
 
 post_install do |installer|
-  # IQKeyboard* pods that require 'AccessLevelOnImport' under Swift 5.10 / Xcode 15.4
-  iq_pods = %w[
-    IQTextInputViewNotification
-    IQKeyboardCore
-    IQKeyboardNotification
-    IQKeyboardToolbar
-    IQKeyboardToolbarManager
-    IQKeyboardReturnManager
-    IQTextView
-  ]
-
   installer.pods_project.targets.each do |t|
     # Keep Flutter/Xcode defaults first
     flutter_additional_ios_build_settings(t)
 
     t.build_configurations.each do |config|
-      # 1) Align all pods to iOS 15.0 (silences old min-target warnings)
+      # Align all pods to iOS 15.0 (silences old min-target warnings on Xcode 16)
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
-
-      # 2) Enable parser support for 'public import' ONLY for the IQ* pods that need it
-      if iq_pods.include?(t.name)
-        existing = config.build_settings['OTHER_SWIFT_FLAGS'] || '$(inherited)'
-        config.build_settings['OTHER_SWIFT_FLAGS'] = "#{existing} -enable-experimental-feature AccessLevelOnImport"
-      end
     end
   end
 end

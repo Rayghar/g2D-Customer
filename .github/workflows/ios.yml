@@ -7,7 +7,7 @@ on:
 
 jobs:
   ios:
-    runs-on: macos-15   # Xcode 16 images live here
+    runs-on: macos-15   # Xcode 16 images live on macOS 15
 
     env:
       BUNDLE_ID: com.primejet.gas2door
@@ -23,7 +23,7 @@ jobs:
       - name: Select Xcode 16
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16.1'   # or '16' to get latest 16.x
+          xcode-version: '16.1'   # or '16' for the latest 16.x
 
       - name: Print runner & toolchain versions
         run: |
