@@ -204,6 +204,12 @@ jobs:
         run: |
           set -euxo pipefail
           ls -l ios/Flutter/Generated.xcconfig
+      - name: Reset CocoaPods resolution (force Firebase <11 pins)
+        working-directory: ios
+        run: |
+          set -euxo pipefail
+          rm -rf Pods Podfile.lock
+          pod repo update
 
       - name: Pod install (log & artifact)
         working-directory: ios

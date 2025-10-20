@@ -5,7 +5,7 @@ platform :ios, '15.0'
 ENV['COCOAPODS_DISABLE_STATS_SEND'] = 'true'
 
 project 'Runner', {
-  'Debug' => :debug,
+  'Debug'   => :debug,
   'Profile' => :release,
   'Release' => :release,
 }
@@ -31,7 +31,17 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
+  # Install Flutter + plugin pods
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  # --- Force Swift-5–compatible Firebase (avoid Swift 6-only 'sending' keyword) ---
+  # Pin only the Firebase pods you actually use; adjust if your app uses more/less.
+  pod 'FirebaseCore',          '< 11.0'
+  pod 'FirebaseAuth',          '< 11.0'
+  pod 'FirebaseFirestore',     '< 11.0'
+  pod 'FirebaseMessaging',     '< 11.0'
+  pod 'FirebaseInstallations', '< 11.0'
+  pod 'FirebaseSharedSwift',   '< 11.0'  # guard the Swift-6 module introduced in 11.x
 
   target 'RunnerTests' do
     inherit! :search_paths
@@ -39,25 +49,29 @@ target 'Runner' do
 end
 
 post_install do |installer|
+  # IQKeyboard* pods that require 'AccessLevelOnImport' under Swift 5.10 / Xcode 15.4
+  iq_pods = %w[
+    IQTextInputViewNotification
+    IQKeyboardCore
+    IQKeyboardNotification
+    IQKeyboardToolbar
+    IQKeyboardToolbarManager
+    IQKeyboardReturnManager
+    IQTextView
+  ]
+
   installer.pods_project.targets.each do |t|
-    # Keep Flutter/Xcode defaults first, then layer our settings so they "win"
+    # Keep Flutter/Xcode defaults first
     flutter_additional_ios_build_settings(t)
 
     t.build_configurations.each do |config|
-      # 1) Align all pods to iOS 15.0 to avoid Xcode 15 warnings & mismatches
+      # 1) Align all pods to iOS 15.0 (silences old min-target warnings)
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
 
-      # 2) Enable Swift parser support for `public import` across all pods
-      #    (required by IQKeyboard* with Xcode 15.4 / Swift 5.10)
-      existing = config.build_settings['OTHER_SWIFT_FLAGS']
-      if existing.nil? || existing.empty?
-        config.build_settings['OTHER_SWIFT_FLAGS'] = '$(inherited) -enable-experimental-feature AccessLevelOnImport'
-      else
-        flags = existing.is_a?(Array) ? existing : existing.to_s.split(' ')
-        unless flags.include?('-enable-experimental-feature') && flags.include?('AccessLevelOnImport')
-          flags += ['-enable-experimental-feature', 'AccessLevelOnImport']
-        end
-        config.build_settings['OTHER_SWIFT_FLAGS'] = flags.join(' ')
+      # 2) Enable parser support for 'public import' ONLY for the IQ* pods that need it
+      if iq_pods.include?(t.name)
+        existing = config.build_settings['OTHER_SWIFT_FLAGS'] || '$(inherited)'
+        config.build_settings['OTHER_SWIFT_FLAGS'] = "#{existing} -enable-experimental-feature AccessLevelOnImport"
       end
     end
   end
