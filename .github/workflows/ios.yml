@@ -7,7 +7,7 @@ on:
 
 jobs:
   ios:
-    runs-on: macos-14
+    runs-on: macos-15   # Xcode 16 images live here
 
     env:
       BUNDLE_ID: com.primejet.gas2door
@@ -19,6 +19,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.1'   # or '16' to get latest 16.x
 
       - name: Print runner & toolchain versions
         run: |
@@ -46,7 +51,7 @@ jobs:
           flutter --version
           flutter doctor -v
 
-      # IMPORTANT: clean BEFORE pub get (so Generated.xcconfig will be recreated)
+      # Clean BEFORE pub get so Generated.xcconfig is recreated
       - name: Flutter clean & deps (order matters)
         run: |
           set -euxo pipefail
@@ -204,7 +209,8 @@ jobs:
         run: |
           set -euxo pipefail
           ls -l ios/Flutter/Generated.xcconfig
-      - name: Reset CocoaPods resolution (force Firebase <11 pins)
+
+      - name: Reset CocoaPods resolution (clean resolve)
         working-directory: ios
         run: |
           set -euxo pipefail
