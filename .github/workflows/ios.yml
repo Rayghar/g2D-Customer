@@ -46,11 +46,18 @@ jobs:
           flutter --version
           flutter doctor -v
 
-      - name: Flutter deps / clean
+      # IMPORTANT: clean BEFORE pub get (so Generated.xcconfig will be recreated)
+      - name: Flutter clean & deps (order matters)
         run: |
           set -euxo pipefail
-          flutter pub get
           flutter clean
+          flutter pub get
+          # sanity check for CocoaPods/Podfile requirement
+          test -f ios/Flutter/Generated.xcconfig || { 
+            echo "ERROR: ios/Flutter/Generated.xcconfig missing after pub get"; 
+            ls -la ios/Flutter || true; 
+            exit 1; 
+          }
 
       - name: Force iOS 15 in Podfile (idempotent)
         run: |
@@ -72,9 +79,7 @@ jobs:
           echo "Team ID present? $([[ -n "${TEAM_ID:-}" ]] && echo yes || echo NO)"
           echo "P12 present? $([[ -n "${P12_BASE64:-}" ]] && echo yes || echo NO)"
           echo "Mobileprovision present? $([[ -n "${MOBILEPROVISION_BASE64:-}" ]] && echo yes || echo NO)"
-          echo "ASC_API_KEY envs defined? ID:$([[ -n "${{ secrets.ASC_API_KEY_ID }}" ]] && echo yes || echo NO) \
-          Issuer:$([[ -n "${{ secrets.ASC_API_ISSUER_ID }}" ]] && echo yes || echo NO) \
-          P8:$([[ -n "${{ secrets.ASC_API_KEY_P8_BASE64 }}" ]] && echo yes || echo NO)"
+          echo "ASC_API_KEY envs defined? ID:$([[ -n "${{ secrets.ASC_API_KEY_ID }}" ]] && echo yes || echo NO) Issuer:$([[ -n "${{ secrets.ASC_API_ISSUER_ID }}" ]] && echo yes || echo NO) P8:$([[ -n "${{ secrets.ASC_API_KEY_P8_BASE64 }}" ]] && echo yes || echo NO)"
 
       - name: Stamp DEVELOPMENT_TEAM and manual signing in Xcode project
         run: |
@@ -195,6 +200,11 @@ jobs:
           mkdir -p build-logs
           cp "$XCCONFIG" build-logs/Release.xcconfig
 
+      - name: Verify Generated.xcconfig exists (pre-pod-install)
+        run: |
+          set -euxo pipefail
+          ls -l ios/Flutter/Generated.xcconfig
+
       - name: Pod install (log & artifact)
         working-directory: ios
         run: |
@@ -210,10 +220,8 @@ jobs:
       - name: Build IPA (Release, verbose)
         run: |
           set -euxo pipefail
-          # Flutter verbose already prints most of what we need
           flutter build ipa --release --verbose
           ls -l build/ios/ipa || true
-          # Keep a copy of the xcarchive if present
           if ls build/ios/archive/*.xcarchive 1>/dev/null 2>&1; then
             echo "Found xcarchive(s):"
             ls -l build/ios/archive
