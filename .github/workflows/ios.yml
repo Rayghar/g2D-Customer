@@ -7,7 +7,7 @@ on:
 
 jobs:
   ios:
-    runs-on: macos-15   # Xcode 16 images live on macOS 15
+    runs-on: macos-15   # <-- REQUIRED for Xcode 16.1 with iOS 18.1 SDK
 
     env:
       BUNDLE_ID: com.primejet.gas2door
@@ -23,21 +23,17 @@ jobs:
       - name: Select Xcode 16
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16.1'   # or '16' for the latest 16.x
+          xcode-version: '16.1'
 
       - name: Print runner & toolchain versions
         run: |
           set -euxo pipefail
-          sw_vers
-          system_profiler SPSoftwareDataType || true
+          sw_vers || true
           xcodebuild -version
           xcrun --version
           swift --version
           ruby -v
           gem env home
-          python3 --version || true
-          node -v || true
-          java -version || true
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -57,56 +53,25 @@ jobs:
           set -euxo pipefail
           flutter clean
           flutter pub get
-          # sanity check for CocoaPods/Podfile requirement
-          test -f ios/Flutter/Generated.xcconfig || { 
-            echo "ERROR: ios/Flutter/Generated.xcconfig missing after pub get"; 
-            ls -la ios/Flutter || true; 
-            exit 1; 
-          }
-
-      - name: Force iOS 15 in Podfile (idempotent)
-        run: |
-          set -euxo pipefail
-          ruby -e "f='ios/Podfile'; c=File.read(f) rescue ''; if c != ''; c=c.gsub(/platform :ios, .*/, \"platform :ios, '15.0'\"); File.write(f,c); else; puts 'WARN: ios/Podfile not found yet'; end"
+          test -f ios/Flutter/Generated.xcconfig || { echo "ERROR: ios/Flutter/Generated.xcconfig missing"; ls -la ios/Flutter || true; exit 1; }
 
       - name: Ensure CocoaPods toolchain
         run: |
           set -euxo pipefail
           sudo gem install cocoapods --no-document
           pod --version
-          pod repo list || true
           pod repo update
-
-      - name: Summarize inputs (no secrets)
-        run: |
-          set -euxo pipefail
-          echo "Bundle ID: ${BUNDLE_ID}"
-          echo "Team ID present? $([[ -n "${TEAM_ID:-}" ]] && echo yes || echo NO)"
-          echo "P12 present? $([[ -n "${P12_BASE64:-}" ]] && echo yes || echo NO)"
-          echo "Mobileprovision present? $([[ -n "${MOBILEPROVISION_BASE64:-}" ]] && echo yes || echo NO)"
-          echo "ASC_API_KEY envs defined? ID:$([[ -n "${{ secrets.ASC_API_KEY_ID }}" ]] && echo yes || echo NO) Issuer:$([[ -n "${{ secrets.ASC_API_ISSUER_ID }}" ]] && echo yes || echo NO) P8:$([[ -n "${{ secrets.ASC_API_KEY_P8_BASE64 }}" ]] && echo yes || echo NO)"
 
       - name: Stamp DEVELOPMENT_TEAM and manual signing in Xcode project
         run: |
           set -euxo pipefail
           PBX=ios/Runner.xcodeproj/project.pbxproj
-
-          # Team
           sed -i '' "s/DEVELOPMENT_TEAM = [A-Z0-9]*/DEVELOPMENT_TEAM = ${TEAM_ID}/g" "$PBX" || true
-
-          # Manual signing + modern identity
           sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBX" || true
           sed -i '' "s/CODE_SIGN_IDENTITY = \"iPhone Developer\"/CODE_SIGN_IDENTITY = \"Apple Distribution\"/g" "$PBX" || true
-
-          # Clear specifier in pbxproj (we'll drive via xcconfig)
           sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = .*/PROVISIONING_PROFILE_SPECIFIER = \"\"/g" "$PBX" || true
-
-          # Also ensure DEV TEAM appears near bundle id, if missing
-          perl -0777 -pe 's/(PRODUCT_BUNDLE_IDENTIFIER = '"$BUNDLE_ID"';)/$1\n\t\t\t\tDEVELOPMENT_TEAM = '"$TEAM_ID"';/g' \
-            "$PBX" > /tmp/p.pbxproj || true
+          perl -0777 -pe 's/(PRODUCT_BUNDLE_IDENTIFIER = '"$BUNDLE_ID"';)/$1\n\t\t\t\tDEVELOPMENT_TEAM = '"$TEAM_ID"';/g' "$PBX" > /tmp/p.pbxproj || true
           if [ -s /tmp/p.pbxproj ]; then mv /tmp/p.pbxproj "$PBX"; fi
-
-          echo "==== project.pbxproj signing excerpts ===="
           grep -nE "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE" "$PBX" || true
 
       - name: Install fastlane
@@ -127,11 +92,13 @@ jobs:
           security list-keychains -s build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
-          echo "==== codesigning identities in build.keychain ===="
+          # Keep the keychain unlocked for a while to avoid random codesign prompts
+          security set-keychain-settings -lut 21600 build.keychain
+          # Let codesign/xcodebuild read the key without UI prompts
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
           security find-identity -v -p codesigning build.keychain || true
 
-      # ---------- Parse provisioning profile ONCE ----------
+      # Parse provisioning profile once and export PROFILE_NAME/UUID
       - name: Decode & parse provisioning profile
         shell: bash
         env:
@@ -140,38 +107,25 @@ jobs:
           set -euxo pipefail
           PP_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
           mkdir -p "$PP_DIR"
-
           if printf '%s' "$MOBILEPROVISION_BASE64" | base64 -D > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then :
-          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 --decode > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then :
+          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 --decode > "$PP_DIR/profile.mobileprovision" 2>/devnull; then :
           elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 -d > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then :
           else
             echo "Failed to base64-decode MOBILEPROVISION_BASE64" >&2; exit 1
           fi
-
-          ls -l "$PP_DIR"
-          file "$PP_DIR/profile.mobileprovision" || true
-
           security cms -D -i "$PP_DIR/profile.mobileprovision" -o /tmp/profile.plist
           /usr/bin/plutil -lint /tmp/profile.plist
-
           NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' /tmp/profile.plist)
           UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profile.plist)
           APPID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' /tmp/profile.plist || true)
-
           : "${NAME:?Provisioning profile Name missing}"
           : "${UUID:?Provisioning profile UUID missing}"
-
           echo "PROFILE_NAME=$NAME" >> $GITHUB_ENV
           echo "PROFILE_UUID=$UUID" >> $GITHUB_ENV
-
           echo "Resolved profile: $NAME ($UUID)"
           echo "App Identifier in profile: ${APPID:-unknown}"
+          mkdir -p build-logs && cp /tmp/profile.plist build-logs/profile.plist
 
-          # Save plist for artifact
-          mkdir -p build-logs
-          cp /tmp/profile.plist build-logs/profile.plist
-
-      # ---------- Inject signing into Release.xcconfig ONCE ----------
       - name: Inject signing into Release.xcconfig (safe)
         shell: bash
         env:
@@ -180,16 +134,9 @@ jobs:
         run: |
           set -euxo pipefail
           : "${PROFILE_NAME:?PROFILE_NAME not found. Ensure the decode/parse step ran successfully.}"
-
           XCCONFIG="ios/Flutter/Release.xcconfig"
-
-          # Ensure CocoaPods include exists (no rewriting)
-          grep -q 'Pods-Runner.release.xcconfig' "$XCCONFIG" || \
-            echo '#include "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$XCCONFIG"
-
-          # Remove previously injected block (idempotent)
+          grep -q 'Pods-Runner.release.xcconfig' "$XCCONFIG" || echo '#include "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$XCCONFIG"
           sed -i '' '/^\/\/ --- Signing injected by CI ---/,$d' "$XCCONFIG" || true
-
           {
             echo '// --- Signing injected by CI ---'
             echo "PRODUCT_BUNDLE_IDENTIFIER = ${BUNDLE_ID}"
@@ -198,17 +145,8 @@ jobs:
             echo "PROVISIONING_PROFILE_SPECIFIER = ${PROFILE_NAME}"
             echo "DEVELOPMENT_TEAM = ${TEAM_ID}"
           } >> "$XCCONFIG"
-
-          echo "==== Final Release.xcconfig ===="
-          cat "$XCCONFIG"
-
-          mkdir -p build-logs
-          cp "$XCCONFIG" build-logs/Release.xcconfig
-
-      - name: Verify Generated.xcconfig exists (pre-pod-install)
-        run: |
-          set -euxo pipefail
-          ls -l ios/Flutter/Generated.xcconfig
+          echo "==== Final Release.xcconfig ===="; cat "$XCCONFIG"
+          mkdir -p build-logs && cp "$XCCONFIG" build-logs/Release.xcconfig
 
       - name: Reset CocoaPods resolution (clean resolve)
         working-directory: ios
@@ -227,45 +165,64 @@ jobs:
         working-directory: ios
         run: |
           set -euxo pipefail
-
-          echo "=== List schemes in workspace ==="
-          xcodebuild -list -workspace Runner.xcworkspace || true
-
-          echo "=== Show available destinations for Runner ==="
+          echo "=== List schemes (workspace) ==="
+          xcodebuild -workspace Runner.xcworkspace -list || true
+          echo "=== Show destinations for Runner ==="
           xcodebuild -workspace Runner.xcworkspace -scheme Runner -showdestinations || true
-
-          echo "=== Write build settings (primary: workspace) ==="
-          xcodebuild \
-            -workspace Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -showBuildSettings \
-            > ../build-logs/xcodebuild_showBuildSettings.txt || true
-
-          # Fallback to project if workspace query failed to write anything
-          if [ ! -s ../build-logs/xcodebuild_showBuildSettings.txt ]; then
-            echo "Primary showBuildSettings produced no output; trying project as fallback..."
-            xcodebuild \
-              -project Runner.xcodeproj \
-              -scheme Runner \
-              -configuration Release \
-              -destination 'generic/platform=iOS' \
-              -showBuildSettings \
-              > ../build-logs/xcodebuild_showBuildSettings.txt || true
-          fi
-
+          echo "=== Write build settings (workspace) ==="
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -destination 'generic/platform=iOS' -showBuildSettings > ../build-logs/xcodebuild_showBuildSettings.txt || true
           echo "Wrote: ../build-logs/xcodebuild_showBuildSettings.txt (size: $(wc -c < ../build-logs/xcodebuild_showBuildSettings.txt) bytes)"
-      
+
+      # Create ExportOptions to force app-store, manual signing, and your profile mapping
+      - name: Write ExportOptions.plist for app-store export
+        working-directory: ios
+        env:
+          PROFILE_NAME: ${{ env.PROFILE_NAME }}
+          BUNDLE_ID: ${{ env.BUNDLE_ID }}
+        run: |
+          set -euxo pipefail
+          cat > ExportOptions.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>compileBitcode</key><false/>
+            <key>destination</key><string>export</string>
+            <key>method</key><string>app-store</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>uploadSymbols</key><true/>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+          </dict>
+          </plist>
+          PLIST
+          echo "==== ExportOptions.plist ===="
+          cat ExportOptions.plist
+
       - name: Build IPA (Release, verbose)
         run: |
           set -euxo pipefail
-          flutter build ipa --release --verbose
+          # Tell Flutter to use our ExportOptions.plist so it doesn't try to infer dev signing
+          flutter build ipa --release --export-options-plist=ios/ExportOptions.plist --verbose || BUILD_FAILED=1
+
+          # Capture xcresult issues if Flutter/Xcode failed
+          mkdir -p build-logs
+          RESULT=$(ls -t ~/Library/Developer/Xcode/DerivedData/*/Logs/Build/*.xcresult 2>/dev/null | head -n 1 || true)
+          if [ -n "${RESULT:-}" ]; then
+            echo "Found xcresult: $RESULT"
+            /usr/bin/xcresulttool get --format json --path "$RESULT" > build-logs/archive_result.json || true
+          fi
+
           ls -l build/ios/ipa || true
           if ls build/ios/archive/*.xcarchive 1>/dev/null 2>&1; then
-            echo "Found xcarchive(s):"
-            ls -l build/ios/archive
+            echo "Found xcarchive(s):"; ls -l build/ios/archive
           fi
+
+          test -z "${BUILD_FAILED:-}" || exit 1
 
       - name: Prepare App Store Connect API key
         working-directory: ios
@@ -316,6 +273,7 @@ jobs:
           name: ios-troubleshooting-bundle
           path: |
             build-logs/**
+            ios/ExportOptions.plist
             ios/Runner.xcodeproj/project.pbxproj
             ios/Runner.xcworkspace/contents.xcworkspacedata
             ios/Podfile
