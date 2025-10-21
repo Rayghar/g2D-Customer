@@ -1,7 +1,4 @@
 // File: lib/providers/theme_provider.dart
-// ADVISORY: This is the final version. All original functions and getters are retained.
-// Color definitions have been updated and new getters have been added as requested.
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
@@ -234,7 +231,8 @@ class ThemeProvider with ChangeNotifier {
         foregroundColor: linkColor,
         textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
       )),
-      cardTheme: CardTheme(
+      // CHANGED: CardTheme -> CardThemeData
+      cardTheme: CardThemeData(
         elevation: 3.0,
         shadowColor: _cardShadowColorGlobalLight,
         shape: RoundedRectangleBorder(borderRadius: cardBorderRadius),
@@ -321,7 +319,8 @@ class ThemeProvider with ChangeNotifier {
         foregroundColor: linkColor,
         textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
       )),
-      cardTheme: CardTheme(
+      // CHANGED: CardTheme -> CardThemeData
+      cardTheme: CardThemeData(
         elevation: 3.0,
         shadowColor: _cardShadowColorGlobalDark,
         shape: RoundedRectangleBorder(borderRadius: cardBorderRadius),
