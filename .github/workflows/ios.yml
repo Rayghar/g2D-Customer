@@ -264,13 +264,19 @@ jobs:
       - name: Locate artifacts (IPA and/or .xcarchive)
         run: |
           set -euxo pipefail
-          IPA_PATH="$(find build/ios/ipa -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
-          ARCHIVE_PATH="$(find build/ios/archive -maxdepth 1 -type d -name '*.xcarchive' -print -quit 2>/dev/null || true)"
-          echo "Resolved IPA_PATH=${IPA_PATH:-<none>}"
-          echo "Resolved ARCHIVE_PATH=${ARCHIVE_PATH:-<none>}"
-          if [ -n "${IPA_PATH:-}" ]; then echo "IPA_PATH=$IPA_PATH" >> "$GITHUB_ENV"; fi
-          if [ -n "${ARCHIVE_PATH:-}" ]; then echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"; fi
+          IPA_REL="$(find build/ios/ipa -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
+          ARCHIVE_REL="$(find build/ios/archive -maxdepth 1 -type d -name '*.xcarchive' -print -quit 2>/dev/null || true)"
 
+          echo "Resolved IPA_REL=${IPA_REL:-<none>}"
+          echo "Resolved ARCHIVE_REL=${ARCHIVE_REL:-<none>}"
+
+          # Export ABSOLUTE paths so later steps (running from ios/) can read them reliably
+          if [ -n "${IPA_REL:-}" ]; then
+            echo "IPA_PATH=$GITHUB_WORKSPACE/$IPA_REL" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${ARCHIVE_REL:-}" ]; then
+            echo "ARCHIVE_PATH=$GITHUB_WORKSPACE/$ARCHIVE_REL" >> "$GITHUB_ENV"
+          fi
       # UPDATED: Fallback export — also verify archive is signed
       - name: Fallback export if IPA missing
         run: |
@@ -325,20 +331,29 @@ jobs:
           JSON
           echo "Wrote fastlane/api_key.json (redacted)"
 
-      # UPDATED: Robust upload — search both locations and require IPA
       - name: Upload to TestFlight (fastlane pilot, verbose)
         working-directory: ios
         run: |
           set -euxo pipefail
+          echo "PWD=$(pwd)"
+
+          # Prefer absolute path exported earlier
           IPA="${IPA_PATH:-}"
+
+          # If not provided (or empty), search in parent (repo root) build dirs, then normalize to absolute
           if [ -z "${IPA:-}" ]; then
-            IPA="$(find ../build/ios/ipa ../build/ios/export -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
+            CANDIDATE="$(find ../build/ios/ipa ../build/ios/export -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
+            if [ -n "${CANDIDATE:-}" ]; then
+              IPA="$(cd "$(dirname "$CANDIDATE")" && pwd)/$(basename "$CANDIDATE")"
+            fi
           fi
+
           if [ -z "${IPA:-}" ] || [ ! -f "$IPA" ]; then
-            echo "ERROR: No IPA found to upload."
-            find ../build -type f -name '*.ipa' || true
+            echo "ERROR: No IPA found to upload (checked absolute path)."
+            find .. -type f -name '*.ipa' || true
             exit 1
           fi
+
           echo "Uploading IPA: $IPA"
           fastlane pilot upload \
             --api_key_path fastlane/api_key.json \
