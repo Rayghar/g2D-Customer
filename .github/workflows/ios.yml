@@ -246,19 +246,44 @@ jobs:
             echo "Found xcarchive(s):"; ls -l build/ios/archive
           fi
 
+          # Export archive path for a fallback export step
+          ARCHIVE_PATH="$(ls -t build/ios/archive/*.xcarchive 2>/dev/null | head -n 1 || true)"
+          if [ -n "${ARCHIVE_PATH:-}" ]; then
+            echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
+          fi
+
           test -z "${BUILD_FAILED:-}" || exit 1
 
-      # NEW: Locate IPA and export absolute path for later steps
+      # NEW: Fallback — if Flutter didn't place an IPA, export it from the .xcarchive
+      - name: Export IPA from .xcarchive (fallback)
+        if: always()
+        run: |
+          set -euxo pipefail
+          if ls build/ios/ipa/*.ipa 1>/dev/null 2>&1; then
+            echo "IPA already present in build/ios/ipa — fallback export not needed."
+            exit 0
+          fi
+          : "${ARCHIVE_PATH:?No ARCHIVE_PATH available for export}"
+          mkdir -p build/ios/export
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -exportPath build/ios/export
+          echo "Fallback export directory contents:"
+          ls -l build/ios/export || true
+
+      # UPDATED: Locate IPA in either default or fallback export folder
       - name: Locate IPA (absolute path)
         run: |
           set -euxo pipefail
           echo "Searching for IPA under $GITHUB_WORKSPACE/build ..."
-          IPA_PATH="$(find "$GITHUB_WORKSPACE/build/ios/ipa" -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
+          IPA_PATH="$( (ls -1 build/ios/ipa/*.ipa 2>/dev/null || true; ls -1 build/ios/export/*.ipa 2>/dev/null || true) | head -n 1 )"
           if [ -z "${IPA_PATH:-}" ] || [ ! -f "$IPA_PATH" ]; then
-            echo "ERROR: No IPA found under ./build/ios/ipa"
+            echo "ERROR: No IPA found under ./build/ios/{ipa,export}"
             find "$GITHUB_WORKSPACE/build" -type f -name '*.ipa' || true
             exit 1
           fi
+          IPA_PATH="$GITHUB_WORKSPACE/${IPA_PATH#./}"
           echo "Found IPA at: $IPA_PATH"
           echo "IPA_PATH=$IPA_PATH" >> "$GITHUB_ENV"
 
