@@ -271,7 +271,7 @@ jobs:
         working-directory: ios
         run: |
           set -euxo pipefail
-          IPA="../build/ios/ipa/Runner.ipa"
+          IPA="$(ls -1 ../build/ios/ipa/*.ipa | head -n 1)"
           if [ ! -f "$IPA" ]; then
             echo "ERROR: IPA not found at $IPA"
             exit 1
