@@ -119,6 +119,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
           security find-identity -v -p codesigning build.keychain || true
 
+      # === UPDATED: install profile under UUID filename ===
       - name: Decode & parse provisioning profile
         shell: bash
         env:
@@ -127,22 +128,30 @@ jobs:
           set -euxo pipefail
           PP_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
           mkdir -p "$PP_DIR"
-          if printf '%s' "$MOBILEPROVISION_BASE64" | base64 -D > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then :
-          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 --decode > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then :
-          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 -d > "$PP_DIR/profile.mobileprovision" 2>/dev/null; then :
+
+          TMP_PP="/tmp/profile.mobileprovision"
+          if printf '%s' "$MOBILEPROVISION_BASE64" | base64 -D > "$TMP_PP" 2>/dev/null; then :
+          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 --decode > "$TMP_PP" 2>/dev/null; then :
+          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 -d > "$TMP_PP" 2>/dev/null; then :
           else
             echo "Failed to base64-decode MOBILEPROVISION_BASE64" >&2; exit 1
           fi
-          security cms -D -i "$PP_DIR/profile.mobileprovision" -o /tmp/profile.plist
+
+          security cms -D -i "$TMP_PP" -o /tmp/profile.plist
           /usr/bin/plutil -lint /tmp/profile.plist
           NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' /tmp/profile.plist)
           UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profile.plist)
           APPID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' /tmp/profile.plist || true)
           : "${NAME:?Provisioning profile Name missing}"
           : "${UUID:?Provisioning profile UUID missing}"
+
+          # Install in the canonical UUID-named location
+          INSTALL_PP="$PP_DIR/${UUID}.mobileprovision"
+          cp "$TMP_PP" "$INSTALL_PP"
+
           echo "PROFILE_NAME=$NAME" >> $GITHUB_ENV
           echo "PROFILE_UUID=$UUID" >> $GITHUB_ENV
-          echo "Resolved profile: $NAME ($UUID)"
+          echo "Installed profile: $NAME ($UUID) at $INSTALL_PP"
           echo "App Identifier in profile: ${APPID:-unknown}"
           mkdir -p build-logs && cp /tmp/profile.plist build-logs/profile.plist
 
@@ -193,14 +202,16 @@ jobs:
           xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -destination 'generic/platform=iOS' -showBuildSettings > ../build-logs/xcodebuild_showBuildSettings.txt || true
           echo "Wrote: ../build-logs/xcodebuild_showBuildSettings.txt (size: $(wc -c < ../build-logs/xcodebuild_showBuildSettings.txt) bytes)"
 
+      # === UPDATED: add teamID in ExportOptions ===
       - name: Write ExportOptions.plist for app-store export
         working-directory: ios
         env:
           PROFILE_NAME: ${{ env.PROFILE_NAME }}
           BUNDLE_ID: ${{ env.BUNDLE_ID }}
+          TEAM_ID: ${{ env.TEAM_ID }}
         run: |
           set -euxo pipefail
-          cat > ExportOptions.plist <<'PLIST'
+          cat > ExportOptions.plist <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -209,6 +220,7 @@ jobs:
             <key>destination</key><string>export</string>
             <key>method</key><string>app-store</string>
             <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
             <key>uploadSymbols</key><true/>
             <key>provisioningProfiles</key>
             <dict>
@@ -227,7 +239,6 @@ jobs:
           set -euxo pipefail
           flutter build ipa --release --export-options-plist=ios/ExportOptions.plist --verbose || BUILD_FAILED=1
 
-          # Grab latest xcresult to help debugging
           mkdir -p build-logs
           RESULT=$(ls -t ~/Library/Developer/Xcode/DerivedData/*/Logs/Build/*.xcresult 2>/dev/null | head -n 1 || true)
           if [ -n "${RESULT:-}" ]; then
@@ -235,7 +246,6 @@ jobs:
             /usr/bin/xcresulttool get --format json --path "$RESULT" > build-logs/archive_result.json || true
           fi
 
-          # Surface archives
           ls -l build/ios/ipa || true
           if ls build/ios/archive/*.xcarchive 1>/dev/null 2>&1; then
             echo "Found xcarchive(s):"; ls -l build/ios/archive
@@ -243,20 +253,25 @@ jobs:
 
           test -z "${BUILD_FAILED:-}" || exit 1
 
+      - name: Diagnose effective build settings (Release)
+        working-directory: ios
+        run: |
+          set -euxo pipefail
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -showBuildSettings | tee ../build-logs/xcodebuild_effective_settings.txt
+          grep -E 'PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER' ../build-logs/xcodebuild_effective_settings.txt || true
+
       # NEW: Resolve paths deterministically (no xcresult scraping)
       - name: Locate artifacts (IPA and/or .xcarchive)
         run: |
           set -euxo pipefail
-          # Prefer IPA produced by Flutter
           IPA_PATH="$(find build/ios/ipa -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
-          # Also capture the archive for fallback export
           ARCHIVE_PATH="$(find build/ios/archive -maxdepth 1 -type d -name '*.xcarchive' -print -quit 2>/dev/null || true)"
           echo "Resolved IPA_PATH=${IPA_PATH:-<none>}"
           echo "Resolved ARCHIVE_PATH=${ARCHIVE_PATH:-<none>}"
           if [ -n "${IPA_PATH:-}" ]; then echo "IPA_PATH=$IPA_PATH" >> "$GITHUB_ENV"; fi
           if [ -n "${ARCHIVE_PATH:-}" ]; then echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"; fi
 
-      # UPDATED: Safe fallback export ONLY if IPA missing AND archive exists
+      # UPDATED: Fallback export — also verify archive is signed
       - name: Fallback export if IPA missing
         run: |
           set -euxo pipefail
@@ -264,15 +279,28 @@ jobs:
             echo "IPA already present in build/ios/ipa — fallback export not needed."
             exit 0
           fi
+
           : "${ARCHIVE_PATH:?No ARCHIVE_PATH available for export}"
+
+          APP_PATH="${ARCHIVE_PATH}/Products/Applications/Runner.app"
+          if [ ! -f "${APP_PATH}/embedded.mobileprovision" ]; then
+            echo "ERROR: Archive missing embedded.mobileprovision — not signed during archive."
+            echo "       Ensure Release.xcconfig injection ran BEFORE archive and sets:"
+            echo "       PROVISIONING_PROFILE_SPECIFIER=${PROFILE_NAME}"
+            echo "       CODE_SIGN_IDENTITY=Apple Distribution"
+            echo "       DEVELOPMENT_TEAM=${TEAM_ID}"
+            exit 1
+          fi
+
           mkdir -p build/ios/export
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportOptionsPlist ios/ExportOptions.plist \
             -exportPath build/ios/export
+
           echo "Fallback export directory contents:"
           ls -l build/ios/export || true
-          # If export produced IPA, publish its path for later
+
           IPA_FALLBACK="$(find build/ios/export -maxdepth 1 -type f -name '*.ipa' -print -quit || true)"
           if [ -n "${IPA_FALLBACK:-}" ]; then
             echo "IPA_PATH=$IPA_FALLBACK" >> "$GITHUB_ENV"
@@ -302,7 +330,6 @@ jobs:
         working-directory: ios
         run: |
           set -euxo pipefail
-          # Prefer env var (set by prior steps), else search standard locations
           IPA="${IPA_PATH:-}"
           if [ -z "${IPA:-}" ]; then
             IPA="$(find ../build/ios/ipa ../build/ios/export -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
