@@ -248,6 +248,20 @@ jobs:
 
           test -z "${BUILD_FAILED:-}" || exit 1
 
+      # NEW: Locate IPA and export absolute path for later steps
+      - name: Locate IPA (absolute path)
+        run: |
+          set -euxo pipefail
+          echo "Searching for IPA under $GITHUB_WORKSPACE/build ..."
+          IPA_PATH="$(find "$GITHUB_WORKSPACE/build/ios/ipa" -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
+          if [ -z "${IPA_PATH:-}" ] || [ ! -f "$IPA_PATH" ]; then
+            echo "ERROR: No IPA found under ./build/ios/ipa"
+            find "$GITHUB_WORKSPACE/build" -type f -name '*.ipa' || true
+            exit 1
+          fi
+          echo "Found IPA at: $IPA_PATH"
+          echo "IPA_PATH=$IPA_PATH" >> "$GITHUB_ENV"
+
       - name: Prepare App Store Connect API key
         working-directory: ios
         env:
@@ -271,14 +285,11 @@ jobs:
         working-directory: ios
         run: |
           set -euxo pipefail
-          IPA="$(ls -1 ../build/ios/ipa/*.ipa | head -n 1)"
-          if [ ! -f "$IPA" ]; then
-            echo "ERROR: IPA not found at $IPA"
-            exit 1
-          fi
+          : "${IPA_PATH:?IPA_PATH not set}"
+          test -f "$IPA_PATH" || { echo "ERROR: IPA does not exist at $IPA_PATH"; exit 1; }
           fastlane pilot upload \
             --api_key_path fastlane/api_key.json \
-            --ipa "$IPA" \
+            --ipa "$IPA_PATH" \
             --verbose \
             --skip_waiting_for_build_processing false
 
@@ -287,7 +298,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ios-ipa
-          path: build/ios/ipa/*.ipa
+          path: ${{ env.IPA_PATH }}
           if-no-files-found: warn
 
       - name: Upload troubleshooting bundle (always)
