@@ -45,5 +45,15 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>This app uses the camera to scan cards/QRs or capture photos needed for orders and support.</string>
+
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We use your location to show you on the map, find nearby stations, and estimate delivery times.</string>
+
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Allowing background location helps us update delivery status and ETA even if the app is not in the foreground.</string
+
+	
 </dict>
 </plist>
