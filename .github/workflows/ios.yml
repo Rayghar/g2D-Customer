@@ -234,32 +234,10 @@ jobs:
           echo "==== ExportOptions.plist ===="
           cat ExportOptions.plist
 
-      # >>> ADDED: compute app version/build for Option A
-      - name: Compute app version/build (CI)
-        run: |
-          set -euxo pipefail
-          # Try to read marketing version from pubspec.yaml (e.g. "version: 1.2.3+45")
-          VLINE="$(grep -E '^version:' pubspec.yaml | head -n1 | awk '{print $2}' || true)"
-          if [ -n "${VLINE:-}" ]; then
-            IOS_BUILD_NAME="${VLINE%%+*}"
-          else
-            IOS_BUILD_NAME="1.0.0"
-          fi
-          IOS_BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
-          echo "IOS_BUILD_NAME=$IOS_BUILD_NAME" >> $GITHUB_ENV
-          echo "IOS_BUILD_NUMBER=$IOS_BUILD_NUMBER" >> $GITHUB_ENV
-          echo "Resolved version: $IOS_BUILD_NAME ($IOS_BUILD_NUMBER)"
-      # <<< END ADDED
-
       - name: Build IPA (Release, verbose)
         run: |
           set -euxo pipefail
-          flutter build ipa \
-            --release \
-            --build-name="${IOS_BUILD_NAME}" \
-            --build-number="${IOS_BUILD_NUMBER}" \
-            --export-options-plist=ios/ExportOptions.plist \
-            --verbose || BUILD_FAILED=1
+          flutter build ipa --release --export-options-plist=ios/ExportOptions.plist --verbose || BUILD_FAILED=1
 
           mkdir -p build-logs
           RESULT=$(ls -t ~/Library/Developer/Xcode/DerivedData/*/Logs/Build/*.xcresult 2>/dev/null | head -n 1 || true)

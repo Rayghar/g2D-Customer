@@ -61,7 +61,7 @@ dev_dependencies:
 
 flutter_launcher_icons:
   ios: true
-  image_path_ios: assets/images/gas2door_logo1.png
+  image_path_ios: assets/gas2door_logo1.png
   
 
 flutter:
