@@ -73,6 +73,20 @@ jobs:
           flutter pub get
           test -f ios/Flutter/Generated.xcconfig || { echo "ERROR: ios/Flutter/Generated.xcconfig missing"; ls -la ios/Flutter || true; exit 1; }
 
+      # >>> NEW (Option A): auto-bump CFBundleVersion only; keeps marketing version as-is <<<
+      - name: Bump iOS build number (Option A)
+        run: |
+          set -euxo pipefail
+          PLIST="ios/Runner/Info.plist"
+          # Ensure marketing version exists (won't change it if already present)
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" >/dev/null 2>&1 || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.0" "$PLIST"
+          # Set build number to the run number
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "$PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${GITHUB_RUN_NUMBER}" "$PLIST"
+          echo "CFBundleShortVersionString=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+          echo "CFBundleVersion=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
+
       - name: Ensure CocoaPods toolchain
         run: |
           set -euxo pipefail
