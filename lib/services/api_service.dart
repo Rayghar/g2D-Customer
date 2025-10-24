@@ -3285,6 +3285,35 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> appleSignIn(String idToken) async {
+    // NOTE: This assumes your backend route is POST /api/v1/auth/apple/mobile-signin
+    final String apiUrl = '$baseUrl/auth/apple/mobile-signin';
+    print('[ApiService] Attempting Apple Sign-In with ID Token via $apiUrl');
+    // Don't log full ID token
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'idToken': idToken}),
+      );
+      final responseBody = jsonDecode(response.body);
+      print(
+          '[ApiService] appleSignIn Response Status: ${response.statusCode}, Body: $responseBody');
+      if (response.statusCode == 200) {
+        print('[ApiService] Apple Sign-In successful.');
+        return responseBody;
+      } else {
+        final errorMessage =
+            responseBody['error'] ?? 'Apple Sign-In failed on the server.';
+        print('[ApiService] Apple Sign-In failed. Error: $errorMessage');
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      print('[ApiService] Error during Apple Sign-In: ${e.toString()}');
+      rethrow;
+    }
+  }
+
   Future<ReferralModel> getReferralInformation(String customerId) async {
     final token = await _getToken();
     if (token == null) {

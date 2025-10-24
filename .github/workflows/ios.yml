@@ -3,7 +3,7 @@ name: Build & Upload iOS (Flutter) — VERBOSE
 on:
   workflow_dispatch:
   push:
-    branches: [ versionios3 ]
+    branches: [ versionios4 ]
 
 jobs:
   ios:

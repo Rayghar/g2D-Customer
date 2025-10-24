@@ -20,6 +20,7 @@ class User {
   final bool? hasUsedReferralBenefit; // Added for referral benefit application
   final List<String> fcmTokens; // Added for FCM device tokens
   final String? googleId; // Added for Google Sign-in ID
+  final String? appleId; // << NEW FIELD FOR APPLE SIGN IN >>
   final String? gatewayCustomerId; // Added for payment gateway customer ID
   final double? latitude; // Added for location (if stored with user)
   final double? longitude; // Added for location (if stored with user)
@@ -41,6 +42,7 @@ class User {
     this.hasUsedReferralBenefit, // Initialize here
     this.fcmTokens = const [], // Initialize with empty list
     this.googleId, // Initialize here
+    this.appleId, // << INITIALIZE NEW FIELD >>
     this.gatewayCustomerId, // Initialize here
     this.latitude, // Initialize here
     this.longitude, // Initialize here
@@ -70,6 +72,7 @@ class User {
               .toList() ??
           const [],
       googleId: json['googleId'] as String?, // Parse new field
+      appleId: json['appleId'] as String?, // << PARSE NEW FIELD >>
       gatewayCustomerId:
           json['gatewayCustomerId'] as String?, // Parse new field
       latitude: (json['latitude'] as num?)?.toDouble(), // Parse new field
@@ -99,6 +102,7 @@ class User {
     bool? hasUsedReferralBenefit, // Add to copyWith
     List<String>? fcmTokens, // Add to copyWith
     String? googleId, // Add to copyWith
+    String? appleId, // << ADD TO copyWith >>
     String? gatewayCustomerId, // Add to copyWith
     double? latitude, // Add to copyWith
     double? longitude, // Add to copyWith
@@ -125,6 +129,7 @@ class User {
           this.hasUsedReferralBenefit, // Copy new field
       fcmTokens: fcmTokens ?? this.fcmTokens, // Copy new field
       googleId: googleId ?? this.googleId, // Copy new field
+      appleId: appleId ?? this.appleId, // << COPY NEW FIELD >>
       gatewayCustomerId:
           gatewayCustomerId ?? this.gatewayCustomerId, // Copy new field
       latitude: latitude ?? this.latitude, // Copy new field
@@ -156,6 +161,8 @@ class User {
             hasUsedReferralBenefit, // Include new field in toJson
       'fcmTokens': fcmTokens, // Include new field in toJson
       if (googleId != null) 'googleId': googleId, // Include new field in toJson
+      if (appleId != null)
+        'appleId': appleId, // << INCLUDE NEW FIELD IN toJson >>
       if (gatewayCustomerId != null)
         'gatewayCustomerId': gatewayCustomerId, // Include new field in toJson
       if (latitude != null) 'latitude': latitude, // Include new field in toJson

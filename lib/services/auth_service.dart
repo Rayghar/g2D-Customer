@@ -240,6 +240,16 @@ class AuthService {
     }
   }
 
+  Future<LoginSuccessData> signInWithApple(String idToken) async {
+    try {
+      final responseData = await _apiService.appleSignIn(idToken);
+      // The backend returns a standard login response after verifying the token
+      return await _handleLoginResponse(responseData, 'customer');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<app_user.User?> getCurrentUserProfile() async {
     final token = await getToken();
     if (token == null) {

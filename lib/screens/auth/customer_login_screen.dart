@@ -1,6 +1,7 @@
 // File: lib/screens/auth/customer_login_screen.dart
 // ADVISORY: This version includes the requested layout refinements.
 
+import 'dart:io'; // NEW: Import to check the platform (iOS/Android).
 import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -9,7 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // ADDED
-
+import 'package:sign_in_with_apple/sign_in_with_apple.dart'; // NEW: Import for Apple Sign In.
 import 'complete_profile_screen.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/auth_service.dart';
@@ -36,6 +37,8 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _isAppleSignInAvailable =
+      false; // NEW: State variable for Apple Sign In availability.
 
   final AuthService _authService = AuthService();
   final ApiService _apiService = ApiService(); // ADDED
@@ -44,6 +47,8 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
   @override
   void initState() {
     super.initState();
+
+    _checkAppleSignInAvailability(); // NEW: Check for Apple Sign In on start.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final arguments =
           ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
@@ -58,6 +63,19 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkAppleSignInAvailability() async {
+    // We only check on iOS. Platform.isAndroid will be false.
+    if (Platform.isIOS) {
+      final isAvailable = await SignInWithApple.isAvailable();
+      if (mounted) {
+        // Good practice to check 'mounted' in async calls
+        setState(() {
+          _isAppleSignInAvailable = isAvailable;
+        });
+      }
+    }
   }
 
   void _showFeedbackSnackbar(String message, {bool isError = false}) {
@@ -162,6 +180,59 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
       if (mounted) {
         _showFeedbackSnackbar(e.toString().replaceFirst("Exception: ", ""),
             isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _handleAppleSignIn() async {
+    setState(() => _isLoading = true);
+    try {
+      // 1. Request credentials from Apple's native UI
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+      );
+
+      // 2. Get the identity token to send to your backend
+      final String? idToken = credential.identityToken;
+      if (idToken == null) {
+        throw Exception("Could not retrieve Apple ID token.");
+      }
+
+      // 3. Call your existing auth service method with the token
+      final LoginSuccessData loginData =
+          await _authService.signInWithApple(idToken);
+      if (!mounted) return;
+
+      // 4. Register FCM token (same as other login methods)
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      if (fcmToken != null) {
+        try {
+          await _apiService.registerFcmToken(fcmToken);
+        } catch (e) {
+          print('Failed to register FCM token: $e');
+        }
+      }
+
+      // 5. Show success and navigate
+      _showFeedbackSnackbar(
+          'Apple Sign-In successful! Welcome, ${loginData.name}.');
+      Navigator.of(context).pushNamedAndRemoveUntil(
+          CustomerDashboardScreen.routeName, (route) => false);
+    } catch (e) {
+      if (mounted) {
+        // Don't show an error if the user simply cancelled the dialog.
+        if (e is SignInWithAppleAuthorizationException &&
+            e.code == AuthorizationErrorCode.canceled) {
+          // User cancelled, so we do nothing.
+        } else {
+          _showFeedbackSnackbar(e.toString().replaceFirst("Exception: ", ""),
+              isError: true);
+        }
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -507,6 +578,29 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                     height: 24),
                                 label: const Text('Sign In with Google'),
                               ),
+                              if (_isAppleSignInAvailable)
+                                const SizedBox(height: 16),
+                              if (_isAppleSignInAvailable)
+                                ElevatedButton.icon(
+                                  onPressed:
+                                      _isLoading ? null : _handleAppleSignIn,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor:
+                                        Colors.black, // Per Apple's guidelines
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 14),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
+                                    textStyle: GoogleFonts.inter(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                  icon: const Icon(Icons.apple,
+                                      color: Colors.white, size: 24),
+                                  label: const Text('Sign In with Apple'),
+                                ),
                             ],
                           ),
                         ),
