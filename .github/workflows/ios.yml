@@ -1,9 +1,9 @@
-name: Build & Upload iOS (Flutter) — VERBOSE
+name: Build iOS IPA (Flutter) — NO UPLOAD
 
 on:
   workflow_dispatch:
   push:
-    branches: [ versionios4 ]
+    branches: [ versionios4 ] # Adjust branch if needed
 
 jobs:
   ios:
@@ -73,8 +73,7 @@ jobs:
           flutter pub get
           test -f ios/Flutter/Generated.xcconfig || { echo "ERROR: ios/Flutter/Generated.xcconfig missing"; ls -la ios/Flutter || true; exit 1; }
 
-      # >>> NEW (Option A): auto-bump CFBundleVersion only; keeps marketing version as-is <<<
-      - name: Bump iOS build number (Option A)
+      - name: Bump iOS build number
         run: |
           set -euxo pipefail
           PLIST="ios/Runner/Info.plist"
@@ -111,12 +110,6 @@ jobs:
           if [ -s /tmp/p.pbxproj ]; then mv /tmp/p.pbxproj "$PBX"; fi
           grep -nE "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE" "$PBX" || true
 
-      - name: Install fastlane
-        run: |
-          set -euxo pipefail
-          gem install fastlane --no-document
-          fastlane --version
-
       - name: Import signing certificate (keychain)
         env:
           P12_BASE64: ${{ secrets.P12_BASE64 }}
@@ -133,7 +126,6 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
           security find-identity -v -p codesigning build.keychain || true
 
-      # === UPDATED: install profile under UUID filename ===
       - name: Decode & parse provisioning profile
         shell: bash
         env:
@@ -216,7 +208,6 @@ jobs:
           xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -destination 'generic/platform=iOS' -showBuildSettings > ../build-logs/xcodebuild_showBuildSettings.txt || true
           echo "Wrote: ../build-logs/xcodebuild_showBuildSettings.txt (size: $(wc -c < ../build-logs/xcodebuild_showBuildSettings.txt) bytes)"
 
-      # === UPDATED: add teamID in ExportOptions ===
       - name: Write ExportOptions.plist for app-store export
         working-directory: ios
         env:
@@ -274,7 +265,6 @@ jobs:
           xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -showBuildSettings | tee ../build-logs/xcodebuild_effective_settings.txt
           grep -E 'PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER' ../build-logs/xcodebuild_effective_settings.txt || true
 
-      # NEW: Resolve paths deterministically (no xcresult scraping)
       - name: Locate artifacts (IPA and/or .xcarchive)
         run: |
           set -euxo pipefail
@@ -291,7 +281,7 @@ jobs:
           if [ -n "${ARCHIVE_REL:-}" ]; then
             echo "ARCHIVE_PATH=$GITHUB_WORKSPACE/$ARCHIVE_REL" >> "$GITHUB_ENV"
           fi
-      # UPDATED: Fallback export — also verify archive is signed
+
       - name: Fallback export if IPA missing
         run: |
           set -euxo pipefail
@@ -326,54 +316,50 @@ jobs:
             echo "IPA_PATH=$IPA_FALLBACK" >> "$GITHUB_ENV"
           fi
 
-      - name: Prepare App Store Connect API key
-        working-directory: ios
-        env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
-        run: |
-          set -euxo pipefail
-          mkdir -p fastlane
-          echo "$ASC_API_KEY_P8_BASE64" | base64 --decode > fastlane/AuthKey_${ASC_API_KEY_ID}.p8
-          cat > fastlane/api_key.json <<JSON
-          {
-            "key_id": "${ASC_API_KEY_ID}",
-            "issuer_id": "${ASC_API_ISSUER_ID}",
-            "key": "$(awk '{printf "%s\\n", $0}' fastlane/AuthKey_${ASC_API_KEY_ID}.p8)"
-          }
-          JSON
-          echo "Wrote fastlane/api_key.json (redacted)"
+      # --- UPLOAD STEP REMOVED ---
+      # - name: Prepare App Store Connect API key
+      #   working-directory: ios
+      #   env:
+      #     ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+      #     ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+      #     ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+      #   run: |
+      #     set -euxo pipefail
+      #     mkdir -p fastlane
+      #     echo "$ASC_API_KEY_P8_BASE64" | base64 --decode > fastlane/AuthKey_${ASC_API_KEY_ID}.p8
+      #     cat > fastlane/api_key.json <<JSON
+      #     {
+      #       "key_id": "${ASC_API_KEY_ID}",
+      #       "issuer_id": "${ASC_API_ISSUER_ID}",
+      #       "key": "$(awk '{printf "%s\\n", $0}' fastlane/AuthKey_${ASC_API_KEY_ID}.p8)"
+      #     }
+      #     JSON
+      #     echo "Wrote fastlane/api_key.json (redacted)"
 
-      - name: Upload to TestFlight (fastlane pilot, verbose)
-        working-directory: ios
-        run: |
-          set -euxo pipefail
-          echo "PWD=$(pwd)"
-
-          # Prefer absolute path exported earlier
-          IPA="${IPA_PATH:-}"
-
-          # If not provided (or empty), search in parent (repo root) build dirs, then normalize to absolute
-          if [ -z "${IPA:-}" ]; then
-            CANDIDATE="$(find ../build/ios/ipa ../build/ios/export -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
-            if [ -n "${CANDIDATE:-}" ]; then
-              IPA="$(cd "$(dirname "$CANDIDATE")" && pwd)/$(basename "$CANDIDATE")"
-            fi
-          fi
-
-          if [ -z "${IPA:-}" ] || [ ! -f "$IPA" ]; then
-            echo "ERROR: No IPA found to upload (checked absolute path)."
-            find .. -type f -name '*.ipa' || true
-            exit 1
-          fi
-
-          echo "Uploading IPA: $IPA"
-          fastlane pilot upload \
-            --api_key_path fastlane/api_key.json \
-            --ipa "$IPA" \
-            --verbose \
-            --skip_waiting_for_build_processing false
+      # - name: Upload to TestFlight (fastlane pilot, verbose)
+      #   working-directory: ios
+      #   run: |
+      #     set -euxo pipefail
+      #     echo "PWD=$(pwd)"
+      #     IPA="${IPA_PATH:-}"
+      #     if [ -z "${IPA:-}" ]; then
+      #       CANDIDATE="$(find ../build/ios/ipa ../build/ios/export -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
+      #       if [ -n "${CANDIDATE:-}" ]; then
+      #         IPA="$(cd "$(dirname "$CANDIDATE")" && pwd)/$(basename "$CANDIDATE")"
+      #       fi
+      #     fi
+      #     if [ -z "${IPA:-}" ] || [ ! -f "$IPA" ]; then
+      #       echo "ERROR: No IPA found to upload (checked absolute path)."
+      #       find .. -type f -name '*.ipa' || true
+      #       exit 1
+      #     fi
+      #     echo "Uploading IPA: $IPA"
+      #     fastlane pilot upload \
+      #       --api_key_path fastlane/api_key.json \
+      #       --ipa "$IPA" \
+      #       --verbose \
+      #       --skip_waiting_for_build_processing false
+      # --- END OF REMOVED UPLOAD STEP ---
 
       - name: Save IPA artifact
         if: always()
