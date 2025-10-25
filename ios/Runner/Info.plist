@@ -54,6 +54,11 @@
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Allowing background location helps us update delivery status and ETA even if the app is not in the foreground.</string>
 
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 	
 </dict>
 </plist>

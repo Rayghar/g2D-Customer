@@ -114,13 +114,14 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
       _socketService.connect();
 
       // 4. Register FCM token for push notifications.
-      final fcmToken = await FirebaseMessaging.instance.getToken();
-      if (fcmToken != null) {
-        try {
+      try {
+        final fcmToken = await FirebaseMessaging.instance.getToken();
+        if (fcmToken != null) {
           await _apiService.registerFcmToken(fcmToken);
-        } catch (e) {
-          print('Failed to register FCM token: $e');
         }
+      } catch (e) {
+        print(
+            'Failed to register FCM token (this is expected on a simulator): $e');
       }
 
       if (!mounted) return;
@@ -162,15 +163,19 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
           await _authService.signInWithGoogle(idToken);
       if (!mounted) return;
 
-      // Get and Register the Device Token
-      final fcmToken = await FirebaseMessaging.instance.getToken();
-      if (fcmToken != null) {
-        try {
+      // --- UPDATED FCM TOKEN REGISTRATION ---
+      // We wrap this in its own try/catch block because it WILL fail
+      // on a simulator, and we don't want that to stop the login flow.
+      try {
+        final fcmToken = await FirebaseMessaging.instance.getToken();
+        if (fcmToken != null) {
           await _apiService.registerFcmToken(fcmToken);
-        } catch (e) {
-          print('Failed to register FCM token: $e');
         }
+      } catch (e) {
+        print(
+            'Failed to register FCM token (this is expected on a simulator): $e');
       }
+      // --- END OF UPDATE ---
 
       _showFeedbackSnackbar(
           'Google Sign-In successful! Welcome, ${loginData.name}.');
@@ -208,15 +213,19 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
           await _authService.signInWithApple(idToken);
       if (!mounted) return;
 
-      // 4. Register FCM token (same as other login methods)
-      final fcmToken = await FirebaseMessaging.instance.getToken();
-      if (fcmToken != null) {
-        try {
+      // --- UPDATED FCM TOKEN REGISTRATION ---
+      // We wrap this in its own try/catch block because it WILL fail
+      // on a simulator, and we don't want that to stop the login flow.
+      try {
+        final fcmToken = await FirebaseMessaging.instance.getToken();
+        if (fcmToken != null) {
           await _apiService.registerFcmToken(fcmToken);
-        } catch (e) {
-          print('Failed to register FCM token: $e');
         }
+      } catch (e) {
+        print(
+            'Failed to register FCM token (this is expected on a simulator): $e');
       }
+      // --- END OF UPDATE ---
 
       // 5. Show success and navigate
       _showFeedbackSnackbar(
