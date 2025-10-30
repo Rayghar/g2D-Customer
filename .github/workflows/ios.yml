@@ -326,55 +326,6 @@ jobs:
             echo "IPA_PATH=$IPA_FALLBACK" >> "$GITHUB_ENV"
           fi
 
-      - name: Prepare App Store Connect API key
-        working-directory: ios
-        env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
-        run: |
-          set -euxo pipefail
-          mkdir -p fastlane
-          echo "$ASC_API_KEY_P8_BASE64" | base64 --decode > fastlane/AuthKey_${ASC_API_KEY_ID}.p8
-          cat > fastlane/api_key.json <<JSON
-          {
-            "key_id": "${ASC_API_KEY_ID}",
-            "issuer_id": "${ASC_API_ISSUER_ID}",
-            "key": "$(awk '{printf "%s\\n", $0}' fastlane/AuthKey_${ASC_API_KEY_ID}.p8)"
-          }
-          JSON
-          echo "Wrote fastlane/api_key.json (redacted)"
-
-      - name: Upload to TestFlight (fastlane pilot, verbose)
-        working-directory: ios
-        run: |
-          set -euxo pipefail
-          echo "PWD=$(pwd)"
-
-          # Prefer absolute path exported earlier
-          IPA="${IPA_PATH:-}"
-
-          # If not provided (or empty), search in parent (repo root) build dirs, then normalize to absolute
-          if [ -z "${IPA:-}" ]; then
-            CANDIDATE="$(find ../build/ios/ipa ../build/ios/export -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
-            if [ -n "${CANDIDATE:-}" ]; then
-              IPA="$(cd "$(dirname "$CANDIDATE")" && pwd)/$(basename "$CANDIDATE")"
-            fi
-          fi
-
-          if [ -z "${IPA:-}" ] || [ ! -f "$IPA" ]; then
-            echo "ERROR: No IPA found to upload (checked absolute path)."
-            find .. -type f -name '*.ipa' || true
-            exit 1
-          fi
-
-          echo "Uploading IPA: $IPA"
-          fastlane pilot upload \
-            --api_key_path fastlane/api_key.json \
-            --ipa "$IPA" \
-            --verbose \
-            --skip_waiting_for_build_processing false
-
       - name: Save IPA artifact
         if: always()
         uses: actions/upload-artifact@v4

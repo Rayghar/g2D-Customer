@@ -26,7 +26,7 @@ class NotificationModel {
         id: json['id'] as String? ?? '',
         title: json['title'] as String? ?? 'Notification',
         body: json['body'] as String? ?? '',
-        timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+        timestamp: DateTime.tryParse(json['createdAt'] as String? ?? '') ??
             DateTime.now(),
         type: json['type'] as String? ?? 'SYSTEM_ALERT',
         data: json['data'] != null
