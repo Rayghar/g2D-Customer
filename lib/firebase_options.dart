@@ -52,21 +52,21 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyBPV-KhAIIegC-C9xNkviDbRL5mE8beAyI',
-    appId: '1:108927420628:android:e486ba39320fdb2b401341',
+    appId: '1:108927420628:android:73cdb1b30eb71cae401341',
     messagingSenderId: '108927420628',
     projectId: 'primejetmobile-83583',
     storageBucket: 'primejetmobile-83583.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCI7fjJItbWvh4PFWyTmiH0o_JrPFkvJME',
-    appId: '1:108927420628:ios:145c5136aca970c9401341',
+    apiKey: 'AIzaSyBRxSAownWAnqYbi7fP0_9j1nDZpj1T2jQ',
+    appId: '1:108927420628:ios:06c657be720eb4e6401341',
     messagingSenderId: '108927420628',
     projectId: 'primejetmobile-83583',
     storageBucket: 'primejetmobile-83583.firebasestorage.app',
-    androidClientId: '108927420628-6g6ikd329uatfbnrbde5bhvrhhp6t8oq.apps.googleusercontent.com',
-    iosClientId: '108927420628-0tpfap0aei70115vkqhvii7soqfn1j35.apps.googleusercontent.com',
-    iosBundleId: 'com.example.primejetMobile',
+    androidClientId: '108927420628-2hemvgijddhq25hg9b8cbb056skaqtk6.apps.googleusercontent.com',
+    iosClientId: '108927420628-hv12p7gjoqu086gc66lgtnak1anfdg52.apps.googleusercontent.com',
+    iosBundleId: 'com.primejet.gas2door',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(

@@ -3,6 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert'; // For jsonDecode and jsonEncode
+import 'dart:async';
+import 'package:crypto/crypto.dart'; // >>> ADDED (Apple)
+import 'package:flutter/foundation.dart';
 
 import '../services/api_service.dart'; // Assuming ApiService exists for login calls
 import '../models/user.dart'; // Assuming User model exists to store user details
