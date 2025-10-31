@@ -64,7 +64,7 @@
 
 	<!-- 1) Google Sign-In iOS client id (EXACTLY the CLIENT_ID in GoogleService-Info.plist) -->
 	<key>GIDClientID</key>
-	<string>108927420628-hv1zp7gjoqu086gc66lqtnak1anfdg52.apps.googleusercontent.com</string>
+	<string>108927420628-hv12p7gjoqu086gc66lgtnak1anfdg52.apps.googleusercontent.com</string>
 
 	<!-- ✅ Google Sign-In URL Scheme (REQUIRED on iOS)
 	     Replace the placeholder below with the REVERSED_CLIENT_ID from your Firebase iOS app. -->
