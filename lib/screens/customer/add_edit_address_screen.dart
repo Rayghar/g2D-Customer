@@ -63,13 +63,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
   final ApiService _apiService = ApiService();
   String? _googleApiKey;
 
-  // === NEW: Focus nodes (wrapped via Focus widgets, no CustomInput API change) ===
-  final FocusNode _aptFocus = FocusNode();
-  final FocusNode _cityFocus = FocusNode();
-  final FocusNode _stateFocus = FocusNode();
-  final FocusNode _postalFocus = FocusNode();
-  final FocusNode _countryFocus = FocusNode();
-
   @override
   void initState() {
     super.initState();
@@ -116,14 +109,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
     _postalCodeController.dispose();
     _countryController.dispose();
     _deliveryInstructionsController.dispose();
-
-    // NEW: dispose focus nodes
-    _aptFocus.dispose();
-    _cityFocus.dispose();
-    _stateFocus.dispose();
-    _postalFocus.dispose();
-    _countryFocus.dispose();
-
     super.dispose();
   }
 
@@ -171,8 +156,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
       String postalCode = _safeGetComponent(components, ["postal_code"]);
 
       setState(() {
-        // Keep your original behavior of filling parsed street;
-        // the itemClick re-asserts user-visible text if plugin clears it.
         _streetController.text = '$streetNumber $route'.trim();
         _cityController.text = city;
         _stateController.text = state;
@@ -378,45 +361,20 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
                     borderSide: BorderSide(
                         color: themeProvider.gas2doorPrimaryBlue, width: 2)),
               ),
-              itemClick: (Prediction prediction) async {
-                // SAFE handoff: capture -> set -> await -> re-assert -> move focus next frame
-                final selected = prediction.description ?? '';
-
-                // 1) show selection immediately
-                _streetController.text = selected;
+              itemClick: (Prediction prediction) {
+                _streetController.text = prediction.description ?? '';
                 _streetController.selection = TextSelection.fromPosition(
-                  TextPosition(offset: selected.length),
-                );
-
-                // 2) fill other fields (city/state/coords)
-                await _populateAddressFields(prediction);
-
-                // 3) guard against plugin clearing text
-                if (_streetController.text.trim().isEmpty) {
-                  _streetController.text = selected;
-                  _streetController.selection = TextSelection.fromPosition(
-                    TextPosition(offset: selected.length),
-                  );
-                }
-
-                // 4) close current focus and advance to next field on the next frame (iOS-safe)
-                FocusScope.of(context).unfocus();
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  FocusScope.of(context).requestFocus(_aptFocus);
-                });
+                    TextPosition(offset: prediction.description?.length ?? 0));
+                _populateAddressFields(prediction);
               },
               textStyle: GoogleFonts.inter(color: themeProvider.primaryText),
               countries: const ["ng"],
             ),
             const SizedBox(height: 16),
-            // Wrap inputs with Focus to attach nodes without changing CustomInput API
-            Focus(
-              focusNode: _aptFocus,
-              child: CustomInput(
-                controller: _apartmentOrSuiteController,
-                labelText: 'Apt, Suite, etc. (Optional)',
-                prefixIcon: Icons.door_front_door_outlined,
-              ),
+            CustomInput(
+              controller: _apartmentOrSuiteController,
+              labelText: 'Apt, Suite, etc. (Optional)',
+              prefixIcon: Icons.door_front_door_outlined,
             ),
           ],
         ),
@@ -432,53 +390,33 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
           children: [
             Row(children: [
               Expanded(
-                child: Focus(
-                  focusNode: _cityFocus,
                   child: CustomInput(
-                    controller: _cityController,
-                    labelText: 'City*',
-                    validator: (v) => v!.isEmpty ? 'City required' : null,
-                    prefixIcon: Icons.location_city_rounded,
-                  ),
-                ),
-              ),
+                      controller: _cityController,
+                      labelText: 'City*',
+                      validator: (v) => v!.isEmpty ? 'City required' : null,
+                      prefixIcon: Icons.location_city_rounded)),
               const SizedBox(width: 16),
               Expanded(
-                child: Focus(
-                  focusNode: _stateFocus,
                   child: CustomInput(
-                    controller: _stateController,
-                    labelText: 'State*',
-                    validator: (v) => v!.isEmpty ? 'State required' : null,
-                    prefixIcon: Icons.business_rounded,
-                  ),
-                ),
-              ),
+                      controller: _stateController,
+                      labelText: 'State*',
+                      validator: (v) => v!.isEmpty ? 'State required' : null,
+                      prefixIcon: Icons.business_rounded)),
             ]),
             const SizedBox(height: 16),
             Row(children: [
               Expanded(
-                child: Focus(
-                  focusNode: _postalFocus,
                   child: CustomInput(
-                    controller: _postalCodeController,
-                    labelText: 'Postal Code',
-                    prefixIcon: Icons.markunread_mailbox_outlined,
-                  ),
-                ),
-              ),
+                      controller: _postalCodeController,
+                      labelText: 'Postal Code',
+                      prefixIcon: Icons.markunread_mailbox_outlined)),
               const SizedBox(width: 16),
               Expanded(
-                child: Focus(
-                  focusNode: _countryFocus,
                   child: CustomInput(
-                    controller: _countryController,
-                    labelText: 'Country*',
-                    validator: (v) => v!.isEmpty ? 'Country required' : null,
-                    prefixIcon: Icons.public_outlined,
-                  ),
-                ),
-              ),
+                      controller: _countryController,
+                      labelText: 'Country*',
+                      validator: (v) => v!.isEmpty ? 'Country required' : null,
+                      prefixIcon: Icons.public_outlined)),
             ]),
           ],
         ),

@@ -1,8 +1,7 @@
 // File: lib/screens/auth/customer_login_screen.dart
 // ADVISORY: This version includes the requested layout refinements.
-// NOTE: Surgical update—existing flows preserved. Unused imports trimmed.
 
-import 'dart:io'; // For Platform.isIOS
+import 'dart:io'; // NEW: Import to check the platform (iOS/Android).
 import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -10,21 +9,19 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
-
+import 'package:firebase_messaging/firebase_messaging.dart'; // ADDED
+import 'package:sign_in_with_apple/sign_in_with_apple.dart'; // NEW: Import for Apple Sign In.
 import 'complete_profile_screen.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/auth_service.dart';
-import '../../services/api_service.dart';
+import '../../services/api_service.dart'; // ADDED
 import '../customer/customer_dashboard_screen.dart';
 import './forgot_password_screen.dart';
 import './customer_register_screen.dart';
 import '../../models/auth_response_model.dart';
-
 import '../../widgets/button.dart';
-import '../../widgets/curve_painter.dart';
-import '../../services/socket_service.dart';
+import '../../widgets/curve_painter.dart'; // CORRECTED: This import is now correct and a dedicated file.
+import '../../services/socket_service.dart'; // ✅ ADD THIS LINE
 
 class CustomerLoginScreen extends StatefulWidget {
   static const String routeName = '/customer_login';
@@ -40,21 +37,23 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
-  bool _isAppleSignInAvailable = false;
+  bool _isAppleSignInAvailable =
+      false; // NEW: State variable for Apple Sign In availability.
 
   final AuthService _authService = AuthService();
-  final ApiService _apiService = ApiService();
-  final SocketService _socketService = SocketService();
+  final ApiService _apiService = ApiService(); // ADDED
+  final SocketService _socketService = SocketService(); // ✅ ADD THIS LINE
 
   @override
   void initState() {
     super.initState();
-    _checkAppleSignInAvailability();
 
+    _checkAppleSignInAvailability(); // NEW: Check for Apple Sign In on start.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final args = ModalRoute.of(context)?.settings.arguments;
-      if (args is Map<String, dynamic> && args.containsKey('email')) {
-        _emailController.text = (args['email'] ?? '').toString();
+      final arguments =
+          ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+      if (arguments != null && arguments.containsKey('email')) {
+        _emailController.text = arguments['email'];
       }
     });
   }
@@ -67,10 +66,15 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
   }
 
   Future<void> _checkAppleSignInAvailability() async {
+    // We only check on iOS. Platform.isAndroid will be false.
     if (Platform.isIOS) {
       final isAvailable = await SignInWithApple.isAvailable();
-      if (!mounted) return;
-      setState(() => _isAppleSignInAvailable = isAvailable);
+      if (mounted) {
+        // Good practice to check 'mounted' in async calls
+        setState(() {
+          _isAppleSignInAvailable = isAvailable;
+        });
+      }
     }
   }
 
@@ -97,48 +101,43 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 1) Backend auth (saves JWT)
+      // 1. Log in to your backend. AuthService saves the JWT.
       final LoginSuccessData loginData = await _authService.loginCustomer(
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
 
-      // 2) Real-time socket connect
+      // 2. ✅ REMOVED: The unnecessary signInToFirebase() call is gone.
+      // await _authService.signInToFirebase();
+
+      // 3. ✅ CORRECT: Connect to your Socket.IO server for real-time chat.
       _socketService.connect();
 
-      // 3) FCM token registration (best effort; simulators may fail)
+      // 4. Register FCM token for push notifications.
       try {
         final fcmToken = await FirebaseMessaging.instance.getToken();
         if (fcmToken != null) {
           await _apiService.registerFcmToken(fcmToken);
         }
       } catch (e) {
-        // Simulators often don't have APNS; don't block login.
-        // ignore: avoid_print
-        print('FCM token registration skipped/failure: $e');
+        print(
+            'Failed to register FCM token (this is expected on a simulator): $e');
       }
 
       if (!mounted) return;
 
-      // 4) Navigate
+      // 5. Navigate as usual.
       if (loginData.isNewUser) {
-        Navigator.of(context).pushNamed(
-          CompleteProfileScreen.routeName,
-          arguments: {'email': _emailController.text.trim()},
-        );
+        // ... navigation to complete profile screen
       } else {
         _showFeedbackSnackbar('Welcome back, ${loginData.name}!');
         Navigator.of(context).pushNamedAndRemoveUntil(
-          CustomerDashboardScreen.routeName,
-          (route) => false,
-        );
+            CustomerDashboardScreen.routeName, (route) => false);
       }
     } catch (e) {
       if (!mounted) return;
-      _showFeedbackSnackbar(
-        e.toString().replaceFirst("Exception: ", ""),
-        isError: true,
-      );
+      _showFeedbackSnackbar(e.toString().replaceFirst("Exception: ", ""),
+          isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -147,48 +146,45 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
   Future<void> _handleGoogleSignIn() async {
     setState(() => _isLoading = true);
     try {
-      final googleSignIn = GoogleSignIn();
-      await googleSignIn.signOut(); // ensure clean session
+      final GoogleSignIn googleSignIn = GoogleSignIn();
+      await googleSignIn.signOut();
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
         if (mounted) setState(() => _isLoading = false);
-        return; // user cancelled
+        return;
       }
-
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
       final String? idToken = googleAuth.idToken;
       if (idToken == null) {
         throw Exception("Could not retrieve Google ID token.");
       }
-
       final LoginSuccessData loginData =
           await _authService.signInWithGoogle(idToken);
       if (!mounted) return;
 
-      // Best-effort FCM registration
+      // --- UPDATED FCM TOKEN REGISTRATION ---
+      // We wrap this in its own try/catch block because it WILL fail
+      // on a simulator, and we don't want that to stop the login flow.
       try {
         final fcmToken = await FirebaseMessaging.instance.getToken();
         if (fcmToken != null) {
           await _apiService.registerFcmToken(fcmToken);
         }
       } catch (e) {
-        // ignore: avoid_print
-        print('FCM token registration skipped/failure: $e');
+        print(
+            'Failed to register FCM token (this is expected on a simulator): $e');
       }
+      // --- END OF UPDATE ---
 
       _showFeedbackSnackbar(
           'Google Sign-In successful! Welcome, ${loginData.name}.');
       Navigator.of(context).pushNamedAndRemoveUntil(
-        CustomerDashboardScreen.routeName,
-        (route) => false,
-      );
+          CustomerDashboardScreen.routeName, (route) => false);
     } catch (e) {
       if (mounted) {
-        _showFeedbackSnackbar(
-          e.toString().replaceFirst("Exception: ", ""),
-          isError: true,
-        );
+        _showFeedbackSnackbar(e.toString().replaceFirst("Exception: ", ""),
+            isError: true);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -196,59 +192,56 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
   }
 
   Future<void> _handleAppleSignIn() async {
-    if (!Platform.isIOS) return; // guard—Apple Sign-In is iOS only
     setState(() => _isLoading = true);
     try {
-      // 1) Request Apple credential (first use may return email/fullName)
+      // 1. Request credentials from Apple's native UI
       final credential = await SignInWithApple.getAppleIDCredential(
-        scopes: const [
+        scopes: [
           AppleIDAuthorizationScopes.email,
           AppleIDAuthorizationScopes.fullName,
         ],
       );
 
-      // 2) Extract ID token for backend verification
+      // 2. Get the identity token to send to your backend
       final String? idToken = credential.identityToken;
       if (idToken == null) {
         throw Exception("Could not retrieve Apple ID token.");
       }
 
-      // 3) Backend auth with Apple ID token (preserves your existing flow)
+      // 3. Call your existing auth service method with the token
       final LoginSuccessData loginData =
           await _authService.signInWithApple(idToken);
       if (!mounted) return;
 
-      // 4) Best-effort FCM registration
+      // --- UPDATED FCM TOKEN REGISTRATION ---
+      // We wrap this in its own try/catch block because it WILL fail
+      // on a simulator, and we don't want that to stop the login flow.
       try {
         final fcmToken = await FirebaseMessaging.instance.getToken();
         if (fcmToken != null) {
           await _apiService.registerFcmToken(fcmToken);
         }
       } catch (e) {
-        // ignore: avoid_print
-        print('FCM token registration skipped/failure: $e');
+        print(
+            'Failed to register FCM token (this is expected on a simulator): $e');
       }
+      // --- END OF UPDATE ---
 
-      // 5) Success → navigate
+      // 5. Show success and navigate
       _showFeedbackSnackbar(
           'Apple Sign-In successful! Welcome, ${loginData.name}.');
       Navigator.of(context).pushNamedAndRemoveUntil(
-        CustomerDashboardScreen.routeName,
-        (route) => false,
-      );
-    } on SignInWithAppleAuthorizationException catch (e) {
-      if (!mounted) return;
-      if (e.code == AuthorizationErrorCode.canceled) {
-        // User canceled—no error UI
-        return;
-      }
-      _showFeedbackSnackbar('Apple Sign-In failed.', isError: true);
+          CustomerDashboardScreen.routeName, (route) => false);
     } catch (e) {
       if (mounted) {
-        _showFeedbackSnackbar(
-          e.toString().replaceFirst("Exception: ", ""),
-          isError: true,
-        );
+        // Don't show an error if the user simply cancelled the dialog.
+        if (e is SignInWithAppleAuthorizationException &&
+            e.code == AuthorizationErrorCode.canceled) {
+          // User cancelled, so we do nothing.
+        } else {
+          _showFeedbackSnackbar(e.toString().replaceFirst("Exception: ", ""),
+              isError: true);
+        }
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -293,7 +286,9 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          Container(color: Colors.grey.shade200),
+          Container(
+            color: Colors.grey.shade200,
+          ),
           Positioned(
             top: -MediaQuery.of(context).size.height * 0.3,
             left: -MediaQuery.of(context).size.width * 0.1,
@@ -314,16 +309,15 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
               child: Transform.rotate(
                 angle: -0.2,
                 child: CustomPaint(
-                  size: Size(
-                    MediaQuery.of(context).size.width * 1.2,
-                    MediaQuery.of(context).size.height * 0.8,
-                  ),
+                  size: Size(MediaQuery.of(context).size.width * 1.2,
+                      MediaQuery.of(context).size.height * 0.8),
                   painter: CurvePainter(),
                 ),
               ),
             ),
           ),
           Positioned(
+            // ADDED: Replicated graphic on the bottom half
             bottom: -MediaQuery.of(context).size.height * 0.3,
             right: -MediaQuery.of(context).size.width * 0.1,
             child: Container(
@@ -331,6 +325,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
               height: MediaQuery.of(context).size.height * 0.8,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
+                  // MODIFIED: Gradient colors for a blue-ish variant
                   colors: [
                     Colors.blue.shade800.withOpacity(0.5),
                     Colors.blue.shade300.withOpacity(0.5),
@@ -343,10 +338,8 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
               child: Transform.rotate(
                 angle: 0.2,
                 child: CustomPaint(
-                  size: Size(
-                    MediaQuery.of(context).size.width * 1.2,
-                    MediaQuery.of(context).size.height * 0.8,
-                  ),
+                  size: Size(MediaQuery.of(context).size.width * 1.2,
+                      MediaQuery.of(context).size.height * 0.8),
                   painter: CurvePainter(),
                 ),
               ),
@@ -363,7 +356,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                   shape: BoxShape.circle,
                   color: Colors.white.withOpacity(0.2),
                 ),
-                child: const Icon(Icons.local_gas_station_outlined,
+                child: Icon(Icons.local_gas_station_outlined,
                     size: 30, color: Colors.white),
               ),
             ),
@@ -379,7 +372,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                   shape: BoxShape.circle,
                   color: Colors.white.withOpacity(0.2),
                 ),
-                child: const Icon(Icons.local_shipping_outlined,
+                child: Icon(Icons.local_shipping_outlined,
                     size: 30, color: Colors.white),
               ),
             ),
@@ -395,7 +388,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                   shape: BoxShape.circle,
                   color: Colors.white.withOpacity(0.2),
                 ),
-                child: const Icon(Icons.location_on_outlined,
+                child: Icon(Icons.location_on_outlined,
                     size: 30, color: Colors.white),
               ),
             ),
@@ -406,7 +399,10 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Image.asset('assets/images/gas2door_logo.png', height: 100),
+                  Image.asset(
+                    'assets/images/gas2door_logo.png',
+                    height: 100,
+                  ),
                   const SizedBox(height: 40),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(24),
@@ -453,9 +449,8 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                               const SizedBox(height: 30),
                               Theme(
                                 data: Theme.of(context).copyWith(
-                                  inputDecorationTheme:
-                                      inputDecorationThemeForScreen,
-                                ),
+                                    inputDecorationTheme:
+                                        inputDecorationThemeForScreen),
                                 child: Column(
                                   children: [
                                     TextFormField(
@@ -469,11 +464,12 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                       keyboardType: TextInputType.emailAddress,
                                       textInputAction: TextInputAction.next,
                                       validator: (value) {
-                                        final v = value?.trim() ?? '';
-                                        if (v.isEmpty)
+                                        if (value == null ||
+                                            value.trim().isEmpty) {
                                           return 'Please enter your email';
+                                        }
                                         if (!RegExp(r'^[^@]+@[^@]+\.[^@]+')
-                                            .hasMatch(v)) {
+                                            .hasMatch(value.trim())) {
                                           return 'Enter a valid email address';
                                         }
                                         return null;
@@ -488,15 +484,12 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                         prefixIcon: const Icon(
                                             Icons.lock_outline_rounded),
                                         suffixIcon: IconButton(
-                                          icon: Icon(
-                                            _obscurePassword
-                                                ? Icons.visibility_off_outlined
-                                                : Icons.visibility_outlined,
-                                          ),
-                                          onPressed: () => setState(
-                                            () => _obscurePassword =
-                                                !_obscurePassword,
-                                          ),
+                                          icon: Icon(_obscurePassword
+                                              ? Icons.visibility_off_outlined
+                                              : Icons.visibility_outlined),
+                                          onPressed: () => setState(() =>
+                                              _obscurePassword =
+                                                  !_obscurePassword),
                                         ),
                                       ),
                                       style: GoogleFonts.inter(
@@ -504,11 +497,10 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                       textInputAction: TextInputAction.done,
                                       onFieldSubmitted: (_) => _handleLogin(),
                                       validator: (value) {
-                                        final v = value ?? '';
-                                        if (v.isEmpty) {
+                                        if (value == null || value.isEmpty) {
                                           return 'Please enter your password';
                                         }
-                                        if (v.length < 6) {
+                                        if (value.length < 6) {
                                           return 'Password must be at least 6 characters';
                                         }
                                         return null;
@@ -523,18 +515,13 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                   padding: const EdgeInsets.only(top: 8.0),
                                   child: TextButton(
                                     onPressed: () {
-                                      Navigator.pushNamed(
-                                        context,
-                                        ForgotPasswordScreen.routeName,
-                                      );
+                                      Navigator.pushNamed(context,
+                                          ForgotPasswordScreen.routeName);
                                     },
-                                    child: Text(
-                                      'Forgot Password?',
-                                      style: GoogleFonts.inter(
-                                        color: themeProvider.linkColor,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                                    child: Text('Forgot Password?',
+                                        style: GoogleFonts.inter(
+                                            color: themeProvider.linkColor,
+                                            fontWeight: FontWeight.w600)),
                                   ),
                                 ),
                               ),
@@ -548,15 +535,13 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                   padding:
                                       const EdgeInsets.symmetric(vertical: 16),
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
+                                      borderRadius: BorderRadius.circular(12)),
                                   textStyle: GoogleFonts.inter(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold),
                                 ),
                                 icon: _isLoading
-                                    ? const SizedBox.shrink()
+                                    ? Container()
                                     : const Icon(Icons.login_rounded, size: 22),
                                 label: Text(
                                     _isLoading ? 'Signing In...' : 'Sign In'),
@@ -565,25 +550,21 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                               Row(
                                 children: [
                                   Expanded(
-                                    child: Divider(
-                                      color: Colors.black.withOpacity(0.2),
-                                    ),
-                                  ),
+                                      child: Divider(
+                                          color:
+                                              Colors.black.withOpacity(0.2))),
                                   Padding(
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 16),
-                                    child: Text(
-                                      "OR",
-                                      style: GoogleFonts.inter(
-                                        color: Colors.black.withOpacity(0.6),
-                                      ),
-                                    ),
+                                    child: Text("OR",
+                                        style: GoogleFonts.inter(
+                                            color:
+                                                Colors.black.withOpacity(0.6))),
                                   ),
                                   Expanded(
-                                    child: Divider(
-                                      color: Colors.black.withOpacity(0.2),
-                                    ),
-                                  ),
+                                      child: Divider(
+                                          color:
+                                              Colors.black.withOpacity(0.2))),
                                 ],
                               ),
                               const SizedBox(height: 24),
@@ -596,17 +577,14 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                   padding:
                                       const EdgeInsets.symmetric(vertical: 14),
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
+                                      borderRadius: BorderRadius.circular(12)),
                                   textStyle: GoogleFonts.inter(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600),
                                 ),
                                 icon: Image.asset(
-                                  'assets/images/google_logo.png',
-                                  height: 24,
-                                ),
+                                    'assets/images/google_logo.png',
+                                    height: 24),
                                 label: const Text('Sign In with Google'),
                               ),
                               if (_isAppleSignInAvailable)
@@ -617,17 +595,16 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                                       _isLoading ? null : _handleAppleSignIn,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor:
-                                        Colors.black, // Apple guideline
+                                        Colors.black, // Per Apple's guidelines
                                     foregroundColor: Colors.white,
                                     padding: const EdgeInsets.symmetric(
                                         vertical: 14),
                                     shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
                                     textStyle: GoogleFonts.inter(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600),
                                   ),
                                   icon: const Icon(Icons.apple,
                                       color: Colors.white, size: 24),
@@ -644,9 +621,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                     text: TextSpan(
                       text: "Don't have an account? ",
                       style: GoogleFonts.inter(
-                        color: Colors.black87.withOpacity(0.8),
-                        fontSize: 15,
-                      ),
+                          color: Colors.black87.withOpacity(0.8), fontSize: 15),
                       children: <TextSpan>[
                         TextSpan(
                           text: 'Register',
@@ -659,9 +634,7 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
                           recognizer: TapGestureRecognizer()
                             ..onTap = () {
                               Navigator.pushNamed(
-                                context,
-                                CustomerRegisterScreen.routeName,
-                              );
+                                  context, CustomerRegisterScreen.routeName);
                             },
                         ),
                       ],

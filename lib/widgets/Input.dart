@@ -32,7 +32,6 @@ class CustomInput extends StatelessWidget {
   // --- ADDED: textCapitalization parameter ---
   final TextCapitalization textCapitalization;
   // --- END ADDED ---
-  final FocusNode? focusNode; // <<< --- ADDED THIS LINE --- <<<
 
   const CustomInput({
     super.key,
@@ -60,7 +59,6 @@ class CustomInput extends StatelessWidget {
     this.inputFormatters,
     this.textCapitalization =
         TextCapitalization.none, // <<< ADDED TO CONSTRUCTOR with default
-    this.focusNode, // <<< --- ADDED THIS LINE TO CONSTRUCTOR --- <<<
   });
 
   @override
@@ -68,7 +66,6 @@ class CustomInput extends StatelessWidget {
     final themeProvider = Provider.of<ThemeProvider>(context);
     return TextFormField(
       controller: controller,
-      focusNode: focusNode, // <<< --- PASS focusNode TO TextFormField --- <<<
       obscureText: obscureText,
       keyboardType: keyboardType,
       textInputAction: textInputAction,
