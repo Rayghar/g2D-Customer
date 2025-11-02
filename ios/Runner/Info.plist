@@ -32,6 +32,7 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -45,20 +46,44 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+
+	<!-- Permissions you already had -->
 	<key>NSCameraUsageDescription</key>
 	<string>This app uses the camera to scan cards/QRs or capture photos needed for orders and support.</string>
-
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>We use your location to show you on the map, find nearby stations, and estimate delivery times.</string>
-
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Allowing background location helps us update delivery status and ETA even if the app is not in the foreground.</string>
 
+	<!-- Background modes you already had -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
 		<string>remote-notification</string>
 	</array>
-	
+
+	<!-- 1) Google Sign-In iOS client id (EXACTLY the CLIENT_ID in GoogleService-Info.plist) -->
+	<key>GIDClientID</key>
+	<string>108927420628-hv12p7gjoqu086gc66lgtnak1anfdg52.apps.googleusercontent.com</string>
+
+	<!-- ✅ Google Sign-In URL Scheme (REQUIRED on iOS)
+	     Replace the placeholder below with the REVERSED_CLIENT_ID from your Firebase iOS app. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.108927420628-hv12p7gjoqu086gc66lgtnak1anfdg52</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- (Optional, harmless) Allow querying the Google URL scheme if any plugin does canOpenURL checks -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>google</string>
+	</array>
 </dict>
 </plist>
