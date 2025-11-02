@@ -1,9 +1,9 @@
-name: Build & Upload iOS (Flutter) — VERBOSE
+name: Build & Upload iOS (Flutter)
 
 on:
   workflow_dispatch:
   push:
-    branches: [ versionios4 ]
+    branches: [ versionios4 ]   # <-- adjust to your branch
 
 jobs:
   ios:
@@ -13,396 +13,174 @@ jobs:
       contents: read
 
     env:
-      # === App / Signing identifiers ===
-      BUNDLE_ID: com.primejet.gas2door
-      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # ---- App / Signing identifiers ----
+      BUNDLE_ID: com.primejet.gas2door              # <-- your bundle id
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}         # e.g. 1A2B3C4D5E
+      PROFILE_NAME: MyApp_AppStore_Profile          # <-- EXACT name of the .mobileprovision in Apple Dev portal
 
-      # === Certificates & Profile (required for signing) ===
-      P12_BASE64: ${{ secrets.P12_BASE64 }}                # base64 of .p12 (Distribution cert)
-      P12_PASSWORD: ${{ secrets.P12_PASSWORD }}            # password for the .p12
-      MOBILEPROVISION_BASE64: ${{ secrets.MOBILEPROVISION_BASE64 }}  # base64 of provisioning profile (.mobileprovision)
+      # ---- Secrets you already have in your repo settings ----
+      P12_BASE64: ${{ secrets.P12_BASE64 }}         # base64-encoded .p12
+      P12_PASSWORD: ${{ secrets.P12_PASSWORD }}     # password for the .p12
+      MOBILEPROVISION_BASE64: ${{ secrets.MOBILEPROVISION_BASE64 }}  # base64-encoded .mobileprovision
+      APP_STORE_CONNECT_USERNAME: ${{ secrets.APP_STORE_CONNECT_USERNAME }} # Apple ID (email)
+      APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}   # app-specific password for that Apple ID
 
-      # === App Store Connect upload (provide ONE of the two sets) ===
-      # Option 1: App Store Connect API key (recommended)
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}                # e.g. ABC123DEFG
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}          # e.g. 00000000-0000-0000-0000-000000000000
-      ASC_KEY_JSON_BASE64: ${{ secrets.ASC_KEY_JSON_BASE64 }} # base64 of FASTLANE API JSON: {"key_id":"...","issuer_id":"...","key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"}
-
-      # Option 2: Apple ID + App-Specific Password
-      APP_STORE_CONNECT_USERNAME: ${{ secrets.APP_STORE_CONNECT_USERNAME }}
-      APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
+      # ---- Build config ----
+      FLUTTER_VERSION: "3.24.3"   # keep or change; must match your toolchain requirements
+      XCODE_VERSION: "16.1"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16
+      # Optional: pin Xcode (you already do this)
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16.1'
+          xcode-version: ${{ env.XCODE_VERSION }}
 
-      - name: Install iOS Platform for Xcode 16.1
+      - name: Ensure iOS SDK present
         run: |
           set -euxo pipefail
           sudo xcodebuild -downloadPlatform iOS
           xcodebuild -showsdks
-
-      - name: Pin DEVELOPER_DIR (safety)
-        run: echo "DEVELOPER_DIR=/Applications/Xcode_16.1.app" >> $GITHUB_ENV
-
-      - name: Verify iOS SDK installation
-        run: |
-          set -euxo pipefail
-          xcodebuild -showsdks
-          SDKDIR="/Applications/Xcode_16.1.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs"
-          test -d "$SDKDIR" || { echo "FATAL: $SDKDIR missing"; exit 1; }
-          ls -1 "$SDKDIR"
-
-      - name: Print runner & toolchain versions
-        run: |
-          set -euxo pipefail
-          sw_vers || true
-          xcodebuild -version
-          xcrun --version
-          swift --version
-          ruby -v
-          gem env home
-          python3 --version || true
-          node -v || true
+          echo "DEVELOPER_DIR=/Applications/Xcode_${XCODE_VERSION}.app" >> $GITHUB_ENV
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
+      - run: flutter --version
 
-      - name: Flutter doctor
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      # ---------- VERSIONING (make sure build number > 50) ----------
+      # Option A: trust pubspec.yaml values that you commit.
+      - name: Show Flutter version from pubspec
+        run: |
+          grep '^version:' pubspec.yaml || true
+
+      # ---------- CREATE TEMP KEYCHAIN & INSTALL CERT ----------
+      - name: Create temporary keychain
         run: |
           set -euxo pipefail
-          flutter --version
-          flutter doctor -v
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
 
-      - name: Flutter clean & deps (order matters)
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+
+      - name: Import .p12 signing certificate to keychain
         run: |
           set -euxo pipefail
-          flutter clean
-          flutter pub get
-          test -f ios/Flutter/Generated.xcconfig || { echo "ERROR: ios/Flutter/Generated.xcconfig missing"; ls -la ios/Flutter || true; exit 1; }
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          # Allow codesign to use the key non-interactively
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # Show identities for debugging
+          security find-identity -v "$KEYCHAIN_PATH" || true
 
-      # Auto-bump ONLY the build number; keep marketing version as-is
-      - name: Bump iOS build number (Option A)
+      # ---------- INSTALL PROVISIONING PROFILE ----------
+      - name: Install provisioning profile
         run: |
           set -euxo pipefail
-          PLIST="ios/Runner/Info.plist"
-          # Ensure marketing version exists (won't change it if already present)
-          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" >/dev/null 2>&1 || \
-            /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.0" "$PLIST"
-          # Set build number to the run number
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "$PLIST" || \
-            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${GITHUB_RUN_NUMBER}" "$PLIST"
-          echo "CFBundleShortVersionString=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
-          echo "CFBundleVersion=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
-
-      - name: Ensure CocoaPods toolchain
-        run: |
-          set -euxo pipefail
-          sudo gem install cocoapods --no-document
-          pod --version
-          pod repo update
-
-      - name: Force iOS 15 in Podfile (idempotent)
-        run: |
-          set -euxo pipefail
-          ruby -e "f='ios/Podfile'; if File.exist?(f); c=File.read(f); c=c.gsub(/platform :ios, .*/, \"platform :ios, '15.0'\"); File.write(f,c); else; puts 'WARN: ios/Podfile not found'; end"
-
-      - name: Stamp DEVELOPMENT_TEAM and manual signing in Xcode project
-        run: |
-          set -euxo pipefail
-          PBX=ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' "s/DEVELOPMENT_TEAM = [A-Z0-9]*/DEVELOPMENT_TEAM = ${TEAM_ID}/g" "$PBX" || true
-          sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBX" || true
-          sed -i '' "s/CODE_SIGN_IDENTITY = \"iPhone Developer\"/CODE_SIGN_IDENTITY = \"Apple Distribution\"/g" "$PBX" || true
-          sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = .*/PROVISIONING_PROFILE_SPECIFIER = \"\"/g" "$PBX" || true
-          perl -0777 -pe 's/(PRODUCT_BUNDLE_IDENTIFIER = '"$BUNDLE_ID"';)/$1\n\t\t\t\tDEVELOPMENT_TEAM = '"$TEAM_ID"';/g' "$PBX" > /tmp/p.pbxproj || true
-          if [ -s /tmp/p.pbxproj ]; then mv /tmp/p.pbxproj "$PBX"; fi
-          grep -nE "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE" "$PBX" || true
-
-      - name: Install fastlane
-        run: |
-          set -euxo pipefail
-          gem install fastlane --no-document
-          fastlane --version
-
-      - name: Import signing certificate (keychain)
-        env:
-          P12_BASE64: ${{ env.P12_BASE64 }}
-          P12_PASSWORD: ${{ env.P12_PASSWORD }}
-        run: |
-          set -euxo pipefail
-          echo "$P12_BASE64" | base64 --decode > signing.p12
-          security create-keychain -p "" build.keychain
-          security import signing.p12 -P "$P12_PASSWORD" -A -k build.keychain
-          security list-keychains -s build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-          security set-keychain-settings -lut 21600 build.keychain
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
-          security find-identity -v -p codesigning build.keychain || true
-
-      - name: Decode & install provisioning profile
-        shell: bash
-        env:
-          MOBILEPROVISION_BASE64: ${{ env.MOBILEPROVISION_BASE64 }}
-        run: |
-          set -euxo pipefail
-          PP_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
-          mkdir -p "$PP_DIR"
-
-          TMP_PP="/tmp/profile.mobileprovision"
-          if printf '%s' "$MOBILEPROVISION_BASE64" | base64 -D > "$TMP_PP" 2>/dev/null; then :
-          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 --decode > "$TMP_PP" 2>/dev/null; then :
-          elif printf '%s' "$MOBILEPROVISION_BASE64" | base64 -d > "$TMP_PP" 2>/dev/null; then :
-          else
-            echo "Failed to base64-decode MOBILEPROVISION_BASE64" >&2; exit 1
-          fi
-
-          security cms -D -i "$TMP_PP" -o /tmp/profile.plist
-          /usr/bin/plutil -lint /tmp/profile.plist
-          NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' /tmp/profile.plist)
-          UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /tmp/profile.plist)
-          : "${NAME:?Provisioning profile Name missing}"
-          : "${UUID:?Provisioning profile UUID missing}"
-
-          INSTALL_PP="$PP_DIR/${UUID}.mobileprovision"
-          cp "$TMP_PP" "$INSTALL_PP"
-
-          echo "PROFILE_NAME=$NAME" >> $GITHUB_ENV
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$MOBILEPROVISION_BASE64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+          # Extract UUID to save with correct name
+          UUID=$(/usr/libexec/PlistBuddy -c Print:UUID /dev/stdin <<< "$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision")")
+          cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
           echo "PROFILE_UUID=$UUID" >> $GITHUB_ENV
-          echo "Installed profile: $NAME ($UUID) at $INSTALL_PP"
-          mkdir -p build-logs && cp /tmp/profile.plist build-logs/profile.plist
+          echo "Installed profile UUID: $UUID"
 
-      - name: Inject signing into Release.xcconfig (safe)
-        shell: bash
-        env:
-          TEAM_ID: ${{ env.TEAM_ID }}
-          PROFILE_NAME: ${{ env.PROFILE_NAME }}
-        run: |
-          set -euxo pipefail
-          : "${PROFILE_NAME:?PROFILE_NAME not found. Ensure the decode/parse step ran successfully.}"
-          XCCONFIG="ios/Flutter/Release.xcconfig"
-          grep -q 'Pods-Runner.release.xcconfig' "$XCCONFIG" || echo '#include "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$XCCONFIG"
-          sed -i '' '/^\/\/ --- Signing injected by CI ---/,$d' "$XCCONFIG" || true
-          {
-            echo '// --- Signing injected by CI ---'
-            echo "PRODUCT_BUNDLE_IDENTIFIER = ${BUNDLE_ID}"
-            echo 'CODE_SIGN_STYLE = Manual'
-            echo 'CODE_SIGN_IDENTITY = Apple Distribution'
-            echo "PROVISIONING_PROFILE_SPECIFIER = ${PROFILE_NAME}"
-            echo "DEVELOPMENT_TEAM = ${TEAM_ID}"
-          } >> "$XCCONFIG"
-          echo "==== Final Release.xcconfig ===="; cat "$XCCONFIG"
-          mkdir -p build-logs && cp "$XCCONFIG" build-logs/Release.xcconfig
+      # ---------- BUILD (ARCHIVE) ----------
+      - name: Flutter build iOS (creates Xcode project files)
+        run: flutter build ios --release --no-codesign
 
-      - name: Reset CocoaPods resolution (clean resolve)
+      - name: Archive with xcodebuild
         working-directory: ios
         run: |
           set -euxo pipefail
-          rm -rf Pods Podfile.lock
-          pod repo update
+          ARCHIVE_PATH="$GITHUB_WORKSPACE/build/ios/archive/Runner.xcarchive"
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath "$ARCHIVE_PATH" \
+            archive \
+            DEVELOPMENT_TEAM="${TEAM_ID}" \
+            PRODUCT_BUNDLE_IDENTIFIER="${BUNDLE_ID}" \
+            CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE_SPECIFIER="${PROFILE_NAME}" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
+          echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> $GITHUB_ENV
 
-      - name: Pod install (log & artifact)
-        working-directory: ios
+      # ---------- EXPORT IPA ----------
+      - name: Write ExportOptions.plist (App Store)
         run: |
-          set -euxo pipefail
-          pod install | tee ../build-logs/pod_install.log
-
-      - name: Show Xcode build settings (after pods)
-        working-directory: ios
-        run: |
-          set -euxo pipefail
-          echo "=== List schemes (workspace) ==="
-          xcodebuild -workspace Runner.xcworkspace -list || true
-          echo "=== Show destinations for Runner ==="
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -showdestinations || true
-          echo "=== Write build settings (workspace) ==="
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -destination 'generic/platform=iOS' -showBuildSettings > ../build-logs/xcodebuild_showBuildSettings.txt || true
-          echo "Wrote: ../build-logs/xcodebuild_showBuildSettings.txt (size: $(wc -c < ../build-logs/xcodebuild_showBuildSettings.txt) bytes)"
-
-      - name: Write ExportOptions.plist for app-store export
-        working-directory: ios
-        env:
-          PROFILE_NAME: ${{ env.PROFILE_NAME }}
-          BUNDLE_ID: ${{ env.BUNDLE_ID }}
-          TEAM_ID: ${{ env.TEAM_ID }}
-        run: |
-          set -euxo pipefail
-          cat > ExportOptions.plist <<'PLIST'
+          cat > ios/ExportOptions.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-            <key>compileBitcode</key><false/>
-            <key>destination</key><string>export</string>
             <key>method</key><string>app-store</string>
             <key>signingStyle</key><string>manual</string>
             <key>teamID</key><string>${TEAM_ID}</string>
-            <key>uploadSymbols</key><true/>
             <key>provisioningProfiles</key>
             <dict>
-              <key>${BUNDLE_ID}</key>
-              <string>${PROFILE_NAME}</string>
+              <key>${BUNDLE_ID}</key><string>${PROFILE_NAME}</string>
             </dict>
-            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>uploadSymbols</key><true/>
+            <key>generateAppStoreInformation</key><false/>
+            <key>uploadBitcode</key><false/>
+            <key>compileBitcode</key><false/>
           </dict>
           </plist>
           PLIST
-          echo "==== ExportOptions.plist ===="
-          cat ExportOptions.plist
 
-      - name: Build IPA (Release, verbose)
+      - name: Export IPA
         run: |
           set -euxo pipefail
-          flutter build ipa --release --export-options-plist=ios/ExportOptions.plist --verbose || BUILD_FAILED=1
-
-          mkdir -p build-logs
-          RESULT=$(ls -t ~/Library/Developer/Xcode/DerivedData/*/Logs/Build/*.xcresult 2>/dev/null | head -n 1 || true)
-          if [ -n "${RESULT:-}" ]; then
-            echo "Found xcresult: $RESULT"
-            /usr/bin/xcresulttool get --format json --path "$RESULT" > build-logs/archive_result.json || true
-          fi
-
-          ls -l build/ios/ipa || true
-          if ls build/ios/archive/*.xcarchive 1>/dev/null 2>&1; then
-            echo "Found xcarchive(s):"; ls -l build/ios/archive
-          fi
-
-          test -z "${BUILD_FAILED:-}" || exit 1
-
-      - name: Diagnose effective build settings (Release)
-        working-directory: ios
-        run: |
-          set -euxo pipefail
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -showBuildSettings | tee ../build-logs/xcodebuild_effective_settings.txt
-          grep -E 'PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER' ../build-logs/xcodebuild_effective_settings.txt || true
-
-      - name: Locate artifacts (IPA and/or .xcarchive)
-        run: |
-          set -euxo pipefail
-          IPA_REL="$(find build/ios/ipa -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
-          ARCHIVE_REL="$(find build/ios/archive -maxdepth 1 -type d -name '*.xcarchive' -print -quit 2>/dev/null || true)"
-
-          echo "Resolved IPA_REL=${IPA_REL:-<none>}"
-          echo "Resolved ARCHIVE_REL=${ARCHIVE_REL:-<none>}"
-
-          if [ -n "${IPA_REL:-}" ]; then
-            echo "IPA_PATH=$GITHUB_WORKSPACE/$IPA_REL" >> "$GITHUB_ENV"
-          fi
-          if [ -n "${ARCHIVE_REL:-}" ]; then
-            echo "ARCHIVE_PATH=$GITHUB_WORKSPACE/$ARCHIVE_REL" >> "$GITHUB_ENV"
-          fi
-
-      - name: Fallback export if IPA missing
-        run: |
-          set -euxo pipefail
-          if ls build/ios/ipa/*.ipa 1>/dev/null 2>&1; then
-            echo "IPA already present in build/ios/ipa — fallback export not needed."
-            exit 0
-          fi
-
-          : "${ARCHIVE_PATH:?No ARCHIVE_PATH available for export}"
-
-          APP_PATH="${ARCHIVE_PATH}/Products/Applications/Runner.app"
-          if [ ! -f "${APP_PATH}/embedded.mobileprovision" ]; then
-            echo "ERROR: Archive missing embedded.mobileprovision — not signed during archive."
-            echo "       Ensure Release.xcconfig injection ran BEFORE archive and sets:"
-            echo "       PROVISIONING_PROFILE_SPECIFIER=${PROFILE_NAME}"
-            echo "       CODE_SIGN_IDENTITY=Apple Distribution"
-            echo "       DEVELOPMENT_TEAM=${TEAM_ID}"
-            exit 1
-          fi
-
-          mkdir -p build/ios/export
+          EXPORT_PATH="$GITHUB_WORKSPACE/build/ios/export"
+          mkdir -p "$EXPORT_PATH"
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportOptionsPlist ios/ExportOptions.plist \
-            -exportPath build/ios/export
+            -exportPath "$EXPORT_PATH" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
+          IPA_PATH=$(find "$EXPORT_PATH" -name "*.ipa" -maxdepth 1 | head -n1)
+          echo "IPA_PATH=$IPA_PATH" >> $GITHUB_ENV
+          ls -lah "$EXPORT_PATH"
 
-          echo "Fallback export directory contents:"
-          ls -l build/ios/export || true
+      # ---------- UPLOAD TO APP STORE CONNECT ----------
+      - name: Upload .ipa to App Store Connect (Transporter)
+        run: |
+          set -euxo pipefail
+          xcrun iTMSTransporter -m upload \
+            -assetFile "$IPA_PATH" \
+            -u "$APP_STORE_CONNECT_USERNAME" \
+            -p "$APP_SPECIFIC_PASSWORD" \
+            -v informational \
+            -k 100000
 
-          IPA_FALLBACK="$(find build/ios/export -maxdepth 1 -type f -name '*.ipa' -print -quit || true)"
-          if [ -n "${IPA_FALLBACK:-}" ]; then
-            echo "IPA_PATH=$IPA_FALLBACK" >> "$GITHUB_ENV"
-          fi
-
-      - name: Save IPA & logs artifacts
-        if: always()
+      # ---------- ARTIFACTS ----------
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ios-artifacts
           path: |
-            build/ios/ipa/*.ipa
-            build/ios/export/*.ipa
-            build/ios/archive/*.xcarchive
-            build-logs/**
-          if-no-files-found: warn
-          retention-days: 14
-
-      # =========================
-      # === UPLOAD TO TESTFLIGHT
-      # =========================
-
-      - name: Prepare Fastlane API key file (if provided)
-        id: api_key
-        shell: bash
-        run: |
-          set -euxo pipefail
-          if [ -n "${ASC_KEY_JSON_BASE64:-}" ]; then
-            echo "$ASC_KEY_JSON_BASE64" | base64 --decode > fastlane_api_key.json
-            test -s fastlane_api_key.json || { echo "Decoded API key JSON is empty"; exit 1; }
-            echo "have_api_key=true" >> $GITHUB_OUTPUT
-          else
-            echo "have_api_key=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Upload to TestFlight via API key (preferred)
-        if: steps.api_key.outputs.have_api_key == 'true'
-        env:
-          IPA_PATH: ${{ env.IPA_PATH }}
-        run: |
-          set -euxo pipefail
-          : "${IPA_PATH:?IPA_PATH not found — build likely failed}"
-          fastlane pilot upload \
-            --ipa "$IPA_PATH" \
-            --api_key_path fastlane_api_key.json \
-            --skip_waiting_for_build_processing true \
-            --verbose
-
-      - name: Upload to TestFlight via Apple ID (fallback)
-        if: steps.api_key.outputs.have_api_key != 'true'
-        env:
-          IPA_PATH: ${{ env.IPA_PATH }}
-          APP_STORE_CONNECT_USERNAME: ${{ env.APP_STORE_CONNECT_USERNAME }}
-          APP_SPECIFIC_PASSWORD: ${{ env.APP_SPECIFIC_PASSWORD }}
-          TEAM_ID: ${{ env.TEAM_ID }}
-        run: |
-          set -euxo pipefail
-          : "${IPA_PATH:?IPA_PATH not found — build likely failed}"
-          : "${APP_STORE_CONNECT_USERNAME:?APP_STORE_CONNECT_USERNAME is required if no API key is provided}"
-          : "${APP_SPECIFIC_PASSWORD:?APP_SPECIFIC_PASSWORD is required if no API key is provided}"
-          fastlane pilot upload \
-            --ipa "$IPA_PATH" \
-            -u "$APP_STORE_CONNECT_USERNAME" \
-            -p "$APP_SPECIFIC_PASSWORD" \
-            --team_id "$TEAM_ID" \
-            --skip_waiting_for_build_processing true \
-            --verbose
+            ${{ env.ARCHIVE_PATH }}
+            ${{ env.IPA_PATH }}
+            ios/ExportOptions.plist
 
       - name: Final summary
         run: |
-          set -euxo pipefail
-          echo "::notice title=Build Number::CFBundleVersion=${GITHUB_RUN_NUMBER}"
           echo "::notice title=Bundle ID::${BUNDLE_ID}"
-          echo "::notice title=IPA Path::${IPA_PATH:-<none>}"
-          echo "::notice title=Archive Path::${ARCHIVE_PATH:-<none>}"
-          echo "If upload succeeded, the build will appear in App Store Connect > TestFlight after Apple finishes initial processing."
+          echo "::notice title=Archive::${ARCHIVE_PATH}"
+          echo "::notice title=IPA::${IPA_PATH}"
+          echo "If the upload step succeeded, the build will show up in App Store Connect > TestFlight after Apple finishes processing."
