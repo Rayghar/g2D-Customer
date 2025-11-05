@@ -1,5 +1,5 @@
 // File: lib/screens/customer/add_edit_address_screen.dart
-// ADVISORY: This version includes the new address labels.
+// ADVISORY: This version fixes the reported bugs (messy suggestions, backspace response, address parsing/duplication) plus other polish.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +10,7 @@ import 'package:google_places_flutter/model/prediction.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../widgets/button.dart';
@@ -51,7 +52,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
   double? _longitude;
 
   String? _selectedLabel;
-  // MODIFIED: Added two new common labels as requested.
   final List<String> _predefinedLabels = [
     'Home',
     'Office',
@@ -61,14 +61,20 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
   ];
 
   final ApiService _apiService = ApiService();
+
   String? _googleApiKey;
 
-  // === NEW: Focus nodes (wrapped via Focus widgets, no CustomInput API change) ===
+  // Focus nodes
   final FocusNode _aptFocus = FocusNode();
   final FocusNode _cityFocus = FocusNode();
   final FocusNode _stateFocus = FocusNode();
   final FocusNode _postalFocus = FocusNode();
   final FocusNode _countryFocus = FocusNode();
+
+  bool _squelchStreetOnChanged = false;
+
+  final Uuid _uuid = const Uuid();
+  String _sessionToken = '';
 
   @override
   void initState() {
@@ -94,7 +100,9 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
     _latitude = _isEditMode ? widget.address!.latitude : null;
     _longitude = _isEditMode ? widget.address!.longitude : null;
 
-    _googleApiKey = dotenv.env['Maps_API_KEY'];
+    _googleApiKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ??
+        dotenv.env['GOOGLE_PLACES_API_KEY'] ??
+        dotenv.env['Maps_API_KEY'];
 
     if (_isEditMode) {
       if (_predefinedLabels.contains(widget.address!.label)) {
@@ -104,10 +112,15 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
         _labelController.text = widget.address!.label;
       }
     }
+
+    _sessionToken = _uuid.v4();
+
+    _streetController.addListener(_handleStreetChanged);
   }
 
   @override
   void dispose() {
+    _streetController.removeListener(_handleStreetChanged);
     _labelController.dispose();
     _streetController.dispose();
     _apartmentOrSuiteController.dispose();
@@ -117,7 +130,6 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
     _countryController.dispose();
     _deliveryInstructionsController.dispose();
 
-    // NEW: dispose focus nodes
     _aptFocus.dispose();
     _cityFocus.dispose();
     _stateFocus.dispose();
@@ -127,67 +139,145 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
     super.dispose();
   }
 
+  void _handleStreetChanged() {
+    if (_squelchStreetOnChanged) return;
+    if (_streetController.text.length < 5) {
+      setState(() {
+        _cityController.clear();
+        _stateController.clear();
+        _postalCodeController.clear();
+        _countryController.text = 'Nigeria';
+        _latitude = null;
+        _longitude = null;
+      });
+    }
+  }
+
   String _safeGetComponent(
-      List<AddressComponent> components, List<String> types) {
+    List<AddressComponent> components,
+    List<String> types,
+  ) {
     AddressComponent? component = components.firstWhere(
-        (c) => c.types.any((type) => types.contains(type)),
-        orElse: () => AddressComponent(longName: '', types: []));
+      (c) => c.types.any((type) => types.contains(type)),
+      orElse: () => AddressComponent(longName: '', types: []),
+    );
     return component.longName;
   }
 
-  Future<void> _populateAddressFields(Prediction prediction) async {
-    if (_googleApiKey == null) {
-      _showFeedbackSnackbar('Google Maps API key not found.', isError: true);
+  void _setControllerText(TextEditingController c, String value,
+      {bool guardStreet = false}) {
+    if (guardStreet) _squelchStreetOnChanged = true;
+    c.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+    if (guardStreet) {
+      Future.microtask(() => _squelchStreetOnChanged = false);
+    }
+  }
+
+  Future<void> _populateAddressFields(Prediction prediction,
+      {required String fallbackFullText}) async {
+    if (_googleApiKey == null || _googleApiKey!.trim().isEmpty) {
+      _showFeedbackSnackbar('Google Places API key not found.', isError: true);
       return;
     }
-    if (prediction.placeId == null) {
+    if (prediction.placeId == null || prediction.placeId!.isEmpty) {
       _showFeedbackSnackbar('Unable to fetch place details.', isError: true);
       return;
     }
-    final url =
-        'https://maps.googleapis.com/maps/api/place/details/json?place_id=${prediction.placeId}&key=$_googleApiKey';
+
+    final fields = 'address_component,geometry,formatted_address';
+
+    final url = Uri.parse(
+      'https://maps.googleapis.com/maps/api/place/details/json'
+      '?place_id=${Uri.encodeComponent(prediction.placeId!)}'
+      '&fields=$fields'
+      '&sessiontoken=${Uri.encodeComponent(_sessionToken)}'
+      '&key=${Uri.encodeComponent(_googleApiKey!)}',
+    );
+
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(url);
       if (response.statusCode != 200) {
-        throw Exception('Failed to fetch place details from Google API.');
+        throw Exception('HTTP ${response.statusCode}');
       }
       final data = json.decode(response.body);
+      final status = (data['status'] ?? '').toString();
+      if (status != 'OK') {
+        final err = data['error_message']?.toString() ?? '';
+        throw Exception(
+            'Google Places: $status${err.isEmpty ? '' : ' - $err'}');
+      }
+
       final result = data['result'];
       if (result == null) {
         throw Exception('No place details found in API response.');
       }
-      List<AddressComponent> components = (result['address_components'] as List)
+
+      final compsRaw = (result['address_components'] as List? ?? []);
+      final components = compsRaw
           .map((c) => AddressComponent(
-              longName: c['long_name'] ?? '',
-              types: List<String>.from(c['types'] ?? [])))
+                longName: c['long_name'] ?? '',
+                types: List<String>.from(c['types'] ?? []),
+              ))
           .toList();
-      String streetNumber = _safeGetComponent(components, ["street_number"]);
-      String route = _safeGetComponent(components, ["route"]);
-      String city = _safeGetComponent(
-          components, ["locality", "administrative_area_level_2"]);
-      String state =
-          _safeGetComponent(components, ["administrative_area_level_1"]);
-      String country = _safeGetComponent(components, ["country"]);
-      String postalCode = _safeGetComponent(components, ["postal_code"]);
+
+      final city = _safeGetComponent(
+          components, ['locality', 'administrative_area_level_2']);
+      final state =
+          _safeGetComponent(components, ['administrative_area_level_1']);
+      final country = _safeGetComponent(components, ['country']);
+      final postalCode = _safeGetComponent(components, ['postal_code']);
+
+      final streetNumber = _safeGetComponent(components, ['street_number']);
+      final route = _safeGetComponent(components, ['route']);
+      final premise = _safeGetComponent(components, ['premise']);
+      final neighborhood = _safeGetComponent(components, ['neighborhood']);
+      final subpremise =
+          _safeGetComponent(components, ['subpremise']); // Apt/suite
+
+      String street =
+          [streetNumber, route].where((s) => s.isNotEmpty).join(' ').trim();
+      if (premise.isNotEmpty) {
+        street = [premise, street].join(' ').trim();
+      }
+      if (street.isEmpty && neighborhood.isNotEmpty) {
+        street = neighborhood;
+      }
+      if (street.isEmpty) {
+        final formatted =
+            result['formatted_address']?.toString().trim() ?? fallbackFullText;
+        street = formatted.split(',').first.trim();
+      }
+
+      final lat = result['geometry']?['location']?['lat'];
+      final lng = result['geometry']?['location']?['lng'];
 
       setState(() {
-        // Keep your original behavior of filling parsed street;
-        // the itemClick re-asserts user-visible text if plugin clears it.
-        _streetController.text = '$streetNumber $route'.trim();
-        _cityController.text = city;
-        _stateController.text = state;
-        _countryController.text = country;
-        _postalCodeController.text = postalCode;
-        _latitude = result['geometry']?['location']?['lat'];
-        _longitude = result['geometry']?['location']?['lng'];
+        _setControllerText(_streetController, street, guardStreet: true);
+        _setControllerText(_cityController, city);
+        _setControllerText(_stateController, state);
+        _setControllerText(_countryController, country);
+        _setControllerText(_postalCodeController, postalCode);
+        if (subpremise.isNotEmpty &&
+            _apartmentOrSuiteController.text.trim().isEmpty) {
+          _setControllerText(_apartmentOrSuiteController, subpremise);
+        }
+        _latitude = (lat is num) ? lat.toDouble() : _latitude;
+        _longitude = (lng is num) ? lng.toDouble() : _longitude;
       });
     } catch (e) {
       _showFeedbackSnackbar('Error fetching details: ${e.toString()}',
           isError: true);
+    } finally {
+      _sessionToken = _uuid.v4();
     }
   }
 
   Future<void> _handleSaveAddress() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+
     if (!_formKey.currentState!.validate()) {
       _showFeedbackSnackbar('Please fill all required fields.', isError: true);
       return;
@@ -223,10 +313,12 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         _showFeedbackSnackbar(
-            'Failed to save address: ${e.toString().replaceFirst("Exception: ", "")}',
-            isError: true);
+          'Failed to save address: ${e.toString().replaceFirst("Exception: ", "")}',
+          isError: true,
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -235,10 +327,13 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
   void _showFeedbackSnackbar(String message, {bool isError = false}) {
     if (!mounted) return;
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
         content: Text(message, style: GoogleFonts.inter(color: Colors.white)),
         backgroundColor:
-            isError ? themeProvider.errorColor : themeProvider.successColor));
+            isError ? themeProvider.errorColor : themeProvider.successColor,
+      ),
+    );
   }
 
   @override
@@ -247,26 +342,35 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
     return Scaffold(
       backgroundColor: themeProvider.appSecondaryBackground,
       appBar: AppBar(
-        title: Text(_isEditMode ? 'Edit Address' : 'Add New Address',
-            style: GoogleFonts.inter(
-                color: themeProvider.primaryText, fontWeight: FontWeight.w600)),
+        title: Text(
+          _isEditMode ? 'Edit Address' : 'Add New Address',
+          style: GoogleFonts.inter(
+            color: themeProvider.primaryText,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         backgroundColor: themeProvider.cardBackground,
       ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildLabelCard(themeProvider),
-              const SizedBox(height: 16),
-              _buildLocationCard(themeProvider),
-              const SizedBox(height: 16),
-              _buildDetailsCard(themeProvider),
-              const SizedBox(height: 16),
-              _buildOptionsCard(themeProvider),
-            ],
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLabelCard(themeProvider),
+                const SizedBox(height: 16),
+                _buildLocationCard(themeProvider),
+                const SizedBox(height: 16),
+                _buildDetailsCard(themeProvider),
+                const SizedBox(height: 16),
+                _buildOptionsCard(themeProvider),
+              ],
+            ),
           ),
         ),
       ),
@@ -275,9 +379,10 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
         decoration:
             BoxDecoration(color: themeProvider.cardBackground, boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -5))
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -5),
+          )
         ]),
         child: CustomButton(
           text: _isLoading ? 'Saving...' : 'Save Address',
@@ -289,8 +394,10 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
+                    strokeWidth: 2.5,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
               : const Icon(Icons.check_circle_outline, color: Colors.white),
         ),
       ),
@@ -324,14 +431,16 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
                   },
                   selectedColor: themeProvider.gas2doorPrimaryBlue,
                   labelStyle: GoogleFonts.inter(
-                      color: isSelected
-                          ? Colors.white
-                          : themeProvider.primaryText),
+                    color:
+                        isSelected ? Colors.white : themeProvider.primaryText,
+                  ),
                   shape: StadiumBorder(
-                      side: BorderSide(
-                          color: isSelected
-                              ? Colors.transparent
-                              : themeProvider.tertiaryText.withOpacity(0.3))),
+                    side: BorderSide(
+                      color: isSelected
+                          ? Colors.transparent
+                          : themeProvider.tertiaryText.withOpacity(0.3),
+                    ),
+                  ),
                 );
               }).toList(),
             ),
@@ -375,41 +484,60 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(
-                        color: themeProvider.gas2doorPrimaryBlue, width: 2)),
+                  borderSide: BorderSide(
+                    color: themeProvider.gas2doorPrimaryBlue,
+                    width: 2,
+                  ),
+                ),
               ),
+              boxDecoration: BoxDecoration(
+                color: themeProvider.cardBackground,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              itemBuilder: (context, index, prediction) {
+                return Column(
+                  children: [
+                    ListTile(
+                      title: Text(
+                        prediction.description ?? '',
+                        style:
+                            GoogleFonts.inter(color: themeProvider.primaryText),
+                      ),
+                    ),
+                    Divider(
+                      height: 1,
+                      color: themeProvider.tertiaryText.withOpacity(0.2),
+                    ),
+                  ],
+                );
+              },
+              isLatLngRequired: false,
+              getPlaceDetailWithLatLng:
+                  (prediction) {}, // we handle details manually
               itemClick: (Prediction prediction) async {
-                // SAFE handoff: capture -> set -> await -> re-assert -> move focus next frame
-                final selected = prediction.description ?? '';
+                final selected = (prediction.description ?? '').trim();
+                _setControllerText(_streetController, selected,
+                    guardStreet: true);
 
-                // 1) show selection immediately
-                _streetController.text = selected;
-                _streetController.selection = TextSelection.fromPosition(
-                  TextPosition(offset: selected.length),
+                await _populateAddressFields(
+                  prediction,
+                  fallbackFullText: selected,
                 );
 
-                // 2) fill other fields (city/state/coords)
-                await _populateAddressFields(prediction);
-
-                // 3) guard against plugin clearing text
-                if (_streetController.text.trim().isEmpty) {
-                  _streetController.text = selected;
-                  _streetController.selection = TextSelection.fromPosition(
-                    TextPosition(offset: selected.length),
-                  );
-                }
-
-                // 4) close current focus and advance to next field on the next frame (iOS-safe)
+                // Dismiss keyboard after selection
                 FocusScope.of(context).unfocus();
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  FocusScope.of(context).requestFocus(_aptFocus);
-                });
               },
               textStyle: GoogleFonts.inter(color: themeProvider.primaryText),
               countries: const ["ng"],
             ),
             const SizedBox(height: 16),
-            // Wrap inputs with Focus to attach nodes without changing CustomInput API
             Focus(
               focusNode: _aptFocus,
               child: CustomInput(
@@ -464,6 +592,8 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
                     controller: _postalCodeController,
                     labelText: 'Postal Code',
                     prefixIcon: Icons.markunread_mailbox_outlined,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   ),
                 ),
               ),
@@ -507,19 +637,24 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
               prefixIcon: Icons.notes_outlined,
             ),
             SwitchListTile.adaptive(
-                title: Text('Set as default address',
-                    style: GoogleFonts.inter(
-                        color: themeProvider.primaryText,
-                        fontWeight: FontWeight.w500)),
-                value: _isDefaultAddress,
-                onChanged: (bool value) =>
-                    setState(() => _isDefaultAddress = value),
-                activeColor: themeProvider.gas2doorTeal,
-                secondary: Icon(Icons.star_rounded,
-                    color: _isDefaultAddress
-                        ? themeProvider.gas2doorTeal
-                        : themeProvider.secondaryText),
-                contentPadding: const EdgeInsets.only(left: 4, top: 8)),
+              title: Text(
+                'Set as default address',
+                style: GoogleFonts.inter(
+                    color: themeProvider.primaryText,
+                    fontWeight: FontWeight.w500),
+              ),
+              value: _isDefaultAddress,
+              onChanged: (bool value) =>
+                  setState(() => _isDefaultAddress = value),
+              activeColor: themeProvider.gas2doorTeal,
+              secondary: Icon(
+                Icons.star_rounded,
+                color: _isDefaultAddress
+                    ? themeProvider.gas2doorTeal
+                    : themeProvider.secondaryText,
+              ),
+              contentPadding: const EdgeInsets.only(left: 4, top: 8),
+            ),
           ],
         ),
       ),
