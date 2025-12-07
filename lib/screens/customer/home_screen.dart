@@ -25,6 +25,8 @@ import './promotion_details_screen.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import '../../providers/order_provider.dart';
 import './payment_screen.dart';
+import '../../models/user.dart' as app_user;
+import './profile/edit_profile_screen.dart';
 
 final _logger = Logger('HomeScreen');
 
@@ -344,11 +346,210 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  void _navigateToOrderPlacement(
+  /// Very lightweight sanity check for a real phone vs placeholders like 00000000000.
+  bool _looksLikeRealPhone(String? rawPhone) {
+    if (rawPhone == null) return false;
+    final phone = rawPhone.trim();
+    if (phone.isEmpty) return false;
+
+    // Allow optional leading +
+    final cleaned = phone.replaceAll(' ', '');
+    final numeric = cleaned.startsWith('+') ? cleaned.substring(1) : cleaned;
+
+    // Must be all digits
+    if (!RegExp(r'^\d+$').hasMatch(numeric)) return false;
+
+    // Basic length check (intl-style)
+    if (numeric.length < 8 || numeric.length > 15) return false;
+
+    // Reject obvious placeholders like 00000000000, 1111111111, etc.
+    if (RegExp(r'^(\d)\1{7,}$').hasMatch(numeric)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  Future<bool> _ensurePhoneNumberBeforeOrder() async {
+    _logger.info('Ensuring phone number is set before order placement.');
+    Sentry.addBreadcrumb(Breadcrumb(
+      category: 'profile',
+      message: 'Ensuring phone before order placement',
+      data: {'customer_id': widget.customerIdFromShell},
+      level: SentryLevel.info,
+    ));
+
+    try {
+      // 1) Load latest profile
+      final app_user.User user = await _apiService.getMyProfile();
+      final String phone = (user.phone ?? '').trim();
+
+      final bool looksValidPhone = _looksLikeRealPhone(phone);
+
+      if (looksValidPhone) {
+        _logger.info(
+            'Phone number looks valid; proceeding with order placement. Phone: $phone');
+        return true;
+      }
+
+      // 2) Phone is missing or placeholder → prompt user
+      _logger.warning(
+          'Phone number missing or placeholder; blocking order placement and prompting user to update profile. Current phone: "$phone"');
+      Sentry.addBreadcrumb(Breadcrumb(
+        category: 'profile',
+        message: 'Phone missing/invalid before order placement',
+        data: {
+          'has_phone': phone.isNotEmpty,
+          'phone_raw': phone,
+          'customer_id': widget.customerIdFromShell,
+        },
+        level: SentryLevel.warning,
+      ));
+
+      final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+
+      final bool? goToProfile = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            backgroundColor: themeProvider.cardBackground,
+            shape: RoundedRectangleBorder(
+                borderRadius: themeProvider.cardBorderRadius),
+            title: Text(
+              'Add your phone number',
+              style: GoogleFonts.inter(
+                color: themeProvider.primaryText,
+                fontWeight: FontWeight.w600,
+                fontSize: 18,
+              ),
+            ),
+            content: Text(
+              'Before you place an order, please add a phone number so your driver '
+              'and support can reach you if needed.',
+              style: GoogleFonts.inter(
+                color: themeProvider.secondaryText,
+                fontSize: 14,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop(false);
+                },
+                child: Text(
+                  'Not now',
+                  style: GoogleFonts.inter(
+                    color: themeProvider.secondaryText,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop(true);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: themeProvider.gas2doorPrimaryBlue,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                ),
+                child: Text(
+                  'Update now',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (goToProfile != true) {
+        _logger.warning(
+            'User dismissed phone update prompt; order placement cancelled.');
+        _showFeedbackSnackbar(
+          'Please add your phone number to continue.',
+          isError: true,
+        );
+        return false;
+      }
+
+      if (widget.customerIdFromShell == null ||
+          widget.customerIdFromShell!.isEmpty) {
+        _logger.warning(
+            'Customer ID missing when trying to navigate to EditProfileScreen.');
+        _showFeedbackSnackbar(
+          'Please log in again to update your profile.',
+          isError: true,
+        );
+        return false;
+      }
+
+      // 3) Navigate directly to Edit Profile screen
+      final result = await Navigator.of(context).pushNamed(
+        EditProfileScreen.routeName,
+        arguments: {'customerId': widget.customerIdFromShell},
+      );
+
+      // EditProfileScreen pops with `true` on success (existing behaviour)
+      if (result == true) {
+        _logger.info(
+            'Returned from EditProfileScreen with success; re-checking phone.');
+        final app_user.User updatedUser = await _apiService.getMyProfile();
+        final String updatedPhone = (updatedUser.phone ?? '').trim();
+        final bool hasPhoneAfterUpdate = _looksLikeRealPhone(updatedPhone);
+
+        if (!hasPhoneAfterUpdate) {
+          _logger.warning(
+              'Profile update completed but phone still missing/invalid; blocking order placement.');
+          _showFeedbackSnackbar(
+            'Please enter a valid phone number before placing an order.',
+            isError: true,
+          );
+        }
+
+        return hasPhoneAfterUpdate;
+      } else {
+        _logger.warning(
+            'User left EditProfileScreen without saving; order placement cancelled.');
+        _showFeedbackSnackbar(
+          'Please add your phone number to continue.',
+          isError: true,
+        );
+        return false;
+      }
+    } catch (e, st) {
+      _logger.severe(
+          'Error while ensuring phone number before order placement: $e',
+          e,
+          st);
+      Sentry.captureException(
+        e,
+        stackTrace: st,
+        hint: Hint.withMap({
+          'action': 'ensure_phone_before_order',
+          'customer_id': widget.customerIdFromShell,
+        }),
+      );
+      _showFeedbackSnackbar(
+        'Could not verify your profile. Please try again.',
+        isError: true,
+      );
+      return false;
+    }
+  }
+
+  Future<void> _navigateToOrderPlacement(
       {String? prefilledPromoCode,
       String? refillCylinderSize,
       bool isRefill = false,
-      String? preselectedCylinderIdFromDeal}) {
+      String? preselectedCylinderIdFromDeal}) async {
     HapticFeedback.mediumImpact();
     _logger.info('Attempting to navigate to OrderPlacementScreen.');
     Sentry.addBreadcrumb(Breadcrumb(
@@ -361,6 +562,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         },
         level: SentryLevel.info));
 
+    // 1) Must be logged in
     if (widget.customerIdFromShell == null) {
       _showFeedbackSnackbar("Please log in to place an order.", isError: true);
       _logger.warning(
@@ -371,6 +573,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           level: SentryLevel.warning));
       return;
     }
+
+    // 2) Must have phone number (Google, Apple, or any user with missing/placeholder phone)
+    final bool hasPhone = await _ensurePhoneNumberBeforeOrder();
+    if (!hasPhone) {
+      _logger.warning(
+          'Order placement aborted because phone number is missing/invalid or user cancelled update.');
+      return;
+    }
+
+    // 3) Must have address (existing behaviour)
     if (widget.currentAddressFromShell == null) {
       _showFeedbackSnackbar("Please select a delivery address first.",
           isError: true);
@@ -383,6 +595,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           level: SentryLevel.warning));
       return;
     }
+
+    // 4) All checks passed → proceed to OrderPlacementScreen
     Navigator.of(context).pushNamed(
       OrderPlacementScreen.routeName,
       arguments: {
@@ -395,7 +609,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       },
     ).then((value) {
       if (value == true) {
-        _logger.info('Order placement completed, refreshing home screen data.');
+        _logger.info(
+            'Order placement completed, refreshing home screen data after return from OrderPlacementScreen.');
         Sentry.addBreadcrumb(Breadcrumb(
             category: 'order_flow',
             message: 'Order placement successful, refreshing home screen',
