@@ -74,26 +74,40 @@ jobs:
           test -f ios/Flutter/Generated.xcconfig || { echo "ERROR: ios/Flutter/Generated.xcconfig missing"; ls -la ios/Flutter || true; exit 1; }
 
       # >>> NEW (Option A): auto-bump CFBundleVersion only; keeps marketing version as-is <<<
-      - name: Bump iOS build number (Option A)
+      - name: Bump iOS build number (Timestamp Strategy)
         run: |
           set -euxo pipefail
           PLIST="ios/Runner/Info.plist"
-          # Ensure marketing version exists (won't change it if already present)
+          
+          # Generate a unique, always-increasing integer based on time
+          # Format: YearMonthDayHourMinute (e.g. 202512080230)
+          NEW_BUILD_NUM=$(date +%Y%m%d%H%M)
+          
+          # Ensure marketing version exists
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" >/dev/null 2>&1 || \
             /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.0" "$PLIST"
-          # Set build number to the run number
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "$PLIST" || \
-            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${GITHUB_RUN_NUMBER}" "$PLIST"
-          echo "CFBundleShortVersionString=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
-          echo "CFBundleVersion=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
+            
+          # Apply the new build number
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD_NUM" "$PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $NEW_BUILD_NUM" "$PLIST"
+            
+          echo "Build number updated to: $NEW_BUILD_NUM"
 
-      - name: Set marketing version to match App Store (1.0.1)
+      - name: Handle Encryption Compliance (Auto-answer 'No')
         run: |
           set -euxo pipefail
           PLIST="ios/Runner/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.1" "$PLIST" || \
-            /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.1" "$PLIST"
-          echo "CFBundleShortVersionString=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+          # This prevents the "Missing Compliance" warning in App Store Connect
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" || \
+            /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
+
+      - name: Set marketing version to match App Store (1.0.2)
+        run: |
+          set -euxo pipefail
+          PLIST="ios/Runner/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.2" "$PLIST" || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.2" "$PLIST"
+          echo "Marketing version forced to 1.0.2"
 
       - name: Ensure CocoaPods toolchain
         run: |
