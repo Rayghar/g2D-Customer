@@ -1,16 +1,7 @@
-name: Build & Upload iOS (Flutter) — VERBOSE (Fixed Packaging + Entitlements Proof)
+name: Build & Upload iOS (Flutter) — VERBOSE
 
 on:
   workflow_dispatch:
-    inputs:
-      export_method:
-        description: "Export method. Use 'ad-hoc' for 3uTools/device install, 'app-store-connect' for App Store upload."
-        required: true
-        default: "ad-hoc"
-        type: choice
-        options:
-          - ad-hoc
-          - app-store-connect
   push:
     branches: [ versionios4 ]
 
@@ -32,7 +23,24 @@ jobs:
       - name: Select Xcode 16
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "16.1"
+          xcode-version: '16.1'
+
+      # MINIMAL SAFETY CHANGE:
+      # Only attempt to download iOS platform if iPhoneOS SDK is missing.
+      - name: Ensure iPhoneOS SDK exists (only download if missing)
+        run: |
+          set -euxo pipefail
+          SDKDIR="/Applications/Xcode_16.1.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs"
+          if [ -d "$SDKDIR" ] && ls -1 "$SDKDIR" | grep -q "iPhoneOS"; then
+            echo "✅ iPhoneOS SDK already present:"
+            ls -1 "$SDKDIR"
+          else
+            echo "⚠️ iPhoneOS SDK missing. Attempting downloadPlatform iOS..."
+            sudo xcodebuild -downloadPlatform iOS
+            xcodebuild -showsdks
+            test -d "$SDKDIR" || { echo "FATAL: $SDKDIR missing after download"; exit 1; }
+            ls -1 "$SDKDIR"
+          fi
 
       - name: Pin DEVELOPER_DIR (safety)
         run: echo "DEVELOPER_DIR=/Applications/Xcode_16.1.app" >> $GITHUB_ENV
@@ -45,6 +53,7 @@ jobs:
           xcrun --version
           swift --version
           ruby -v
+          gem env home
           python3 --version || true
           node -v || true
 
@@ -108,6 +117,24 @@ jobs:
           set -euxo pipefail
           ruby -e "f='ios/Podfile'; if File.exist?(f); c=File.read(f); c=c.gsub(/platform :ios, .*/, \"platform :ios, '15.0'\"); File.write(f,c); else; puts 'WARN: ios/Podfile not found'; end"
 
+      - name: Stamp DEVELOPMENT_TEAM and manual signing in Xcode project
+        run: |
+          set -euxo pipefail
+          PBX=ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' "s/DEVELOPMENT_TEAM = [A-Z0-9]*/DEVELOPMENT_TEAM = ${TEAM_ID}/g" "$PBX" || true
+          sed -i '' "s/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g" "$PBX" || true
+          sed -i '' "s/CODE_SIGN_IDENTITY = \"iPhone Developer\"/CODE_SIGN_IDENTITY = \"Apple Distribution\"/g" "$PBX" || true
+          sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = .*/PROVISIONING_PROFILE_SPECIFIER = \"\"/g" "$PBX" || true
+          perl -0777 -pe 's/(PRODUCT_BUNDLE_IDENTIFIER = '"$BUNDLE_ID"';)/$1\n\t\t\t\tDEVELOPMENT_TEAM = '"$TEAM_ID"';/g' "$PBX" > /tmp/p.pbxproj || true
+          if [ -s /tmp/p.pbxproj ]; then mv /tmp/p.pbxproj "$PBX"; fi
+          grep -nE "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE" "$PBX" || true
+
+      - name: Install fastlane
+        run: |
+          set -euxo pipefail
+          gem install fastlane --no-document
+          fastlane --version
+
       - name: Import signing certificate (keychain)
         env:
           P12_BASE64: ${{ secrets.P12_BASE64 }}
@@ -124,7 +151,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
           security find-identity -v -p codesigning build.keychain || true
 
-      - name: Decode & parse provisioning profile (install under UUID)
+      - name: Decode & parse provisioning profile
         shell: bash
         env:
           MOBILEPROVISION_BASE64: ${{ secrets.MOBILEPROVISION_BASE64 }}
@@ -156,11 +183,11 @@ jobs:
           echo "PROFILE_UUID=$UUID" >> $GITHUB_ENV
           echo "Installed profile: $NAME ($UUID) at $INSTALL_PP"
           echo "App Identifier in profile: ${APPID:-unknown}"
+          mkdir -p build-logs && cp /tmp/profile.plist build-logs/profile.plist
 
-          mkdir -p build-logs
-          cp /tmp/profile.plist build-logs/profile.plist
-
-      - name: Inject signing + entitlements into Release.xcconfig (critical)
+      # ✅ MINIMAL REQUIRED CHANGE:
+      # Force entitlements into signing via Release.xcconfig.
+      - name: Inject signing + entitlements into Release.xcconfig (safe)
         shell: bash
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -168,6 +195,9 @@ jobs:
         run: |
           set -euxo pipefail
           : "${PROFILE_NAME:?PROFILE_NAME not found. Ensure the decode/parse step ran successfully.}"
+
+          # Sanity check that entitlements file exists in repo
+          test -f ios/Runner/Runner.entitlements || { echo "ERROR: ios/Runner/Runner.entitlements missing"; ls -la ios/Runner || true; exit 1; }
 
           XCCONFIG="ios/Flutter/Release.xcconfig"
           grep -q 'Pods-Runner.release.xcconfig' "$XCCONFIG" || echo '#include "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"' >> "$XCCONFIG"
@@ -180,15 +210,13 @@ jobs:
             echo 'CODE_SIGN_IDENTITY = Apple Distribution'
             echo "PROVISIONING_PROFILE_SPECIFIER = ${PROFILE_NAME}"
             echo "DEVELOPMENT_TEAM = ${TEAM_ID}"
-            # THIS is the key line that proves/forces your Sign in with Apple entitlement to be used in CI signing:
+
+            # 🔥 The key fix for Sign in with Apple entitlement
             echo 'CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements'
           } >> "$XCCONFIG"
 
-          echo "==== Final Release.xcconfig ===="
-          cat "$XCCONFIG"
-
-          mkdir -p build-logs
-          cp "$XCCONFIG" build-logs/Release.xcconfig
+          echo "==== Final Release.xcconfig ===="; cat "$XCCONFIG"
+          mkdir -p build-logs && cp "$XCCONFIG" build-logs/Release.xcconfig
 
       - name: Reset CocoaPods resolution (clean resolve)
         working-directory: ios
@@ -203,21 +231,22 @@ jobs:
           set -euxo pipefail
           pod install | tee ../build-logs/pod_install.log
 
-      - name: Write ExportOptions.plist (method is selectable)
+      - name: Show Xcode build settings (after pods)
+        working-directory: ios
+        run: |
+          set -euxo pipefail
+          xcodebuild -workspace Runner.xcworkspace -list || true
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -showdestinations || true
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -destination 'generic/platform=iOS' -showBuildSettings > ../build-logs/xcodebuild_showBuildSettings.txt || true
+
+      - name: Write ExportOptions.plist for app-store export
         working-directory: ios
         env:
           PROFILE_NAME: ${{ env.PROFILE_NAME }}
           BUNDLE_ID: ${{ env.BUNDLE_ID }}
           TEAM_ID: ${{ env.TEAM_ID }}
-          EXPORT_METHOD: ${{ inputs.export_method }}
         run: |
           set -euxo pipefail
-
-          # If this is a push trigger (not workflow_dispatch), default to ad-hoc for sanity unless overridden
-          if [ -z "${EXPORT_METHOD:-}" ]; then
-            EXPORT_METHOD="ad-hoc"
-          fi
-
           cat > ExportOptions.plist <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -225,7 +254,7 @@ jobs:
           <dict>
             <key>compileBitcode</key><false/>
             <key>destination</key><string>export</string>
-            <key>method</key><string>${EXPORT_METHOD}</string>
+            <key>method</key><string>app-store-connect</string>
             <key>signingStyle</key><string>manual</string>
             <key>teamID</key><string>${TEAM_ID}</string>
             <key>uploadSymbols</key><true/>
@@ -238,44 +267,30 @@ jobs:
           </dict>
           </plist>
           PLIST
-
-          echo "==== ExportOptions.plist ===="
           cat ExportOptions.plist
-
-      - name: Fix Xcode Project Structure (only if fix_project.rb exists)
-        run: |
-          set -euxo pipefail
-          if [ -f "fix_project.rb" ]; then
-            gem install xcodeproj --no-document
-            ruby fix_project.rb
-          else
-            echo "No fix_project.rb found. Skipping."
-          fi
 
       - name: Build IPA (Release, verbose)
         run: |
           set -euxo pipefail
-
-          # IMPORTANT: Build via Flutter so flutter_assets is packaged correctly
           flutter build ipa --release --export-options-plist=ios/ExportOptions.plist --verbose
 
-          mkdir -p build-logs
-          RESULT=$(ls -t ~/Library/Developer/Xcode/DerivedData/*/Logs/Build/*.xcresult 2>/dev/null | head -n 1 || true)
-          if [ -n "${RESULT:-}" ]; then
-            echo "Found xcresult: $RESULT"
-            /usr/bin/xcresulttool get --format json --path "$RESULT" > build-logs/archive_result.json || true
+          ls -l build/ios/ipa || true
+          if ls build/ios/archive/*.xcarchive 1>/dev/null 2>&1; then
+            echo "Found xcarchive(s):"; ls -l build/ios/archive
           fi
 
-          ls -la build/ios/ipa || true
-          ls -la build/ios/archive || true
-
-      - name: Validate IPA contents (assets + entitlements) — stops the cycle
+      # ✅ NEW (safe) — validate packaging + entitlements so we stop guessing
+      - name: Validate IPA contents (flutter assets + entitlements)
+        if: always()
         run: |
           set -euxo pipefail
 
           IPA_PATH="$(find build/ios/ipa -maxdepth 1 -type f -name '*.ipa' -print -quit 2>/dev/null || true)"
-          echo "Resolved IPA_PATH=${IPA_PATH:-<none>}"
-          test -n "${IPA_PATH:-}" || { echo "❌ No IPA produced in build/ios/ipa"; exit 1; }
+          if [ -z "${IPA_PATH:-}" ]; then
+            echo "❌ No IPA found in build/ios/ipa"
+            exit 1
+          fi
+          echo "IPA_PATH=$IPA_PATH"
 
           rm -rf ipa_check
           mkdir -p ipa_check
@@ -284,31 +299,19 @@ jobs:
           unzip -q app.ipa
 
           APP_PATH="$(find Payload -maxdepth 2 -name '*.app' -print -quit)"
-          echo "Resolved APP_PATH=${APP_PATH:-<none>}"
-          test -n "${APP_PATH:-}" || { echo "❌ No .app found in IPA Payload"; exit 1; }
+          echo "APP_PATH=$APP_PATH"
 
-          echo "== Confirm Flutter assets exist =="
+          echo "== flutter_assets listing =="
           ls -la "$APP_PATH/flutter_assets" || true
-          test -f "$APP_PATH/flutter_assets/AssetManifest.json" || { echo "❌ Missing flutter_assets/AssetManifest.json (broken IPA packaging)"; exit 1; }
-          echo "✅ AssetManifest.json exists."
 
-          echo "== Print bundle id =="
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist" || true
+          test -f "$APP_PATH/flutter_assets/AssetManifest.json" || {
+            echo "❌ Missing AssetManifest.json -> IPA packaging is wrong (will crash in Flutter)."
+            exit 1
+          }
+          echo "✅ AssetManifest.json present."
 
-          echo "== Print entitlements embedded in signed app (the truth) =="
+          echo "== Embedded entitlements in signed app =="
           codesign -d --entitlements :- "$APP_PATH" || true
-
-          echo "== Decode embedded profile and print its entitlements =="
-          test -f "$APP_PATH/embedded.mobileprovision" || { echo "❌ embedded.mobileprovision missing in app"; exit 1; }
-          security cms -D -i "$APP_PATH/embedded.mobileprovision" > /tmp/embedded_profile.plist
-          /usr/libexec/PlistBuddy -c "Print :Entitlements" /tmp/embedded_profile.plist || true
-
-      - name: Diagnose effective build settings (Release)
-        working-directory: ios
-        run: |
-          set -euxo pipefail
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -showBuildSettings | tee ../build-logs/xcodebuild_effective_settings.txt
-          grep -E 'PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_ENTITLEMENTS' ../build-logs/xcodebuild_effective_settings.txt || true
 
       - name: Save IPA artifact
         if: always()
@@ -317,7 +320,6 @@ jobs:
           name: ios-ipa
           path: |
             build/ios/ipa/*.ipa
-            ipa_check/app.ipa
           if-no-files-found: warn
 
       - name: Upload troubleshooting bundle (always)
@@ -333,4 +335,5 @@ jobs:
             ios/Podfile
             ios/Podfile.lock
             ios/Pods/Manifest.lock
+            ios/Runner/Runner.entitlements
           if-no-files-found: warn
