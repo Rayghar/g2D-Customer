@@ -270,6 +270,13 @@ jobs:
           echo "==== ExportOptions.plist ===="
           cat ExportOptions.plist
 
+      - name: Install Ruby Gem
+        run: gem install xcodeproj
+
+      - name: Fix Xcode Project Structure
+        run: ruby fix_project.rb      
+      
+
       - name: Build IPA (Release, verbose)
         run: |
           set -euxo pipefail
